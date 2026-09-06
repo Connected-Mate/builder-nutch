@@ -92,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateNotch() {
         guard let manager = accountManager, let controller = notchController else { return }
         let activeIDs = Set(manager.selected.values.map(\.uuidString))
-        // The full list lives in the manager. Two active rings stay legible on every screen.
+        // The full list lives in the manager; each selected assistant has its own ring.
         controller.model.snapshots = manager.snapshots.filter { activeIDs.contains($0.id) }
         controller.model.refreshing = Set(manager.busyIDs.map(\.uuidString))
         controller.model.now = Date()

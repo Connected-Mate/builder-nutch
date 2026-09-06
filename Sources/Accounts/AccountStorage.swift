@@ -92,7 +92,7 @@ struct AccountStorage {
         guard let emoji = value?.trimmingCharacters(in: .whitespacesAndNewlines), !emoji.isEmpty else { return nil }
         guard emoji.count == 1, emoji.utf8.count <= 64,
               emoji.unicodeScalars.contains(where: { $0.properties.isEmojiPresentation || $0.value == 0xFE0F }),
-              !emoji.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+              !emoji.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) && $0.value != 0x200D && !(0xE0020...0xE007F).contains($0.value) }) else {
             throw ManagedAccountError.invalidEmoji
         }
         return emoji

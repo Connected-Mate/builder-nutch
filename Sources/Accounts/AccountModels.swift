@@ -62,7 +62,11 @@ enum AccountProvider: String, Codable, CaseIterable, Identifiable {
         case .codex, .chatgpt: return .openai
         case .cursor: return .cursor
         case .gemini: return .antigravity
-        default: return .third
+        case .kimi: return .kimi
+        case .grok: return .grok
+        case .perplexity: return .perplexity
+        case .deepseek: return .deepseek
+        case .mistral: return .mistral
         }
     }
 }
