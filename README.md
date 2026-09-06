@@ -1,133 +1,73 @@
-# Codenotch
+# Codenotch Accounts
 
-A macOS app that pins a small black notch to a screen edge, showing how much of
-each coding assistant's usage limit you have burned — and whether it is still
-working, done, or waiting on you.
+**All your AI accounts. More room to ship.**
 
-![Collapsed notch with hover tooltip](docs/design/frame-124-hover-tooltip.png)
+A native macOS account manager built directly on [Codenotch by Vinz](https://github.com/vinzdg/codenotch). Keep the screen-edge notch and usage rings; add separate Claude Code and Codex accounts, official browser sign-in, and one-click selection for your next session.
 
-Hover a ring for its limit windows and when they reset. Claude's ring shows the
-same **current session** window Claude Code's own `/usage` leads with, so the
-two never disagree.
+[Website](https://codenotch-accounts.tasty-ball-9449.chatgpt.site) · [Releases](https://github.com/Connected-Mate/codenotch-accounts/releases)
 
-## What it reads
+## What it does
 
-| Provider | Source | How |
-|---|---|---|
-| **Claude Code** | official | The OAuth token in the login keychain, against the same endpoint Claude Code's own `/usage` uses. |
-| **Cursor** | official | The editor's own signed-in session, read from its local SQLite state — no separate sign-in. |
-| **Codex** | official | Codex's own app server, asked live for the current rate limits. Falls back to its rollout log when Codex isn't running. |
-| **Antigravity** | official where licensed, otherwise a request count | Antigravity's local language server first, then Google's quota endpoint; a plain count when neither will answer for the account. |
-| **GLM** | official | Z.ai's Coding Plan monitor endpoint, with a key borrowed from whichever coding tool already holds one — Claude Code's `settings.json`, ZCode, or OpenCode. |
+- Manage six or more accounts per provider. There is no six-account cap.
+- Connect each account using the **unmodified official CLI's browser login**. No passwords, tokens or browser cookies are collected by this app.
+- Name accounts, see connection state, usage windows and reset times, and choose a project folder.
+- Select an account in one click and launch a new Claude Code or Codex terminal session with it.
+- Enable automatic selection to choose an available account from fresh readings before a new launch.
+- Keep the selected accounts in Codenotch's familiar notch, with the full list in a resizable native window.
 
-Codenotch never signs in anywhere. Every reading is borrowed from a credential
-or session a tool on your Mac already holds — install and sign in to any of
-them, and its ring appears. Switching a provider off in Settings stops its
-credential being read at all and forgets the readings taken from it; it does
-not sign you out of the tool that owns the account, and the row says so.
+**A selection applies to new sessions launched from this manager. It does not change an already-running process, switch Claude.ai/ChatGPT browser sessions, or sign the separate desktop apps into another account. Running work is never killed to switch an account.** Each subscription keeps its own limits and terms; this app does not create unlimited usage.
 
-It also answers **"is it still working?"** — a thin arc spins inside a
-provider's ring while a session is busy, and becomes a pulsing amber ring when
-one is blocked waiting on you. Hover for every live session by name, where it
-is running, and what it wants.
+## Connect your first account
 
-Two Claude Code logins are two rings. Anyone who keeps a work account apart with
-`CLAUDE_CONFIG_DIR=~/.claude-work claude` gets a **Claude (work)** ring beside the
-personal one, with its own limits, its own sessions and its own row in Settings.
-Any `~/.claude-<slug>` directory Claude Code has run against is found at launch;
-the default `~/.claude` always comes first, the rest in alphabetical order, so the
-rings never swap places.
+1. Install the official [Claude Code](https://code.claude.com/docs/en/quickstart) and/or [Codex CLI](https://developers.openai.com/codex/cli/).
+2. Open Codenotch Accounts and choose a provider.
+3. Add an account with a label and optional email hint, then select **Connect**.
+4. Complete the provider's browser login. Repeat for your other accounts.
+5. Select an account and a project folder, then launch a session.
 
-## Placement
+The account manager never reads or replaces your existing default Claude Code or Codex login. New managed profiles start disconnected. Browser login is performed by you, and each provider remains responsible for its credentials and token refresh.
 
-The notch lives on any of the four screen edges. Right and left keep a
-vertical column; top and bottom lay the readings out side by side. It pins
-itself to the *usable* edge, so a bottom notch rests on the Dock and follows
-when the Dock hides or moves. On a Mac with a hardware notch, the top
-placement takes its exact shape, so the two read as one rather than as a bar
-parked underneath it.
+## How account isolation works
 
-At rest it is a small pill on the screen edge that unfolds when the pointer
-reaches it — configurable in Settings to always show, or to hide entirely.
-Settings live in an orb below the notch: an arc at rest, a gear on hover.
+Each profile has a stable UUID directory under `~/Library/Application Support/Codenotch Accounts/profiles/`. Claude Code runs with that profile's `CLAUDE_CONFIG_DIR`; Codex runs with its `CODEX_HOME` and its official `keyring` credential storage. Credential/provider environment overrides are excluded from launched processes so another account or API key cannot silently take precedence.
 
-The app itself can show a Dock icon, a menu bar icon, or neither.
+The app stores account labels, identifiers and selection locally. Profile folders have owner-only permissions. The official tools may also keep their configuration and conversation history there. Do not sync, publish or share these folders. Removing a profile from the list leaves the vendor's local profile intact, as the confirmation explains.
 
-## Updates
+### Usage accuracy
 
-Codenotch updates itself. [Sparkle](https://sparkle-project.org) checks daily
-and installs in the background without prompting; Settings says so and can
-switch it off. Every update is EdDSA-signed, so nothing installs that wasn't
-built and signed by the maintainer.
+- **Codex:** read from the official app-server `account/read` and `account/rateLimits/read` methods.
+- **Claude Code:** a per-profile status-line helper captures only the documented `rate_limits` fields. Readings appear after you use a managed Claude Code session. No undocumented subscription API is queried by the managed-account runtime.
+- Unknown or old readings remain unknown or stale. They are excluded from automatic selection; a weekly or session limit at 100% also makes an account unavailable.
 
-## Building
+The upstream provider adapters remain in the source history for attribution and reference. This fork's composition root does not start those token-reading adapters.
+
+## Build and install
+
+Requires macOS 26+, Xcode 26+, and an internet connection for the initial dependency download. Apple Silicon and Intel are supported.
 
 ```sh
-brew install xcodegen   # once
-make run                # generate, build, launch a Debug build
-make test               # unit tests
+./Scripts/build-accounts.sh build
+open build/AccountsDerivedData/Build/Products/Release/Codenotch.app
 ```
 
-No signing identity is required for either. `make release` — which archives,
-notarizes, and produces a signed auto-update feed — needs a Developer ID
-certificate and an App Store Connect notary profile, and is only ever run by
-the maintainer to cut an official release. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
+The build script downloads a pinned XcodeGen release and verifies its SHA-256. Homebrew is not required. Local builds use ad-hoc signing; distributed builds use this fork maintainer's own Developer ID.
 
-Run with `CODENOTCH_DEMO=1` to see fixed sample data instead of live readings.
+To install your local build, copy `Codenotch.app` into Applications as **Codenotch Accounts.app**. It uses the independent bundle identifier `com.connectedmate.codenotch-accounts` and can coexist with upstream Codenotch.
 
-## Architecture
-
-Every provider implements `UsageProvider` (`Sources/Providers/`) and declares
-its own `Fidelity` — `.official`, `.derived`, or `.manual` — so the UI never
-presents a guess as if a vendor had published it. `UsageStore`
-(`Sources/Model/`) polls them on a timer, keeps the last good reading across
-launches, and degrades every failure to a visible status rather than a
-made-up percentage.
-
-The notch itself works in one-dimensional **stack space** (`along`/`across`)
-regardless of which screen edge it's on; `NotchPlacement` is the only place
-that maps that back onto real screen coordinates. `NotchLayout` holds every
-measurement, quoted from `docs/design/frame-124-hover-tooltip.png` so the
-layout can be checked against the design frame directly.
-
-- Design spec: [`docs/specs/2026-08-28-usage-notch-design.md`](docs/specs/2026-08-28-usage-notch-design.md)
-- Implementation history: [`TASKS.md`](TASKS.md)
-
-## The honest caveat
-
-No vendor publishes a clean "your session limit is N% used" API for any of
-these tools. Each adapter reads whatever the owning app itself reads from —
-an internal endpoint, a local database, a language server's own RPC — and
-those can change without notice. Every adapter's response shape is pinned by
-tests, and every failure degrades to a visible status (`stale`, `needsAuth`,
-`error`) rather than an invented number.
-
-**Keychain:** the app is signed with a stable Developer ID identity so the
-one-time "Always Allow" grant on Claude Code's and Antigravity's keychain
-items survives rebuilds. The secret itself is read only when the owning app
-has actually changed it — checked via the item's modification date, which
-isn't behind the same access prompt as the credential — so a valid grant does
-not mean a prompt on every poll.
-
-**Rate limits:** Claude's endpoint returns 429 if polled too hard, with an
-unhelpful `Retry-After: 0`. The back-off treats that as a floor-raiser only —
-60s, doubling per consecutive 429, capped at 15 minutes — and the deadline is
-persisted, so relaunching during a penalty waits instead of spending an
-attempt on it. Polling drops to every 5 minutes when nothing is running, and
-right-clicking the notch offers **Refresh now**.
-
-**Logs:** the app has no window, so anything worth diagnosing goes to the
-unified log.
+### Tests
 
 ```sh
-/usr/bin/log stream --predicate 'subsystem == "com.vinz.codenotch"' --level debug
+./Scripts/build-accounts.sh test
 ```
 
-## Contributing
+The test host skips application startup. Account tests use temporary directories, fake commands and synthetic status-line payloads, never your real credentials. The upstream notch, layout, usage-model and interaction tests are retained.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+## Updates and privacy
 
-## License
+This fork never installs updates from upstream Codenotch's feed. Releases are distributed from this repository; no automatic updater is enabled until the fork has its own signed feed. There is no account backend, telemetry, credential proxy or cloud synchronization in the account manager.
 
-[MIT](LICENSE)
+## Attribution and license
+
+Based on [vinzdg/codenotch](https://github.com/vinzdg/codenotch), copyright © 2026 Vinz, under the MIT license. Upstream design, notch implementation, icon and tests are credited to their author. Account management and this community distribution are maintained by Connected Mate. The original [LICENSE](LICENSE) is preserved.
+
+Independent project; not affiliated with or endorsed by Anthropic or OpenAI.

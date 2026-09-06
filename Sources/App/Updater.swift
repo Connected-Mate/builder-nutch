@@ -47,6 +47,16 @@ final class Updater: NSObject, ObservableObject, SPUUpdaterDelegate {
 
     @Published private(set) var outcome: Outcome = .idle
 
+    /// A fork must never install the upstream maintainer's release over itself.
+    /// Enable updates only after this distribution has its own signed feed.
+    var isAvailable: Bool {
+        guard let feed = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
+              let url = URL(string: feed), url.scheme == "https",
+              let key = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String
+        else { return false }
+        return !key.isEmpty
+    }
+
     private lazy var controller = SPUStandardUpdaterController(
         startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil
     )
@@ -54,8 +64,9 @@ final class Updater: NSObject, ObservableObject, SPUUpdaterDelegate {
     /// Mirrors the preference, so switching it off really does stop the checks
     /// rather than only hiding them.
     var automatic: Bool {
-        get { controller.updater.automaticallyChecksForUpdates }
+        get { isAvailable && controller.updater.automaticallyChecksForUpdates }
         set {
+            guard isAvailable else { return }
             controller.updater.automaticallyChecksForUpdates = newValue
             controller.updater.automaticallyDownloadsUpdates = newValue
         }
@@ -65,16 +76,17 @@ final class Updater: NSObject, ObservableObject, SPUUpdaterDelegate {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
     }
 
-    var lastChecked: Date? { controller.updater.lastUpdateCheckDate }
+    var lastChecked: Date? { isAvailable ? controller.updater.lastUpdateCheckDate : nil }
 
     /// Starts the scheduled checks. Deliberately not in `init`: the controller
     /// is lazy so that `self` exists before it is handed over as the delegate.
-    func start() { _ = controller }
+    func start() { if isAvailable { _ = controller } }
 
     /// The manual path, for someone who does not want to wait for the schedule.
     /// This one *does* show UI — it was asked for, so silence would read as a
     /// broken button.
     func checkNow() {
+        guard isAvailable else { return }
         outcome = .checking
         controller.updater.checkForUpdates()
     }

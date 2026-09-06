@@ -19,6 +19,7 @@ final class SettingsWindowController {
     private let switchAccount: (String) -> Bool
     private let retry: (String) -> Void
     private let updater: Updater
+    private let managedAccounts: Bool
 
     init(preferences: Preferences,
          providers: @escaping () -> [ProviderSummary],
@@ -26,7 +27,9 @@ final class SettingsWindowController {
          signOut: @escaping (String) -> Void,
          signIn: @escaping (String) -> Bool,
          switchAccount: @escaping (String) -> Bool,
-         retry: @escaping (String) -> Void) {
+         retry: @escaping (String) -> Void,
+         managedAccounts: Bool = false) {
+        self.managedAccounts = managedAccounts
         self.switchAccount = switchAccount
         self.retry = retry
         self.updater = updater
@@ -64,7 +67,7 @@ final class SettingsWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Codenotch Settings"
+        window.title = managedAccounts ? "Codenotch Accounts — Appearance" : "Codenotch Settings"
         window.contentView = NSHostingView(
             rootView: SettingsView(preferences: preferences,
                                    providers: providers,
@@ -72,7 +75,8 @@ final class SettingsWindowController {
                                    signIn: signIn,
                                    switchAccount: switchAccount,
                                    retry: retry,
-                                   updater: updater)
+                                   updater: updater,
+                                   managedAccounts: managedAccounts)
         )
         window.center()
         window.isReleasedWhenClosed = false

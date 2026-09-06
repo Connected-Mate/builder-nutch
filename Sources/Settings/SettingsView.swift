@@ -20,6 +20,7 @@ struct SettingsView: View {
     /// the whole remedy: asking again is what puts the prompt back on screen.
     let retry: (String) -> Void
     @ObservedObject var updater: Updater
+    var managedAccounts = false
 
     var body: some View {
         // One page of grouped sections rather than tabs. Tabs hid three
@@ -29,7 +30,7 @@ struct SettingsView: View {
         // uses for this: each section is a titled, rounded group, so the
         // structure is visible all at once instead of navigated to.
         Form {
-            Section("Integrations") {
+            if !managedAccounts { Section("Integrations") {
                 if needsSetup { setupNote }
                 ForEach(accounts) {
                     AccountRow(provider: $0, preferences: preferences,
@@ -47,7 +48,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
+            } }
 
             // One section, because they are one question: what Codenotch
             // looks like and where it turns up. Split across three headers it
@@ -99,6 +100,7 @@ struct SettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                if updater.isAvailable {
                 Toggle("Install updates automatically", isOn: Binding(
                     get: { updater.automatic },
                     set: { updater.automatic = $0 }
@@ -133,6 +135,15 @@ struct SettingsView: View {
                         )
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                } else {
+                    HStack {
+                        Text("Codenotch Accounts · \(updater.currentVersion)")
+                        Spacer()
+                        Link("Releases", destination: URL(string: "https://github.com/Connected-Mate/codenotch-accounts/releases")!)
+                    }
+                    Text("This community build checks no external update feed. Install new releases from the project page.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)
@@ -151,7 +162,7 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             Divider()
             HStack(spacing: 4) {
-                Text("App designed and developed by")
+                Text(managedAccounts ? "Based on Codenotch by" : "App designed and developed by")
                 // Only the handle is the link, so the line reads as a sentence
                 // rather than as a button with a sentence attached.
                 Link("@hivinz_", destination: SettingsView.authorURL)
