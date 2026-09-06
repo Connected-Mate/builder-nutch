@@ -151,11 +151,13 @@ final class AccountManagerTests: XCTestCase {
             _ = try await runner.run(login, cancellation: AccountCancellation())
             XCTFail("Nonzero login exits must still fail")
         } catch { XCTAssertEqual(error.localizedDescription, ManagedAccountError.commandFailed(1).localizedDescription) }
-        try AccountStorage.write(Data("#!/bin/sh\necho '{\"loggedIn\":true}'\nexit 1\n".utf8), to: executable, mode: 0o700)
-        do {
-            _ = try await runner.run(status, cancellation: AccountCancellation())
-            XCTFail("Only explicitly logged-out status can use exit 1")
-        } catch { XCTAssertEqual(error.localizedDescription, ManagedAccountError.commandFailed(1).localizedDescription) }
+        for value in ["true", "0", "null", "\"false\""] {
+            try AccountStorage.write(Data("#!/bin/sh\necho '{\"loggedIn\":\(value)}'\nexit 1\n".utf8), to: executable, mode: 0o700)
+            do {
+                _ = try await runner.run(status, cancellation: AccountCancellation())
+                XCTFail("Only an explicit JSON false can use exit 1")
+            } catch { XCTAssertEqual(error.localizedDescription, ManagedAccountError.commandFailed(1).localizedDescription) }
+        }
     }
 
     func testRealFakeProcessRPCAndCancellation() async throws {

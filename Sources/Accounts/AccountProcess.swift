@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import CoreFoundation
 
 struct AccountCommand {
     var executable: URL
@@ -125,9 +126,11 @@ struct OfficialAccountProcess: AccountCommandRunning {
                 // Claude auth status intentionally exits 1 when signed out.
                 // Accept only that exact command and its explicit logged-out
                 // JSON response; every other nonzero exit remains an error.
+                let statusJSON = try? JSONSerialization.jsonObject(with: all) as? [String: Any]
+                let loginValue = statusJSON?["loggedIn"] as? NSNumber
                 let loggedOut = process.terminationStatus == 1
                     && command.arguments == ["auth", "status", "--json"]
-                    && (try? JSONSerialization.jsonObject(with: all) as? [String: Any])?["loggedIn"] as? Bool == false
+                    && loginValue.map { CFGetTypeID($0) == CFBooleanGetTypeID() && !$0.boolValue } == true
                 guard process.terminationStatus == 0 || loggedOut else { throw ManagedAccountError.commandFailed(process.terminationStatus) }
                 if command.readsCodexAccount { throw ManagedAccountError.invalidResponse }
                 return all
