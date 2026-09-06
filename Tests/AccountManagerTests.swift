@@ -231,7 +231,9 @@ final class AccountManagerTests: XCTestCase {
         let source = "#!/bin/sh\n/bin/sleep 30 &\nprintf '%s' $! > \(AccountEnvironment.quote(childFile.path))\nwait\n"
         try AccountStorage.write(Data(source.utf8), to: script, mode: 0o700)
         do {
-            _ = try await OfficialAccountProcess().run(AccountCommand(executable: script, arguments: [], environment: [:], directory: root, timeout: 0.3), cancellation: AccountCancellation())
+            // Allow macOS to start the fixture before exercising descendant
+            // termination; cold process startup can exceed 300 ms.
+            _ = try await OfficialAccountProcess().run(AccountCommand(executable: script, arguments: [], environment: [:], directory: root, timeout: 2), cancellation: AccountCancellation())
             XCTFail("Should time out")
         } catch { XCTAssertEqual(error.localizedDescription, ManagedAccountError.timedOut.localizedDescription) }
         let pid = try XCTUnwrap(Int32(String(contentsOf: childFile, encoding: .utf8)))
