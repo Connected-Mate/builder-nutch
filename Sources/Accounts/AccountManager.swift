@@ -23,6 +23,7 @@ final class AccountManager: ObservableObject {
     private let resolveExecutable: (AccountProvider) -> URL?
     private let openTerminal: (URL) -> Bool
     private let openBrowser: (URL, URL, String?) async throws -> String
+    private let readKimi: (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState
     private var browserOpenedIDs: Set<UUID> = []
     private var operations: [UUID: AccountCancellation] = [:]
     private var loaded = false
@@ -36,9 +37,10 @@ final class AccountManager: ObservableObject {
 
     init(rootURL: URL?, runner: any AccountCommandRunning,
          executable: @escaping (AccountProvider) -> URL?, openTerminal: @escaping (URL) -> Bool = { _ in false },
-         openBrowser: @escaping (URL, URL, String?) async throws -> String = AccountBrowser.open) {
+         openBrowser: @escaping (URL, URL, String?) async throws -> String = AccountBrowser.open,
+         readKimi: @escaping (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState = KimiAccountIntegration.read) {
         self.runner = runner; self.resolveExecutable = executable; self.openTerminal = openTerminal
-        self.openBrowser = openBrowser
+        self.openBrowser = openBrowser; self.readKimi = readKimi
         let root = rootURL ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Codenotch Accounts", isDirectory: true)
         do {
@@ -97,6 +99,10 @@ final class AccountManager: ObservableObject {
                             plan: "Browser profile", message: account.browserConfirmedAt == nil ? "Sign in on the official website, then confirm here." : nil)
     }
 
+    func canConfirmBrowserConnection(_ account: ManagedAccount) -> Bool {
+        account.provider.isBrowserProfile && browserOpenedIDs.contains(account.id) && !busyIDs.contains(account.id)
+    }
+
     func confirmBrowserConnection(_ account: ManagedAccount) throws {
         guard account.provider.isBrowserProfile, browserOpenedIDs.contains(account.id),
               let index = accounts.firstIndex(where: { $0.id == account.id }) else { throw ManagedAccountError.notConnected }
@@ -109,12 +115,12 @@ final class AccountManager: ObservableObject {
         notice = "Browser profile saved. Your sign-in stays in its browser; usage is shown on the website."
     }
 
-    private func showBrowser(_ account: ManagedAccount) async throws {
+    private func showBrowser(_ account: ManagedAccount, signingIn: Bool = false) async throws {
         guard let current = accounts.first(where: { $0.id == account.id && $0.provider == account.provider }),
               current.provider.isBrowserProfile else { throw ManagedAccountError.unavailable }
         let profile = try usableStorage().profile(current).appendingPathComponent("browser", isDirectory: true)
         try AccountStorage.privateDirectory(profile)
-        let identifier = try await openBrowser(profile, current.provider.website, current.browserBundleIdentifier)
+        let identifier = try await openBrowser(profile, signingIn ? current.provider.signInWebsite : current.provider.website, current.browserBundleIdentifier)
         guard let index = accounts.firstIndex(where: { $0.id == current.id }) else { throw ManagedAccountError.unavailable }
         var updated = accounts
         updated[index].browserBundleIdentifier = identifier
@@ -155,6 +161,7 @@ final class AccountManager: ObservableObject {
         guard !account.provider.isBrowserProfile else { throw ManagedAccountError.unavailable }
         guard let executable = resolveExecutable(account.provider) else { throw ManagedAccountError.missingCLI(account.provider) }
         let profile = try usableStorage().profile(account)
+        if account.provider == .kimi { try AccountStorage.privateDirectory(profile.appendingPathComponent("home", isDirectory: true)) }
         if account.provider == .claude { try ClaudeAccountStatusLine.configure(profile: profile) }
         else if account.provider == .codex {
             let config = profile.appendingPathComponent("config.toml")
@@ -184,13 +191,19 @@ final class AccountManager: ObservableObject {
         defer { loginAccountID = nil; finish(account.id) }
         do {
             if account.provider.isBrowserProfile {
-                try await showBrowser(account)
+                try await showBrowser(account, signingIn: true)
                 states[account.id]?.message = "Finish signing in on the website, then choose ‘I’ve signed in’ here."
                 notice = "\(account.provider.title) opened in its own browser profile."
                 return
             }
             let (executable, profile, environment) = try prepare(account)
-            var args = account.provider == .claude ? ["auth", "login", "--claudeai"] : ["--config", "cli_auth_credentials_store=\"keyring\"", "login"]
+            var args: [String]
+            switch account.provider {
+            case .claude: args = ["auth", "login", "--claudeai"]
+            case .codex: args = ["--config", "cli_auth_credentials_store=\"keyring\"", "login"]
+            case .kimi: args = ["login"]
+            default: throw ManagedAccountError.unavailable
+            }
             if account.provider == .claude, let hint = account.emailHint { args += ["--email", hint] }
             _ = try await runner.run(AccountCommand(executable: executable, arguments: args, environment: environment,
                                                     directory: profile, timeout: 180), cancellation: cancellation)
@@ -217,6 +230,9 @@ final class AccountManager: ObservableObject {
             return Self.browserState(current)
         }
         let (executable, profile, environment) = try prepare(account)
+        if account.provider == .kimi {
+            return try await readKimi(executable, profile, environment, cancellation)
+        }
         let codex = account.provider == .codex
         let arguments = codex ? ["--config", "cli_auth_credentials_store=\"keyring\"", "app-server"] : ["auth", "status", "--json"]
         let data = try await runner.run(AccountCommand(executable: executable, arguments: arguments, environment: environment,

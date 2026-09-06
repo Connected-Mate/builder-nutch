@@ -8,12 +8,10 @@ import Darwin
 enum KimiAccountIntegration {
     static func executable() -> URL? {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        var paths = [home.appendingPathComponent(".kimi-code/bin/kimi").path,
-                     home.appendingPathComponent(".local/bin/kimi").path,
-                     "/opt/homebrew/bin/kimi", "/usr/local/bin/kimi"]
-        paths += (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":")
-            .filter { $0.hasPrefix("/") }.map { "\($0)/kimi" }
-        return paths.first(where: FileManager.default.isExecutableFile(atPath:)).map { URL(fileURLWithPath: $0) }
+        // This distribution exposes the KIMI_CODE_HOME/password server contract.
+        // A similarly named legacy Python CLI does not share that contract.
+        let path = home.appendingPathComponent(".kimi-code/bin/kimi")
+        return FileManager.default.isExecutableFile(atPath: path.path) ? path : nil
     }
 
     static func isolatedEnvironment(profile: URL, inherited: [String: String]) -> [String: String] {
@@ -21,6 +19,7 @@ enum KimiAccountIntegration {
         var result = inherited.filter { allowed.contains($0.key) }
         result["PATH"] = result["PATH"] ?? "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
         result["KIMI_CODE_HOME"] = profile.path
+        result["HOME"] = profile.appendingPathComponent("home", isDirectory: true).path
         return result
     }
 
@@ -39,6 +38,7 @@ enum KimiAccountIntegration {
                      http: any KimiHTTPFetching, port: () throws -> UInt16,
                      startupTimeout: TimeInterval = 8, pollInterval: TimeInterval = 0.15) async throws -> ManagedAccountState {
         try AccountStorage.privateDirectory(profile)
+        try AccountStorage.privateDirectory(profile.appendingPathComponent("home", isDirectory: true))
         for attempt in 0..<2 {
             try checkCancellation(cancellation)
             let serverCancellation = AccountCancellation()

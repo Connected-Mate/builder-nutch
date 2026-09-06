@@ -27,7 +27,7 @@ final class BrowserAccountTests: XCTestCase {
         await manager.connect(second)
         XCTAssertFalse(manager.state(for: second).isConnected)
         XCTAssertNotEqual(opened[0].0, opened[1].0)
-        XCTAssertEqual(opened[0].1, AccountProvider.grok.website)
+        XCTAssertEqual(opened[0].1, AccountProvider.grok.signInWebsite)
         XCTAssertTrue(opened[0].0.path.hasSuffix("\(first.id.uuidString.lowercased())/browser"))
         XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: opened[0].0.path)[.posixPermissions] as? NSNumber)?.intValue, 0o700)
         let restored = AccountManager(rootURL: storage, runner: NoBrowserCommands(), executable: { _ in nil },
@@ -55,7 +55,7 @@ final class BrowserAccountTests: XCTestCase {
     func testFailedBrowserLaunchCannotBecomeConnected() async throws {
         let manager = AccountManager(rootURL: try root(), runner: NoBrowserCommands(), executable: { _ in nil },
             openBrowser: { _, _, _ in throw ManagedAccountError.missingBrowser })
-        let account = try manager.add(provider: .kimi, label: "Kimi", emailHint: nil)
+        let account = try manager.add(provider: .grok, label: "Grok", emailHint: nil)
         await manager.connect(account)
         XCTAssertFalse(manager.state(for: account).isConnected)
         XCTAssertThrowsError(try manager.confirmBrowserConnection(account))

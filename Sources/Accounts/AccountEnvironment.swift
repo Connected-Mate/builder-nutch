@@ -3,6 +3,7 @@ import Foundation
 enum AccountEnvironment {
     /// An allowlist also excludes future vendor auth/provider override variables.
     static func isolated(profile: URL, provider: AccountProvider, inherited: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        if provider == .kimi { return KimiAccountIntegration.isolatedEnvironment(profile: profile, inherited: inherited) }
         let allowed: Set<String> = ["HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM", "SSH_AUTH_SOCK", "SYSTEMROOT"]
         var result = inherited.filter { allowed.contains($0.key) }
         result["PATH"] = result["PATH"] ?? "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
@@ -13,6 +14,7 @@ enum AccountEnvironment {
 
     static func executable(for provider: AccountProvider) -> URL? {
         guard !provider.isBrowserProfile else { return nil }
+        if provider == .kimi { return KimiAccountIntegration.executable() }
         let home = FileManager.default.homeDirectoryForCurrentUser
         let name = provider == .claude ? "claude" : "codex"
         var candidates = [home.appendingPathComponent(".local/bin/\(name)").path,

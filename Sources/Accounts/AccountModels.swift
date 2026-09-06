@@ -17,7 +17,7 @@ enum AccountProvider: String, Codable, CaseIterable, Identifiable {
         case .mistral: return "Mistral"
         }
     }
-    var isBrowserProfile: Bool { self != .claude && self != .codex }
+    var isBrowserProfile: Bool { self != .claude && self != .codex && self != .kimi }
     var supportsAutomaticSelection: Bool { !isBrowserProfile }
     var symbolName: String {
         switch self {
@@ -33,10 +33,20 @@ enum AccountProvider: String, Codable, CaseIterable, Identifiable {
         case .mistral: return "wind"
         }
     }
+    var connectionSummary: String {
+        switch self {
+        case .claude: return "Claude subscription · Coding"
+        case .codex: return "ChatGPT subscription · Coding"
+        case .kimi: return "Kimi Code subscription · Coding"
+        case .cursor: return "Cursor account · Web dashboard"
+        default: return "Separate web account"
+        }
+    }
     var connectionDetail: String {
         switch self {
         case .claude: return "Sign in with your Claude subscription. Launch Claude Code and follow its available usage."
         case .codex: return "Sign in with ChatGPT. Launch Codex and follow its available usage."
+        case .kimi: return "Sign in with your Kimi Code subscription. Launch Kimi Code and follow its available usage."
         case .cursor: return "Sign in to your Cursor dashboard in a separate browser profile. This does not switch the Cursor editor account."
         default: return "Sign in on \(title)'s official website. Each account keeps its own browser profile."
         }
@@ -55,6 +65,13 @@ enum AccountProvider: String, Codable, CaseIterable, Identifiable {
         case .mistral: address = "https://chat.mistral.ai/"
         }
         return URL(string: address)!
+    }
+    var signInWebsite: URL {
+        // Official sign-in destination observed from Grok's own Sign in action.
+        if self == .grok {
+            return URL(string: "https://accounts.x.ai/sign-in?redirect=grok-com&return_to=%2F%3Fq%3D%26reasoningMode%3Dnone%26voice%3Dfalse")!
+        }
+        return website
     }
     var glyph: ProviderGlyph {
         switch self {
