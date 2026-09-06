@@ -4,7 +4,7 @@
 
 A native macOS account manager built directly on [Codenotch by Vinz](https://github.com/vinzdg/codenotch). Keep the screen-edge notch and usage rings; add separate Claude Code and Codex accounts, official browser sign-in, and one-click selection for your next session.
 
-[Website](https://codenotch-accounts.tasty-ball-9449.chatgpt.site) · [Releases](https://github.com/Connected-Mate/codenotch-accounts/releases)
+[Website](https://codenotch-accounts.alexandre-cormeraie.chatgpt.site) · [Releases](https://github.com/Connected-Mate/codenotch-accounts/releases)
 
 ## What it does
 
@@ -64,7 +64,7 @@ The test host skips application startup. Account tests use temporary directories
 
 ## Website
 
-The public introduction is at [codenotch-accounts.tasty-ball-9449.chatgpt.site](https://codenotch-accounts.tasty-ball-9449.chatgpt.site). Its complete source is in `website/`. Run `npm ci`, `npm run dev`, or `npm run build` from that directory. The interactive account preview uses clearly labeled sample data; it never accesses local accounts.
+The public introduction is at [codenotch-accounts.alexandre-cormeraie.chatgpt.site](https://codenotch-accounts.alexandre-cormeraie.chatgpt.site). Its complete source is in `website/`. Run `npm ci`, `npm run dev`, or `npm run build` from that directory. The interactive account preview uses clearly labeled sample data; it never accesses local accounts.
 
 Maintainers distributing a Developer ID build must run `Scripts/sign-release.sh APP_PATH 'Developer ID Application: …'`, notarize the resulting archive, and staple the accepted ticket before publishing. The signing helper signs each embedded Sparkle executable with a secure timestamp and strips development-only entitlements from the application.
 
