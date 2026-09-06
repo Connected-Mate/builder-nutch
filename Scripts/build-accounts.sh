@@ -18,8 +18,17 @@ case "$ACTION" in
   build|test) ;;
   *) echo 'Usage: Scripts/build-accounts.sh [build|test]' >&2; exit 2 ;;
 esac
-xcodebuild -project Codenotch.xcodeproj -scheme Codenotch \
-  -destination 'platform=macOS' -configuration Release \
-  -derivedDataPath build/AccountsDerivedData \
-  CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
-  ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO "$ACTION"
+if [ "$ACTION" = test ]; then
+  # @testable imports require Debug's testability. Tests execute on this Mac's
+  # architecture and use a separate directory from the distributable build.
+  xcodebuild -project Codenotch.xcodeproj -scheme Codenotch \
+    -destination "platform=macOS,arch=$(uname -m)" -configuration Debug \
+    -derivedDataPath build/TestsDerivedData \
+    CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO test
+else
+  xcodebuild -project Codenotch.xcodeproj -scheme Codenotch \
+    -destination 'platform=macOS' -configuration Release \
+    -derivedDataPath build/AccountsDerivedData \
+    CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
+    ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO build
+fi
