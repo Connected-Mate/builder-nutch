@@ -95,6 +95,7 @@ struct AccountsView: View {
                 Label("Add assistant", systemImage: "plus").fontWeight(.semibold)
             }
             .buttonStyle(.borderedProminent).foregroundStyle(.black)
+            .disabled(manager.loginAccountID != nil)
             .keyboardShortcut("n", modifiers: .command)
         }
         .padding(.horizontal, 28).padding(.vertical, 22)
@@ -115,6 +116,7 @@ struct AccountsView: View {
                     Label("Add your first assistant", systemImage: "plus").fontWeight(.semibold)
                 }
                 .buttonStyle(.borderedProminent).foregroundStyle(.black)
+                .disabled(manager.loginAccountID != nil)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).padding(48)
         } else {
@@ -213,7 +215,7 @@ private struct AssistantRow: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
                     Text(account.label).font(.body.weight(.bold)).lineLimit(1)
-                    if isSelected, account.provider.supportsAutomaticSelection {
+                    if isSelected, state.isConnected, account.provider.supportsAutomaticSelection {
                         Text("NEXT").font(.caption2.weight(.black)).foregroundStyle(.black)
                             .padding(.horizontal, 7).padding(.vertical, 3)
                             .background(Palette.ample, in: Capsule())
@@ -221,7 +223,7 @@ private struct AssistantRow: View {
                     }
                 }
                 HStack(spacing: 6) {
-                    Image(systemName: account.provider.symbolName).accessibilityHidden(true)
+                    ProviderGlyphView(glyph: account.provider.glyph, size: 13).accessibilityHidden(true)
                     Text(account.provider.title)
                     if let email = state.email ?? account.emailHint, !email.isEmpty { Text("·"); Text(email).lineLimit(1) }
                 }.font(.callout).foregroundStyle(Palette.textSecondary)
@@ -245,7 +247,7 @@ private struct AssistantRow: View {
                     .rotationEffect(.degrees(-90))
             }
             if let emoji = account.emoji, !emoji.isEmpty { Text(emoji).font(.system(size: 23)) }
-            else { Image(systemName: account.provider.symbolName).font(.system(size: 19, weight: .semibold))
+            else { ProviderGlyphView(glyph: account.provider.glyph, size: 20)
                     .foregroundStyle(state.isConnected ? Palette.ample : Palette.textSecondary) }
         }.frame(width: 48, height: 48).accessibilityHidden(true)
     }
@@ -256,6 +258,9 @@ private struct AssistantRow: View {
         else if !state.isConnected {
             Label(state.message ?? "Not connected", systemImage: "circle")
                 .foregroundStyle(state.message == nil ? Palette.textSecondary : Palette.watch).lineLimit(2)
+        } else if !account.provider.isBrowserProfile, state.needsFirstUsage {
+            Label("Usage appears after your first session", systemImage: "info.circle")
+                .foregroundStyle(Palette.textSecondary)
         } else if let message = state.message {
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(Palette.watch).lineLimit(2)
@@ -272,6 +277,8 @@ private struct AssistantRow: View {
                 Text(account.provider.connectionDetail).font(.callout).foregroundStyle(Palette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        } else if state.needsFirstUsage {
+            Color.clear.frame(height: 1).accessibilityHidden(true)
         } else if state.windows.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Usage unavailable").font(.callout.weight(.semibold))
@@ -353,6 +360,7 @@ private struct AddAssistantFlow: View {
     let reportError: (String) -> Void
     @State private var createdAccountID: UUID?
     @State private var startedInitialConnection = false
+    @State private var localError: String?
     private let startsConnectionOnAppear: Bool
     private var account: ManagedAccount? { manager.accounts.first { $0.id == createdAccountID } }
 
@@ -375,6 +383,11 @@ private struct AddAssistantFlow: View {
             } else { providerStep }
         }
         .frame(width: 720, height: 560).background(Palette.notch).foregroundStyle(Palette.textPrimary)
+        .alert("Couldn't continue", isPresented: Binding(
+            get: { localError != nil }, set: { if !$0 { localError = nil } }
+        )) {
+            Button("OK") { localError = nil }
+        } message: { Text(localError ?? "") }
         .task {
             guard startsConnectionOnAppear, !startedInitialConnection, let account else { return }
             startedInitialConnection = true
@@ -404,11 +417,11 @@ private struct AddAssistantFlow: View {
                 ForEach(providers) { provider in
                     Button { createAndConnect(provider) } label: {
                         HStack(spacing: 14) {
-                            Image(systemName: provider.symbolName).font(.system(size: 22, weight: .semibold))
+                            ProviderGlyphView(glyph: provider.glyph, size: 24)
                                 .foregroundStyle(Palette.ample).frame(width: 32)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(provider.title).font(.body.weight(.bold)).foregroundStyle(Palette.textPrimary)
-                                Text(provider.connectionDetail).font(.callout).foregroundStyle(Palette.textSecondary)
+                                Text(provider.connectionSummary).font(.callout).foregroundStyle(Palette.textSecondary)
                                     .lineLimit(2).multilineTextAlignment(.leading)
                             }
                             Spacer(minLength: 4)
@@ -418,6 +431,7 @@ private struct AddAssistantFlow: View {
                         .background(Palette.ringTrack.opacity(0.38), in: RoundedRectangle(cornerRadius: 12))
                         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.ringTrack))
                     }.buttonStyle(.plain)
+                        .disabled(manager.loginAccountID != nil || createdAccountID != nil)
                         .accessibilityLabel("Add \(provider.title). \(provider.connectionDetail)")
                 }
             }
@@ -431,7 +445,7 @@ private struct AddAssistantFlow: View {
             VStack(alignment: .leading, spacing: 16) {
                 ZStack {
                     Circle().stroke(Palette.ringTrack, lineWidth: 3)
-                    Image(systemName: account.provider.symbolName).font(.system(size: 34, weight: .semibold))
+                    ProviderGlyphView(glyph: account.provider.glyph, size: 36)
                         .foregroundStyle(Palette.ample)
                 }.frame(width: 76, height: 76)
                 Text(state.message ?? "Continue sign-in in the browser window opened by Builder Nutch.")
@@ -443,7 +457,9 @@ private struct AddAssistantFlow: View {
                 }
                 Text("Your password and tokens stay with the official service. Builder Nutch does not ask for or copy them.")
                     .font(.body).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
-            }.frame(maxWidth: 520, alignment: .leading)
+            }
+            .frame(maxWidth: 520, alignment: .leading)
+            .padding(.horizontal, 28)
             Spacer()
             HStack {
                 Button("Close") { dismiss() }.buttonStyle(.bordered); Spacer()
@@ -451,7 +467,8 @@ private struct AddAssistantFlow: View {
                     Button("Open sign-in again") { Task { await manager.connect(account) } }
                         .buttonStyle(.bordered).disabled(state.isBusy || manager.loginAccountID != nil)
                     Button("I've finished signing in") { confirmBrowserConnection(account) }
-                        .buttonStyle(.borderedProminent).foregroundStyle(.black).disabled(state.isBusy)
+                        .buttonStyle(.borderedProminent).foregroundStyle(.black)
+                        .disabled(state.isBusy || !manager.canConfirmBrowserConnection(account))
                 } else if state.isBusy {
                     ProgressView().controlSize(.small).tint(Palette.ample)
                     Button("Cancel") { manager.cancelLogin() }.buttonStyle(.bordered)
@@ -477,16 +494,20 @@ private struct AddAssistantFlow: View {
     }
 
     private func createAndConnect(_ provider: AccountProvider) {
+        guard manager.loginAccountID == nil, createdAccountID == nil else { return }
         do {
             let count = manager.accounts.filter { $0.provider == provider }.count
             let label = count == 0 ? provider.title : "\(provider.title) \(count + 1)"
             let account = try manager.add(provider: provider, label: label, emailHint: nil)
             createdAccountID = account.id
             Task { await manager.connect(account) }
-        } catch { reportError(error.localizedDescription) }
+        } catch { present(error.localizedDescription) }
     }
     private func confirmBrowserConnection(_ account: ManagedAccount) {
-        do { try manager.confirmBrowserConnection(account) } catch { reportError(error.localizedDescription) }
+        do { try manager.confirmBrowserConnection(account) } catch { present(error.localizedDescription) }
+    }
+    private func present(_ message: String) {
+        localError = message
     }
 }
 
@@ -498,6 +519,7 @@ private struct PersonalizeAssistantView: View {
     let reportError: (String) -> Void
     @State private var nickname: String
     @State private var selectedEmoji: String?
+    @State private var localError: String?
     @FocusState private var nicknameFocused: Bool
     private let emojiChoices = ["⚡️", "🧠", "🛠️", "🚀", "🔬", "🧭", "🎯", "🧪", "💻", "🤖"]
 
@@ -516,7 +538,7 @@ private struct PersonalizeAssistantView: View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Make it yours").font(.title2.weight(.bold))
-                Text("\(account.provider.isBrowserProfile ? "Browser profile ready" : "Connected") for \(account.provider.title). A nickname and emoji are optional; they only help you recognise this account.")
+                Text(personalizationDetail)
                     .font(.body).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
             }
             VStack(alignment: .leading, spacing: 8) {
@@ -542,6 +564,11 @@ private struct PersonalizeAssistantView: View {
         }
         .padding(28).frame(width: 620, height: 360).background(Palette.notch)
         .foregroundStyle(Palette.textPrimary).onAppear { nicknameFocused = true }
+        .alert("Couldn't save", isPresented: Binding(
+            get: { localError != nil }, set: { if !$0 { localError = nil } }
+        )) {
+            Button("OK") { localError = nil }
+        } message: { Text(localError ?? "") }
     }
 
     private func emojiButton(_ emoji: String?, title: String) -> some View {
@@ -559,6 +586,17 @@ private struct PersonalizeAssistantView: View {
             try manager.personalize(account, label: trimmed.isEmpty ? account.label : trimmed,
                                     emoji: selectedEmoji)
             dismiss()
-        } catch { reportError(error.localizedDescription) }
+        } catch {
+            localError = error.localizedDescription
+        }
+    }
+
+    private var personalizationDetail: String {
+        let connected = manager.state(for: account).isConnected
+        let prefix: String
+        if account.provider.isBrowserProfile && connected { prefix = "Browser profile ready for \(account.provider.title)." }
+        else if connected { prefix = "Connected to \(account.provider.title)." }
+        else { prefix = "Customize this \(account.provider.title) account." }
+        return prefix + " A nickname and emoji are optional; they only help you recognise this account."
     }
 }
