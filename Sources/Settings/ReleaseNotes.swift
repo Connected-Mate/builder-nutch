@@ -52,14 +52,14 @@ enum ReleaseNotes {
         ),
         ReleaseNote(
             version: "0.1.0",
-            headline: "Your accounts, together in Builder Nutch.",
+            headline: "Your accounts, together in Codenotch.",
             changes: [
                 .init(title: "Separate Claude Code and Codex accounts",
                       detail: "Add named profiles and sign in through each assistant's official browser flow."),
                 .init(title: "Choose the account for your next session",
                       detail: "Launch in your project folder with a selected account, or let verified, fresh quota guide the choice. Running sessions keep their current account."),
-                .init(title: "The original notch experience",
-                      detail: "Selected accounts appear in the notch. This independent fork is based on Codenotch by vinzdg.")
+                .init(title: "The original Codenotch experience",
+                      detail: "Selected accounts appear in the notch. This independent fork builds on Codenotch by vinzdg.")
             ]
         ),
         ReleaseNote(
@@ -112,7 +112,7 @@ enum ReleaseNotes {
                     title: "Codex is read live instead of from a log",
                     detail: "The figure came from a file Codex writes during a "
                           + "turn, so it was as old as the last time you used "
-                          + "it — three days stale in one case. Builder Nutch now "
+                          + "it — three days stale in one case. Codenotch now "
                           + "asks Codex itself, and matches its own panel."
                 ),
                 ReleaseNote.Change(
@@ -178,7 +178,7 @@ enum ReleaseNotes {
             changes: [
                 ReleaseNote.Change(
                     title: "Antigravity shows its actual quota",
-                    detail: "Google will not answer Builder Nutch directly, so it asks "
+                    detail: "Google will not answer Codenotch directly, so it asks "
                           + "Antigravity's own language server instead — the same "
                           + "place Antigravity's usage panel gets its figure."
                 ),
@@ -221,10 +221,10 @@ enum ReleaseNotes {
                 ReleaseNote.Change(
                     title: "Claude, Cursor, Codex and Gemini",
                     detail: "Each read from the tool already signed in on this Mac. "
-                          + "Builder Nutch never asks for a password."
+                          + "Codenotch never asks for a password."
                 ),
                 ReleaseNote.Change(
-                    title: "Choose where Builder Nutch appears",
+                    title: "Choose where Codenotch appears",
                     detail: "In the Dock, in the menu bar, or nowhere at all."
                 )
             ]
