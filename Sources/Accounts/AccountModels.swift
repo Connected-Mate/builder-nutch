@@ -78,7 +78,7 @@ enum AccountProvider: String, Codable, CaseIterable, Identifiable {
         case .claude: return .claude
         case .codex, .chatgpt: return .openai
         case .cursor: return .cursor
-        case .gemini: return .antigravity
+        case .gemini: return .geminiChat
         case .kimi: return .kimi
         case .grok: return .grok
         case .perplexity: return .perplexity

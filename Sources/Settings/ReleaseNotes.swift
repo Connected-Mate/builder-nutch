@@ -34,7 +34,8 @@ enum ReleaseNotes {
             version: "0.3.1",
             headline: "Your assistants, one place.",
             changes: [
-                .init(title: "Release history included", detail: "This update includes the in-app notes for the new assistant experience.")
+                .init(title: "Release history included", detail: "This update includes the in-app notes for the new assistant experience."),
+                .init(title: "A distinct Gemini mark", detail: "Gemini browser accounts use their own symbol, separate from the upstream Antigravity integration.")
             ]
         ),
         ReleaseNote(
