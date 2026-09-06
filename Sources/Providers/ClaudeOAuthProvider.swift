@@ -37,7 +37,7 @@ actor ClaudeOAuthProvider: UsageProvider {
     /// `session` is: the token path had no tests, which is how a back-off that
     /// never expired shipped. Production reads through this profile's own
     /// `ClaudeKeychain`; a test substitutes a fake credential source instead.
-    private let loadCredentials: @Sendable () throws -> ClaudeCredentials
+    nonisolated private let loadCredentials: @Sendable () throws -> ClaudeCredentials
 
     init(profile: ClaudeProfile = .default(),
          session: URLSession = .shared,
@@ -206,7 +206,7 @@ actor ClaudeOAuthProvider: UsageProvider {
     nonisolated func forgetCachedCredential() { keychain.forgetCached() }
 
     nonisolated func account() -> ProviderAccount? {
-        guard let credentials = try? keychain.load() else { return nil }
+        guard let credentials = try? loadCredentials() else { return nil }
         return ProviderAccount(
             label: nil,   // the credential carries no address
             plan: credentials.subscriptionType,

@@ -31,6 +31,18 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.1.0",
+            headline: "Your accounts, together in Codenotch.",
+            changes: [
+                .init(title: "Separate Claude Code and Codex accounts",
+                      detail: "Add named profiles and sign in through each assistant's official browser flow."),
+                .init(title: "Choose the account for your next session",
+                      detail: "Launch in your project folder with a selected account, or let verified, fresh quota guide the choice. Running sessions keep their current account."),
+                .init(title: "The original Codenotch experience",
+                      detail: "Selected accounts appear in the notch. This independent fork builds on Codenotch by vinzdg.")
+            ]
+        ),
+        ReleaseNote(
             version: "1.4.0",
             headline: "Two more accounts, four community fixes, and honest duplicates.",
             changes: [
