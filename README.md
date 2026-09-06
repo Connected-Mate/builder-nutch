@@ -62,6 +62,12 @@ To install your local build, copy `Codenotch.app` into Applications as **Codenot
 
 The test host skips application startup. Account tests use temporary directories, fake commands and synthetic status-line payloads, never your real credentials. The upstream notch, layout, usage-model and interaction tests are retained.
 
+## Website
+
+The public introduction is at [codenotch-accounts.tasty-ball-9449.chatgpt.site](https://codenotch-accounts.tasty-ball-9449.chatgpt.site). Its complete source is in `website/`. Run `npm ci`, `npm run dev`, or `npm run build` from that directory. The interactive account preview uses clearly labeled sample data; it never accesses local accounts.
+
+Maintainers distributing a Developer ID build must run `Scripts/sign-release.sh APP_PATH 'Developer ID Application: …'`, notarize the resulting archive, and staple the accepted ticket before publishing. The signing helper signs each embedded Sparkle executable with a secure timestamp and strips development-only entitlements from the application.
+
 ## Updates and privacy
 
 This fork never installs updates from upstream Codenotch's feed. Releases are distributed from this repository; no automatic updater is enabled until the fork has its own signed feed. There is no account backend, telemetry, credential proxy or cloud synchronization in the account manager.
