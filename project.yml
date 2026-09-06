@@ -79,6 +79,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.connectedmate.codenotch-accounts.tests
         GENERATE_INFOPLIST_FILE: "YES"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Builder Nutch.app/Contents/MacOS/Codenotch"
 
 schemes:
   Codenotch:
