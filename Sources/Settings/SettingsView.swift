@@ -147,11 +147,16 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
         // Outside the form, so it stays put at the foot of the window rather
         // than scrolling away below the last section — a credit that has to be
         // hunted for is not really a credit.
         .safeAreaInset(edge: .bottom, spacing: 0) { credit }
         .frame(width: SettingsView.width, height: SettingsView.height)
+        .background(Palette.notch)
+        .foregroundStyle(Palette.textPrimary)
+        .tint(Palette.ample)
+        .preferredColorScheme(.dark)
         .onAppear { accounts = providers() }
         .onReceive(NotificationCenter.default.publisher(
             for: NSWindow.didBecomeKeyNotification
@@ -176,7 +181,7 @@ struct SettingsView: View {
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
         }
-        .background(.ultraThinMaterial)
+        .background(Palette.card)
     }
 
     static let authorURL = URL(string: "https://x.com/hivinz_")!

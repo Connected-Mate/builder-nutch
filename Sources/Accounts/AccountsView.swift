@@ -1,14 +1,12 @@
 import AppKit
 import SwiftUI
 
-/// Account profiles for future Claude Code and Codex sessions.
 struct AccountsView: View {
     @ObservedObject var manager: AccountManager
     let onOpenSettings: (() -> Void)?
-
-    @State private var provider: AccountProvider = .claude
-    @State private var presentingAdd = false
-    @State private var editingAccount: ManagedAccount?
+    @State private var showingAddAssistant = false
+    @State private var connectingAccount: ManagedAccount?
+    @State private var personalizingAccount: ManagedAccount?
     @State private var removingAccount: ManagedAccount?
     @State private var localError: String?
     @State private var projectURL: URL
@@ -22,537 +20,545 @@ struct AccountsView: View {
                                                isDirectory: true))
     }
 
-    private var accounts: [ManagedAccount] {
-        manager.accounts.filter { $0.provider == provider }
-    }
-
     var body: some View {
-        NavigationSplitView {
-            providerSidebar
-                .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 250)
-        } detail: {
-            VStack(spacing: 0) {
-                header
-                Divider()
-                if manager.loginAccountID != nil { loginBanner }
-                if let notice = manager.notice { noticeBanner(notice) }
-                accountList
-                Divider()
-                launchBar
-            }
-            .frame(minWidth: 500, minHeight: 460)
+        VStack(spacing: 0) {
+            header
+            if manager.loginAccountID != nil { loginBanner }
+            if let notice = manager.notice { noticeBanner(notice) }
+            Divider().overlay(Palette.ringTrack)
+            assistantList
+            Divider().overlay(Palette.ringTrack)
+            sessionBar
         }
-        .navigationSplitViewStyle(.balanced)
-        .frame(minWidth: 700, minHeight: 500)
-        .sheet(isPresented: $presentingAdd) {
-            AccountForm(mode: .add(provider)) { label, email in
-                do {
-                    _ = try manager.add(provider: provider, label: label, emailHint: email)
-                    presentingAdd = false
-                } catch { localError = error.localizedDescription }
-            }
+        .frame(minWidth: 760, minHeight: 520)
+        .background(Palette.notch)
+        .foregroundStyle(Palette.textPrimary)
+        .tint(Palette.ample)
+        .preferredColorScheme(.dark)
+        .sheet(isPresented: $showingAddAssistant) {
+            AddAssistantFlow(manager: manager) { localError = $0 }
+                .preferredColorScheme(.dark).tint(Palette.ample)
         }
-        .sheet(item: $editingAccount) { account in
-            AccountForm(mode: .rename(account)) { label, _ in
-                do {
-                    try manager.rename(account, to: label)
-                    editingAccount = nil
-                } catch { localError = error.localizedDescription }
-            }
+        .sheet(item: $connectingAccount) { account in
+            AddAssistantFlow(manager: manager, initialAccount: account) { localError = $0 }
+                .preferredColorScheme(.dark).tint(Palette.ample)
+        }
+        .sheet(item: $personalizingAccount) { account in
+            PersonalizeAssistantView(account: account, manager: manager) { localError = $0 }
+                .preferredColorScheme(.dark).tint(Palette.ample)
         }
         .confirmationDialog(
-            "Remove \(removingAccount?.label ?? "account")?",
-            isPresented: Binding(get: { removingAccount != nil }, set: { if !$0 { removingAccount = nil } }),
-            titleVisibility: .visible,
-            presenting: removingAccount
+            "Remove \(removingAccount?.label ?? "assistant")?",
+            isPresented: Binding(get: { removingAccount != nil },
+                                 set: { if !$0 { removingAccount = nil } }),
+            titleVisibility: .visible, presenting: removingAccount
         ) { account in
-            Button("Remove account", role: .destructive) {
-                do { try manager.remove(account) }
-                catch { localError = error.localizedDescription }
+            Button("Remove from Builder Nutch", role: .destructive) {
+                do { try manager.remove(account) } catch { localError = error.localizedDescription }
                 removingAccount = nil
             }
             Button("Cancel", role: .cancel) { removingAccount = nil }
-        } message: { _ in
-            Text("Only this profile is removed from Builder Nutch. The official tool keeps its saved sign-in.")
+        } message: { account in
+            Text("This removes \(account.label) from the list. The official service keeps its saved sign-in.")
         }
         .alert("Builder Nutch", isPresented: Binding(
-            get: { localError != nil },
-            set: { if !$0 { localError = nil } }
+            get: { localError != nil }, set: { if !$0 { localError = nil } }
         )) {
             Button("OK") { localError = nil }
-        } message: {
-            Text(localError ?? "")
-        }
-    }
-
-    private var providerSidebar: some View {
-        List(selection: $provider) {
-            Section("Assistants") {
-                ForEach(AccountProvider.allCases) { item in
-                    Label {
-                        HStack {
-                            Text(item.title)
-                            Spacer()
-                            Text("\(manager.accounts.filter { $0.provider == item }.count)")
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                    } icon: {
-                        Image(systemName: item == .claude ? "sparkles" : "terminal")
-                    }
-                    .tag(item)
-                }
-            }
-        }
-        .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let onOpenSettings {
-                Button(action: onOpenSettings) {
-                    Label("Builder Nutch Settings", systemImage: "gearshape")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                .padding(12)
-                .keyboardShortcut(",", modifiers: .command)
-            }
-        }
+        } message: { Text(localError ?? "") }
     }
 
     private var header: some View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(provider.title)
-                    .font(.title2.weight(.semibold))
-                Text("Choose the profile used by new sessions. Running sessions stay on their current account.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text("Assistants").font(.largeTitle.weight(.bold))
+                Text("Your AI accounts, one focused place for the next build.")
+                    .font(.callout).foregroundStyle(Palette.textSecondary)
             }
-            Spacer(minLength: 20)
-            Button {
-                Task { await manager.refreshAll() }
-            } label: {
+            Spacer(minLength: 24)
+            Button { Task { await manager.refreshAll() } } label: {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
-            .disabled(!manager.busyIDs.isEmpty)
+            .buttonStyle(.bordered)
+            .disabled(manager.accounts.isEmpty || !manager.busyIDs.isEmpty)
             .keyboardShortcut("r", modifiers: .command)
-
-            Button {
-                presentingAdd = true
-            } label: {
-                Label("Add account", systemImage: "plus")
+            if let onOpenSettings {
+                Button(action: onOpenSettings) {
+                    Image(systemName: "gearshape").frame(width: 20, height: 20)
+                }
+                .buttonStyle(.bordered)
+                .help("Appearance and app settings")
+                .accessibilityLabel("Open Builder Nutch settings")
+                .keyboardShortcut(",", modifiers: .command)
             }
+            Button { showingAddAssistant = true } label: {
+                Label("Add assistant", systemImage: "plus").fontWeight(.semibold)
+            }
+            .buttonStyle(.borderedProminent).foregroundStyle(.black)
             .keyboardShortcut("n", modifiers: .command)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 20)
+        .padding(.horizontal, 28).padding(.vertical, 22)
     }
 
-    @ViewBuilder
-    private var accountList: some View {
-        if accounts.isEmpty {
-            ContentUnavailableView {
-                Label("No \(provider.title) accounts", systemImage: "person.crop.circle.badge.plus")
-            } description: {
-                Text("Add a profile, then sign in through the official \(provider.title) browser flow. Passwords and tokens never appear here.")
-            } actions: {
-                Button("Add account") { presentingAdd = true }
-                    .keyboardShortcut(.defaultAction)
+    @ViewBuilder private var assistantList: some View {
+        if manager.accounts.isEmpty {
+            VStack(alignment: .leading, spacing: 18) {
+                Image(systemName: "bolt.horizontal.circle")
+                    .font(.system(size: 42, weight: .light)).foregroundStyle(Palette.ample)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Put your AI subscriptions to work").font(.title2.weight(.bold))
+                    Text("Add Claude, Codex, Cursor or another assistant. Sign-in happens with the official service, then you can give the account a nickname and emoji.")
+                        .font(.body).foregroundStyle(Palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 560, alignment: .leading)
+                }
+                Button { showingAddAssistant = true } label: {
+                    Label("Add your first assistant", systemImage: "plus").fontWeight(.semibold)
+                }
+                .buttonStyle(.borderedProminent).foregroundStyle(.black)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).padding(48)
         } else {
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(accounts) { account in
-                        AccountRow(
-                            account: account,
-                            state: manager.state(for: account),
-                            isSelected: manager.isSelected(account),
-                            isLoginPending: manager.loginAccountID == account.id,
-                            loginInProgress: manager.loginAccountID != nil,
-                            select: { select(account) },
-                            connect: { Task { await manager.connect(account) } },
-                            refresh: { Task { await manager.refresh(account) } },
-                            launch: { Task { await manager.launch(account, project: projectURL) } },
-                            rename: { editingAccount = account },
-                            remove: { removingAccount = account }
-                        )
-                        if account.id != accounts.last?.id { Divider().padding(.leading, 72) }
+                    ForEach(manager.accounts) { account in
+                        AssistantRow(account: account, state: manager.state(for: account),
+                                     isSelected: manager.isSelected(account),
+                                     isLoginPending: manager.loginAccountID == account.id,
+                                     loginInProgress: manager.loginAccountID != nil,
+                                     projectURL: projectURL, manager: manager,
+                                     connect: { connectingAccount = account },
+                                     personalize: { personalizingAccount = account },
+                                     remove: { removingAccount = account },
+                                     reportError: { localError = $0 })
+                        if account.id != manager.accounts.last?.id {
+                            Divider().overlay(Palette.ringTrack).padding(.leading, 92)
+                        }
                     }
-                }
-                .padding(.vertical, 8)
-            }
+                }.padding(.vertical, 8)
+            }.background(Palette.card)
         }
     }
 
     private var loginBanner: some View {
         HStack(spacing: 12) {
-            ProgressView().controlSize(.small)
+            ProgressView().controlSize(.small).tint(Palette.ample)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Waiting for browser sign-in")
-                    .font(.callout.weight(.medium))
-                Text("Finish in the official browser window, or cancel this connection.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                Text("Waiting for official sign-in").font(.callout.weight(.semibold))
+                Text("Finish in the browser window. Builder Nutch never asks for your password or token.")
+                    .font(.callout).foregroundStyle(Palette.textSecondary)
             }
             Spacer()
-            Button("Cancel") { manager.cancelLogin() }
+            Button("Cancel") { manager.cancelLogin() }.buttonStyle(.bordered)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 12)
-        .background(Color.accentColor.opacity(0.08))
-        .accessibilityElement(children: .combine)
+        .padding(.horizontal, 28).padding(.vertical, 12).background(Palette.ample.opacity(0.08))
     }
 
     private func noticeBanner(_ notice: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "info.circle.fill")
-                .foregroundStyle(.secondary)
-            Text(notice)
-                .font(.callout)
-                .fixedSize(horizontal: false, vertical: true)
+            Image(systemName: "info.circle.fill").foregroundStyle(Palette.ample)
+            Text(notice).font(.callout).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 10)
-        .background(.quaternary.opacity(0.5))
+        .padding(.horizontal, 28).padding(.vertical, 10).background(Palette.ringTrack.opacity(0.45))
     }
 
-    private var launchBar: some View {
-        VStack(alignment: .leading, spacing: 12) {
+    private var sessionBar: some View {
+        HStack(spacing: 22) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Project folder").font(.callout.weight(.semibold))
+                Text(projectURL.path(percentEncoded: false)).font(.callout)
+                    .foregroundStyle(Palette.textSecondary).lineLimit(1).truncationMode(.middle)
+                    .help(projectURL.path(percentEncoded: false))
+            }.frame(minWidth: 220, maxWidth: .infinity, alignment: .leading)
+            Button("Choose…", action: chooseProjectFolder).buttonStyle(.bordered)
+            Divider().frame(height: 42).overlay(Palette.ringTrack)
             Toggle(isOn: $manager.automaticSelection) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Automatically choose an available account")
-                    Text("For each new session, use the connected \(provider.title) profile with the most fresh, verified quota. Unknown, stale, blocked and disconnected profiles are skipped.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Choose the best account automatically").font(.callout.weight(.semibold))
+                    Text("Only assistants with fresh, verified limits qualify. Browser-only profiles are never guessed.")
+                        .font(.callout).foregroundStyle(Palette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-            }
-            .toggleStyle(.switch)
-
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Project folder")
-                        .font(.callout.weight(.medium))
-                    Text(projectURL.path(percentEncoded: false))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .help(projectURL.path(percentEncoded: false))
-                }
-                Spacer(minLength: 16)
-                Button("Choose…", action: chooseProjectFolder)
-            }
+            }.toggleStyle(.switch).frame(maxWidth: 430, alignment: .leading)
+                .disabled(!manager.accounts.contains { $0.provider.supportsAutomaticSelection })
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 16)
-    }
-
-    private func select(_ account: ManagedAccount) {
-        do { try manager.select(account) }
-        catch { localError = error.localizedDescription }
+        .padding(.horizontal, 28).padding(.vertical, 16).background(Palette.card)
     }
 
     private func chooseProjectFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Choose a project folder"
-        panel.prompt = "Choose"
-        panel.directoryURL = projectURL
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
+        panel.title = "Choose a project folder"; panel.prompt = "Choose"; panel.directoryURL = projectURL
+        panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        projectURL = url
-        savedProjectPath = url.path(percentEncoded: false)
+        projectURL = url; savedProjectPath = url.path(percentEncoded: false)
     }
 }
 
-private struct AccountRow: View {
+private struct AssistantRow: View {
     let account: ManagedAccount
     let state: ManagedAccountState
     let isSelected: Bool
     let isLoginPending: Bool
     let loginInProgress: Bool
-    let select: () -> Void
+    let projectURL: URL
+    @ObservedObject var manager: AccountManager
     let connect: () -> Void
-    let refresh: () -> Void
-    let launch: () -> Void
-    let rename: () -> Void
+    let personalize: () -> Void
     let remove: () -> Void
+    let reportError: (String) -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
-            quotaRing
-                .frame(width: 44, height: 44)
-
+        HStack(alignment: .center, spacing: 18) {
+            identityMark
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
-                    Text(account.label)
-                        .font(.body.weight(.semibold))
-                        .lineLimit(1)
-                    if isSelected {
-                        Text("ACTIVE")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.accentColor, in: Capsule())
-                            .accessibilityLabel("Active account")
-                    }
-                    if let plan = state.plan, !plan.isEmpty {
-                        Text(plan)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    Text(account.label).font(.body.weight(.bold)).lineLimit(1)
+                    if isSelected, account.provider.supportsAutomaticSelection {
+                        Text("NEXT").font(.caption2.weight(.black)).foregroundStyle(.black)
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(Palette.ample, in: Capsule())
+                            .accessibilityLabel("Selected for the next session")
                     }
                 }
-                Text(identityLine)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Image(systemName: account.provider.symbolName).accessibilityHidden(true)
+                    Text(account.provider.title)
+                    if let email = state.email ?? account.emailHint, !email.isEmpty { Text("·"); Text(email).lineLimit(1) }
+                }.font(.callout).foregroundStyle(Palette.textSecondary)
                 statusLine
-            }
-            .frame(minWidth: 130, maxWidth: .infinity, alignment: .leading)
-
-            usageWindows
-                .frame(minWidth: 155, idealWidth: 210, maxWidth: 250, alignment: .leading)
-
-            actionButtons
+            }.frame(minWidth: 190, maxWidth: .infinity, alignment: .leading)
+            usageSummary.frame(minWidth: 190, idealWidth: 260, maxWidth: 300, alignment: .leading)
+            actions
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 14)
-        .contentShape(Rectangle())
+        .padding(.horizontal, 28).padding(.vertical, 16).contentShape(Rectangle())
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(account.label), \(statusDescription)")
+        .accessibilityLabel("\(account.label), \(account.provider.title), \(statusDescription)")
     }
 
-    private var identityLine: String {
-        state.email ?? account.emailHint ?? "No email hint"
-    }
-
-    @ViewBuilder
-    private var statusLine: some View {
-        if isLoginPending {
-            Label("Browser sign-in pending", systemImage: "clock")
-                .foregroundStyle(.blue)
-        } else if state.isBusy {
-            Label("Working…", systemImage: "arrow.triangle.2.circlepath")
-                .foregroundStyle(.secondary)
-        } else if let message = state.message {
-            Label(message, systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .lineLimit(2)
-        } else if !state.isConnected {
-            Label("Disconnected", systemImage: "circle")
-                .foregroundStyle(.secondary)
-        } else if state.needsFirstUsage {
-            Label("Connected · Start one session to read usage", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.secondary)
-        } else if let refreshedAt = state.refreshedAt {
-            Label(freshnessLabel(refreshedAt), systemImage: state.isFresh() ? "checkmark.circle.fill" : "clock.badge.exclamationmark")
-                .foregroundStyle(state.isFresh() ? Color.secondary : Color.orange)
-        } else {
-            Label("Connected · No usage reading yet", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder
-    private var usageWindows: some View {
-        if state.windows.isEmpty {
-            Text(state.isConnected ? "Usage will appear after the first session." : "Connect to read quota.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(state.windows.prefix(2)) { window in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(window.label).lineLimit(1)
-                            Spacer(minLength: 8)
-                            Text(window.summary).monospacedDigit()
-                        }
-                        .font(.caption)
-                        if let reset = window.resetsAt {
-                            Text("Resets \(reset.formatted(date: .abbreviated, time: .shortened))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private var actionButtons: some View {
-        HStack(spacing: 8) {
-            if needsStatusCheck {
-                Button("Check", action: refresh)
-                    .disabled(state.isBusy)
-                    .help("Check whether this saved profile is connected")
-            } else if !state.isConnected {
-                Button("Connect", action: connect)
-                    .disabled(state.isBusy || loginInProgress)
-            } else if !isSelected {
-                Button("Use", action: select)
-                    .help("Use for future \(account.provider.title) sessions")
-            }
-
-            Button("Launch", action: launch)
-                .disabled(!state.isConnected || state.isBusy)
-                .help("Open a new session in the chosen project folder")
-
-            Menu {
-                Button("Refresh", action: refresh)
-                    .disabled(state.isBusy)
-                Button("Rename…", action: rename)
-                    .disabled(state.isBusy || isLoginPending)
-                Divider()
-                Button("Remove…", role: .destructive, action: remove)
-                    .disabled(state.isBusy || isLoginPending)
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .accessibilityLabel("More actions for \(account.label)")
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-        }
-        .controlSize(.small)
-    }
-
-    private var needsStatusCheck: Bool {
-        !state.isConnected && state.message == "Refresh to check this account."
-    }
-
-    private var quotaRing: some View {
+    private var identityMark: some View {
         ZStack {
-            Circle()
-                .stroke(Color.secondary.opacity(0.18), lineWidth: 5)
-            if let remaining = state.remainingPercent {
+            Circle().stroke(Palette.ringTrack, lineWidth: 4).background(Circle().fill(Palette.card))
+            if let remaining = state.remainingPercent, !account.provider.isBrowserProfile {
                 Circle()
                     .trim(from: 0, to: min(max(remaining / 100, 0), 1))
-                    .stroke(quotaColor(remaining), style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .stroke(quotaColor(remaining), style: StrokeStyle(lineWidth: 4, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                Text("\(Int(remaining.rounded()))%")
-                    .font(.caption2.weight(.semibold))
-                    .monospacedDigit()
-                    .minimumScaleFactor(0.8)
-            } else {
-                Text("—")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
             }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(state.remainingPercent.map { "\(Int($0.rounded())) percent quota remaining" } ?? "Quota unknown")
+            if let emoji = account.emoji, !emoji.isEmpty { Text(emoji).font(.system(size: 23)) }
+            else { Image(systemName: account.provider.symbolName).font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(state.isConnected ? Palette.ample : Palette.textSecondary) }
+        }.frame(width: 48, height: 48).accessibilityHidden(true)
     }
 
+    @ViewBuilder private var statusLine: some View {
+        if isLoginPending { Label("Sign-in in progress", systemImage: "clock").foregroundStyle(Palette.watch) }
+        else if state.isBusy { Label("Checking…", systemImage: "arrow.triangle.2.circlepath").foregroundStyle(Palette.textSecondary) }
+        else if !state.isConnected {
+            Label(state.message ?? "Not connected", systemImage: "circle")
+                .foregroundStyle(state.message == nil ? Palette.textSecondary : Palette.watch).lineLimit(2)
+        } else if let message = state.message {
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(Palette.watch).lineLimit(2)
+        } else {
+            Label(account.provider.isBrowserProfile ? "Browser ready" : "Connected",
+                  systemImage: "checkmark.circle.fill").foregroundStyle(Palette.ample)
+        }
+    }
+
+    @ViewBuilder private var usageSummary: some View {
+        if account.provider.isBrowserProfile {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Browser profile").font(.callout.weight(.semibold))
+                Text(account.provider.connectionDetail).font(.callout).foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else if state.windows.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Usage unavailable").font(.callout.weight(.semibold))
+                Text(state.isConnected ? "Start a session, then refresh to read official limits." : "Connect to read official limits.")
+                    .font(.callout).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(state.windows.prefix(2)) { window in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(window.label).lineLimit(1); Spacer(minLength: 8)
+                            Text(window.summary).monospacedDigit().lineLimit(1)
+                        }.font(.caption)
+                        if let reset = window.resetsAt {
+                            Text("Resets \(reset.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption).foregroundStyle(Palette.textSecondary)
+                        }
+                    }
+                }
+                if let refreshedAt = state.refreshedAt {
+                    Text(state.isFresh() ? "Updated \(refreshedAt.formatted(.relative(presentation: .named)))"
+                         : "Stale · Updated \(refreshedAt.formatted(.relative(presentation: .named)))")
+                        .font(.caption).foregroundStyle(state.isFresh() ? Palette.textSecondary : Palette.watch)
+                }
+            }
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 8) {
+            if !state.isConnected {
+                Button("Connect", action: connect)
+                    .buttonStyle(.borderedProminent).foregroundStyle(.black)
+                    .disabled(state.isBusy || loginInProgress)
+            } else if account.provider.supportsAutomaticSelection && !isSelected {
+                Button("Use next", action: selectAccount).buttonStyle(.bordered)
+            }
+            if state.isConnected {
+                Button(account.provider.isBrowserProfile ? "Open" : "Launch") {
+                    Task { await manager.launch(account, project: projectURL) }
+                }
+                    .buttonStyle(.bordered).disabled(state.isBusy)
+                    .help(account.provider.isBrowserProfile
+                          ? "Open this separate \(account.provider.title) browser profile"
+                          : "Start a new \(account.provider.title) session in the project folder")
+            }
+            Menu {
+                if !account.provider.isBrowserProfile {
+                    Button("Refresh usage") { Task { await manager.refresh(account) } }.disabled(state.isBusy)
+                }
+                Button("Nickname & emoji…", action: personalize).disabled(state.isBusy || isLoginPending)
+                Divider()
+                Button("Remove…", role: .destructive, action: remove).disabled(state.isBusy || isLoginPending)
+            } label: {
+                Image(systemName: "ellipsis.circle").font(.system(size: 17))
+                    .accessibilityLabel("More actions for \(account.label)")
+            }.menuStyle(.borderlessButton).fixedSize()
+        }.controlSize(.small)
+    }
+
+    private func selectAccount() {
+        do { try manager.select(account) } catch { reportError(error.localizedDescription) }
+    }
     private func quotaColor(_ remaining: Double) -> Color {
         if remaining <= 10 { return Palette.critical }
         if remaining <= 30 { return Palette.watch }
         return Palette.ample
     }
-
     private var statusDescription: String {
-        if isLoginPending { return "browser sign-in pending" }
-        if let message = state.message { return message }
-        if !state.isConnected { return "disconnected" }
-        if state.needsFirstUsage { return "connected, no usage yet" }
-        if let percent = state.remainingPercent { return "\(Int(percent.rounded())) percent remaining" }
-        return "connected"
-    }
-
-    private func freshnessLabel(_ date: Date) -> String {
-        state.isFresh()
-            ? "Updated \(date.formatted(.relative(presentation: .named)))"
-            : "Usage may be stale · Last updated \(date.formatted(.relative(presentation: .named)))"
+        if isLoginPending { return "sign-in in progress" }; if state.isBusy { return "checking" }
+        if !state.isConnected { return state.message ?? "not connected" }; return "connected"
     }
 }
 
-private struct AccountForm: View {
-    enum Mode {
-        case add(AccountProvider)
-        case rename(ManagedAccount)
-
-        var title: String {
-            switch self {
-            case .add(let provider): return "Add \(provider.title) account"
-            case .rename: return "Rename account"
-            }
-        }
-    }
-
+private struct AddAssistantFlow: View {
     @Environment(\.dismiss) private var dismiss
-    let mode: Mode
-    let save: (String, String?) -> Void
-    @State private var label: String
-    @State private var email: String
-    @FocusState private var focusedField: Field?
+    @ObservedObject var manager: AccountManager
+    let reportError: (String) -> Void
+    @State private var createdAccountID: UUID?
+    @State private var startedInitialConnection = false
+    private let startsConnectionOnAppear: Bool
+    private var account: ManagedAccount? { manager.accounts.first { $0.id == createdAccountID } }
 
-    private enum Field { case label, email }
-
-    init(mode: Mode, save: @escaping (String, String?) -> Void) {
-        self.mode = mode
-        self.save = save
-        switch mode {
-        case .add:
-            _label = State(initialValue: "")
-            _email = State(initialValue: "")
-        case .rename(let account):
-            _label = State(initialValue: account.label)
-            _email = State(initialValue: account.emailHint ?? "")
-        }
+    init(manager: AccountManager, initialAccount: ManagedAccount? = nil,
+         reportError: @escaping (String) -> Void) {
+        self.manager = manager
+        self.reportError = reportError
+        _createdAccountID = State(initialValue: initialAccount?.id)
+        startsConnectionOnAppear = initialAccount != nil
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(mode.title).font(.title2.weight(.semibold))
-                if case .add = mode {
-                    Text("This creates a separate local profile. Sign-in continues in the official browser; no password or token is entered here.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            Form {
-                TextField("Account name", text: $label, prompt: Text("Work, Personal, Team…"))
-                    .focused($focusedField, equals: .label)
-                    .textContentType(.nickname)
-                if case .add = mode {
-                    TextField("Email hint (optional)", text: $email, prompt: Text("Helps distinguish accounts"))
-                        .focused($focusedField, equals: .email)
-                        .textContentType(.emailAddress)
-                }
-            }
-            .formStyle(.grouped)
-
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button(modeButtonTitle) {
-                    save(label.trimmingCharacters(in: .whitespacesAndNewlines),
-                         email.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty)
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
+        Group {
+            if let account {
+                let state = manager.state(for: account)
+                if state.isConnected {
+                    PersonalizeAssistantView(account: account, manager: manager,
+                                             completionTitle: "Finish", reportError: reportError)
+                } else { connectionStep(account: account, state: state) }
+            } else { providerStep }
         }
-        .padding(24)
-        .frame(width: 460)
-        .onAppear { focusedField = .label }
+        .frame(width: 720, height: 560).background(Palette.notch).foregroundStyle(Palette.textPrimary)
+        .task {
+            guard startsConnectionOnAppear, !startedInitialConnection, let account else { return }
+            startedInitialConnection = true
+            await manager.connect(account)
+        }
     }
 
-    private var modeButtonTitle: String {
-        switch mode { case .add: return "Add account"; case .rename: return "Save" }
+    private var providerStep: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            flowHeader(title: "Add assistant",
+                       detail: "Choose a service first. You will sign in with its official page before naming the account.")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    providerGrid(title: "Developer tools",
+                                 providers: AccountProvider.allCases.filter { !$0.isBrowserProfile })
+                    providerGrid(title: "Browser assistants",
+                                 providers: AccountProvider.allCases.filter(\.isBrowserProfile))
+                }.padding(.horizontal, 28).padding(.bottom, 24)
+            }
+        }
+    }
+
+    private func providerGrid(title: String, providers: [AccountProvider]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.callout.weight(.semibold)).foregroundStyle(Palette.textSecondary)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                ForEach(providers) { provider in
+                    Button { createAndConnect(provider) } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: provider.symbolName).font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(Palette.ample).frame(width: 32)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(provider.title).font(.body.weight(.bold)).foregroundStyle(Palette.textPrimary)
+                                Text(provider.connectionDetail).font(.callout).foregroundStyle(Palette.textSecondary)
+                                    .lineLimit(2).multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.right").foregroundStyle(Palette.textSecondary)
+                        }
+                        .padding(16).frame(maxWidth: .infinity, minHeight: 82, alignment: .leading)
+                        .background(Palette.ringTrack.opacity(0.38), in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.ringTrack))
+                    }.buttonStyle(.plain)
+                        .accessibilityLabel("Add \(provider.title). \(provider.connectionDetail)")
+                }
+            }
+        }
+    }
+
+    private func connectionStep(account: ManagedAccount, state: ManagedAccountState) -> some View {
+        VStack(alignment: .leading, spacing: 24) {
+            flowHeader(title: "Connect \(account.provider.title)", detail: account.provider.connectionDetail)
+            Spacer()
+            VStack(alignment: .leading, spacing: 16) {
+                ZStack {
+                    Circle().stroke(Palette.ringTrack, lineWidth: 3)
+                    Image(systemName: account.provider.symbolName).font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(Palette.ample)
+                }.frame(width: 76, height: 76)
+                Text(state.message ?? "Continue sign-in in the browser window opened by Builder Nutch.")
+                    .font(.title3.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                if account.provider.isBrowserProfile,
+                   state.message?.contains("Install Google Chrome") == true {
+                    Link("Install Google Chrome", destination: URL(string: "https://www.google.com/chrome/")!)
+                        .font(.body.weight(.semibold))
+                }
+                Text("Your password and tokens stay with the official service. Builder Nutch does not ask for or copy them.")
+                    .font(.body).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
+            }.frame(maxWidth: 520, alignment: .leading)
+            Spacer()
+            HStack {
+                Button("Close") { dismiss() }.buttonStyle(.bordered); Spacer()
+                if account.provider.isBrowserProfile {
+                    Button("Open sign-in again") { Task { await manager.connect(account) } }
+                        .buttonStyle(.bordered).disabled(state.isBusy || manager.loginAccountID != nil)
+                    Button("I've finished signing in") { confirmBrowserConnection(account) }
+                        .buttonStyle(.borderedProminent).foregroundStyle(.black).disabled(state.isBusy)
+                } else if state.isBusy {
+                    ProgressView().controlSize(.small).tint(Palette.ample)
+                    Button("Cancel") { manager.cancelLogin() }.buttonStyle(.bordered)
+                } else {
+                    Button("Try again") { Task { await manager.connect(account) } }
+                        .buttonStyle(.borderedProminent).foregroundStyle(.black)
+                }
+            }.padding(.horizontal, 28).padding(.bottom, 24)
+        }
+    }
+
+    private func flowHeader(title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(title).font(.title2.weight(.bold)); Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 18)).foregroundStyle(Palette.textSecondary)
+                }.buttonStyle(.plain).accessibilityLabel("Close").keyboardShortcut(.cancelAction)
+            }
+            Text(detail).font(.body).foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }.padding(28)
+    }
+
+    private func createAndConnect(_ provider: AccountProvider) {
+        do {
+            let count = manager.accounts.filter { $0.provider == provider }.count
+            let label = count == 0 ? provider.title : "\(provider.title) \(count + 1)"
+            let account = try manager.add(provider: provider, label: label, emailHint: nil)
+            createdAccountID = account.id
+            Task { await manager.connect(account) }
+        } catch { reportError(error.localizedDescription) }
+    }
+    private func confirmBrowserConnection(_ account: ManagedAccount) {
+        do { try manager.confirmBrowserConnection(account) } catch { reportError(error.localizedDescription) }
     }
 }
 
-private extension String {
-    var nilIfEmpty: String? { isEmpty ? nil : self }
+private struct PersonalizeAssistantView: View {
+    @Environment(\.dismiss) private var dismiss
+    let account: ManagedAccount
+    @ObservedObject var manager: AccountManager
+    var completionTitle = "Save"
+    let reportError: (String) -> Void
+    @State private var nickname: String
+    @State private var selectedEmoji: String?
+    @FocusState private var nicknameFocused: Bool
+    private let emojiChoices = ["⚡️", "🧠", "🛠️", "🚀", "🔬", "🧭", "🎯", "🧪", "💻", "🤖"]
+
+    init(account: ManagedAccount, manager: AccountManager, completionTitle: String = "Save",
+         reportError: @escaping (String) -> Void) {
+        self.account = account; self.manager = manager; self.completionTitle = completionTitle
+        self.reportError = reportError
+        let generatedSuffix = account.label.dropFirst(account.provider.title.count)
+            .trimmingCharacters(in: .whitespaces)
+        let isGenerated = account.label == account.provider.title || Int(generatedSuffix) != nil
+        _nickname = State(initialValue: isGenerated ? "" : account.label)
+        _selectedEmoji = State(initialValue: account.emoji)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Make it yours").font(.title2.weight(.bold))
+                Text("\(account.provider.isBrowserProfile ? "Browser profile ready" : "Connected") for \(account.provider.title). A nickname and emoji are optional; they only help you recognise this account.")
+                    .font(.body).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Nickname").font(.callout.weight(.semibold))
+                TextField("Optional — e.g. Work or Personal", text: $nickname)
+                    .textFieldStyle(.roundedBorder).focused($nicknameFocused)
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Emoji").font(.callout.weight(.semibold))
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 44, maximum: 52), spacing: 8)], spacing: 8) {
+                    emojiButton(nil, title: "None")
+                    ForEach(emojiChoices, id: \.self) { emoji in emojiButton(emoji, title: emoji) }
+                }
+            }
+            Spacer()
+            HStack {
+                Text("Account identity and sign-in stay unchanged.").font(.callout).foregroundStyle(Palette.textSecondary)
+                Spacer()
+                Button(completionTitle == "Finish" ? "Skip" : "Cancel") { dismiss() }.buttonStyle(.bordered)
+                Button(completionTitle, action: save).buttonStyle(.borderedProminent).foregroundStyle(.black)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(28).frame(width: 620, height: 360).background(Palette.notch)
+        .foregroundStyle(Palette.textPrimary).onAppear { nicknameFocused = true }
+    }
+
+    private func emojiButton(_ emoji: String?, title: String) -> some View {
+        Button { selectedEmoji = emoji } label: {
+            Text(title).font(emoji == nil ? .caption : .system(size: 20)).frame(minWidth: 30, minHeight: 30)
+        }
+        .buttonStyle(.bordered).tint(selectedEmoji == emoji ? Palette.ample : Palette.textSecondary)
+        .accessibilityLabel(emoji == nil ? "No emoji" : "Use \(emoji!)")
+        .accessibilityAddTraits(selectedEmoji == emoji ? .isSelected : [])
+    }
+
+    private func save() {
+        let trimmed = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            try manager.personalize(account, label: trimmed.isEmpty ? account.label : trimmed,
+                                    emoji: selectedEmoji)
+            dismiss()
+        } catch { reportError(error.localizedDescription) }
+    }
 }
