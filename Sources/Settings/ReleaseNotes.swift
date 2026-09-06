@@ -31,6 +31,14 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.1.1",
+            headline: "A clearer first connection.",
+            changes: [
+                .init(title: "New Claude profiles show their connection step",
+                      detail: "An account that has not signed in yet now asks you to connect instead of displaying an operational error.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.1.0",
             headline: "Your accounts, together in Codenotch.",
             changes: [

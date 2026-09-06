@@ -122,7 +122,13 @@ struct OfficialAccountProcess: AccountCommandRunning {
                 let (tail, excess) = collector.drain()
                 guard !excess else { throw ManagedAccountError.invalidResponse }
                 all.append(tail)
-                guard process.terminationStatus == 0 else { throw ManagedAccountError.commandFailed(process.terminationStatus) }
+                // Claude auth status intentionally exits 1 when signed out.
+                // Accept only that exact command and its explicit logged-out
+                // JSON response; every other nonzero exit remains an error.
+                let loggedOut = process.terminationStatus == 1
+                    && command.arguments == ["auth", "status", "--json"]
+                    && (try? JSONSerialization.jsonObject(with: all) as? [String: Any])?["loggedIn"] as? Bool == false
+                guard process.terminationStatus == 0 || loggedOut else { throw ManagedAccountError.commandFailed(process.terminationStatus) }
                 if command.readsCodexAccount { throw ManagedAccountError.invalidResponse }
                 return all
             }

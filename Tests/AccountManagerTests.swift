@@ -137,6 +137,27 @@ final class AccountManagerTests: XCTestCase {
         XCTAssertEqual(fake.commands.last?.environment["CODEX_HOME"], manager.configurationDirectory(for: account).path)
     }
 
+    func testClaudeLoggedOutStatusExitIsNotAnOperationalFailure() async throws {
+        let root = try temporary(), executable = root.appendingPathComponent("fake-cli")
+        try AccountStorage.write(Data("#!/bin/sh\necho '{\"loggedIn\":false}'\nexit 1\n".utf8), to: executable, mode: 0o700)
+        let runner = OfficialAccountProcess()
+        let status = AccountCommand(executable: executable, arguments: ["auth", "status", "--json"], environment: [:], directory: root)
+        let data = try await runner.run(status, cancellation: AccountCancellation())
+        let state = try AccountQuotas.claude(status: data, quota: nil)
+        XCTAssertFalse(state.isConnected)
+        XCTAssertEqual(state.message, "Connect this account.")
+        var login = status; login.arguments = ["auth", "login", "--claudeai"]
+        do {
+            _ = try await runner.run(login, cancellation: AccountCancellation())
+            XCTFail("Nonzero login exits must still fail")
+        } catch { XCTAssertEqual(error.localizedDescription, ManagedAccountError.commandFailed(1).localizedDescription) }
+        try AccountStorage.write(Data("#!/bin/sh\necho '{\"loggedIn\":true}'\nexit 1\n".utf8), to: executable, mode: 0o700)
+        do {
+            _ = try await runner.run(status, cancellation: AccountCancellation())
+            XCTFail("Only explicitly logged-out status can use exit 1")
+        } catch { XCTAssertEqual(error.localizedDescription, ManagedAccountError.commandFailed(1).localizedDescription) }
+    }
+
     func testRealFakeProcessRPCAndCancellation() async throws {
         let root = try temporary(), executable = root.appendingPathComponent("fake-cli")
         let script = #"""
