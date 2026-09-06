@@ -39,7 +39,7 @@ struct SettingsView: View {
                 }
                 // Beside the switches it explains, not stranded at the end of
                 // the page.
-                Text("Codenotch never signs in — each reading is borrowed from the "
+                Text("Builder Nutch never signs in — each reading is borrowed from the "
                      + "tool that already holds the account. Signing out here stops "
                      + "the credential being read and forgets the numbers, but leaves "
                      + "you signed in to that tool. macOS asks once per tool the "
@@ -92,7 +92,7 @@ struct SettingsView: View {
             // without being asked, and one switch under its own header looked
             // like an oversight rather than a section.
             Section("General") {
-                Toggle("Open Codenotch at login", isOn: $preferences.launchAtLogin)
+                Toggle("Open Builder Nutch at login", isOn: $preferences.launchAtLogin)
                 if let problem = preferences.launchAtLoginProblem {
                     Text(problem)
                         .font(.caption)
@@ -114,7 +114,7 @@ struct SettingsView: View {
                     // background updater and something that looks like it is
                     // hiding.
                     Text("Version \(updater.currentVersion). Updates install in the "
-                         + "background and apply next time Codenotch starts.")
+                         + "background and apply next time Builder Nutch starts.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -137,9 +137,9 @@ struct SettingsView: View {
                 }
                 } else {
                     HStack {
-                        Text("Codenotch Accounts · \(updater.currentVersion)")
+                        Text("Builder Nutch · \(updater.currentVersion)")
                         Spacer()
-                        Link("Releases", destination: URL(string: "https://github.com/Connected-Mate/codenotch-accounts/releases")!)
+                        Link("Releases", destination: URL(string: "https://github.com/Connected-Mate/builder-nutch/releases")!)
                     }
                     Text("This community build checks no external update feed. Install new releases from the project page.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -199,7 +199,7 @@ struct SettingsView: View {
     /// this, sees four blank rings and concludes it is broken — and the
     /// distinction that catches them out is Claude *Code*, not the Claude app.
     static let setupCopy =
-        "Codenotch reads usage from tools already signed in on this Mac — it "
+        "Builder Nutch reads usage from tools already signed in on this Mac — it "
         + "never asks for your password. Install and sign in to any of Claude "
         + "Code (the terminal tool, not the Claude app), Cursor, Codex or "
         + "Antigravity, and its ring appears in the notch."
@@ -342,7 +342,7 @@ private struct AccountRow: View {
             // Not a sign-in problem, so do not send them off to sign in. The
             // credential is right there and macOS is the one saying no — the
             // remedy is the button on this same row.
-            Text("macOS is not letting Codenotch read \(provider.name)'s saved "
+            Text("macOS is not letting Builder Nutch read \(provider.name)'s saved "
                  + "login. Choose Allow access… above, then Always Allow.")
                 .foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)

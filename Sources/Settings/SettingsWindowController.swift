@@ -67,7 +67,7 @@ final class SettingsWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = managedAccounts ? "Codenotch Accounts — Appearance" : "Codenotch Settings"
+        window.title = managedAccounts ? "Builder Nutch — Appearance" : "Builder Nutch Settings"
         window.contentView = NSHostingView(
             rootView: SettingsView(preferences: preferences,
                                    providers: providers,

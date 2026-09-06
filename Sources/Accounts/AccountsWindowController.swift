@@ -26,7 +26,7 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Codenotch Accounts"
+        window.title = "Builder Nutch"
         window.minSize = NSSize(width: 700, height: 500)
         window.setFrameAutosaveName("CodenotchAccountsWindow")
         window.isReleasedWhenClosed = false

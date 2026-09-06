@@ -74,7 +74,7 @@ enum SignInRoute: Equatable {
     var signOutCaveat: String {
         switch self {
         case .modal(let name):
-            return "Signs out of \(name) — the session belongs to Codenotch."
+            return "Signs out of \(name) — the session belongs to Builder Nutch."
         case .openApp(_, let name):
             return "You stay signed in to \(name) — end that session in \(name) itself."
         case .guidance:

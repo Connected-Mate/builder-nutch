@@ -73,9 +73,9 @@ struct AccountsView: View {
             }
             Button("Cancel", role: .cancel) { removingAccount = nil }
         } message: { _ in
-            Text("Only this profile is removed from Codenotch Accounts. The official tool keeps its saved sign-in.")
+            Text("Only this profile is removed from Builder Nutch. The official tool keeps its saved sign-in.")
         }
-        .alert("Codenotch Accounts", isPresented: Binding(
+        .alert("Builder Nutch", isPresented: Binding(
             get: { localError != nil },
             set: { if !$0 { localError = nil } }
         )) {
@@ -108,7 +108,7 @@ struct AccountsView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let onOpenSettings {
                 Button(action: onOpenSettings) {
-                    Label("Codenotch Settings", systemImage: "gearshape")
+                    Label("Builder Nutch Settings", systemImage: "gearshape")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)

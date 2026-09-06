@@ -31,6 +31,18 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.2.0",
+            headline: "Builder Nutch, for builders running more than one AI account.",
+            changes: [
+                .init(title: "One clear name across the app",
+                      detail: "Codenotch Accounts is now Builder Nutch. Existing profiles, selected accounts and official sign-ins stay exactly where they are."),
+                .init(title: "Built for multiple AI subscriptions",
+                      detail: "Keep Claude Code and Codex accounts separate, see fresh limits, and choose the right account before opening a new project session."),
+                .init(title: "The notch remains the working view",
+                      detail: "Builder Nutch keeps the original at-a-glance quota experience. Based on Codenotch by vinzdg.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.1.1",
             headline: "A clearer first connection.",
             changes: [
@@ -40,14 +52,14 @@ enum ReleaseNotes {
         ),
         ReleaseNote(
             version: "0.1.0",
-            headline: "Your accounts, together in Codenotch.",
+            headline: "Your accounts, together in Builder Nutch.",
             changes: [
                 .init(title: "Separate Claude Code and Codex accounts",
                       detail: "Add named profiles and sign in through each assistant's official browser flow."),
                 .init(title: "Choose the account for your next session",
                       detail: "Launch in your project folder with a selected account, or let verified, fresh quota guide the choice. Running sessions keep their current account."),
-                .init(title: "The original Codenotch experience",
-                      detail: "Selected accounts appear in the notch. This independent fork builds on Codenotch by vinzdg.")
+                .init(title: "The original notch experience",
+                      detail: "Selected accounts appear in the notch. This independent fork is based on Codenotch by vinzdg.")
             ]
         ),
         ReleaseNote(
@@ -100,7 +112,7 @@ enum ReleaseNotes {
                     title: "Codex is read live instead of from a log",
                     detail: "The figure came from a file Codex writes during a "
                           + "turn, so it was as old as the last time you used "
-                          + "it — three days stale in one case. Codenotch now "
+                          + "it — three days stale in one case. Builder Nutch now "
                           + "asks Codex itself, and matches its own panel."
                 ),
                 ReleaseNote.Change(
@@ -166,7 +178,7 @@ enum ReleaseNotes {
             changes: [
                 ReleaseNote.Change(
                     title: "Antigravity shows its actual quota",
-                    detail: "Google will not answer Codenotch directly, so it asks "
+                    detail: "Google will not answer Builder Nutch directly, so it asks "
                           + "Antigravity's own language server instead — the same "
                           + "place Antigravity's usage panel gets its figure."
                 ),
@@ -209,10 +221,10 @@ enum ReleaseNotes {
                 ReleaseNote.Change(
                     title: "Claude, Cursor, Codex and Gemini",
                     detail: "Each read from the tool already signed in on this Mac. "
-                          + "Codenotch never asks for a password."
+                          + "Builder Nutch never asks for a password."
                 ),
                 ReleaseNote.Change(
-                    title: "Choose where Codenotch appears",
+                    title: "Choose where Builder Nutch appears",
                     detail: "In the Dock, in the menu bar, or nowhere at all."
                 )
             ]

@@ -33,12 +33,12 @@ final class Updater: NSObject, ObservableObject, SPUUpdaterDelegate {
             switch self {
             case .idle:          return nil
             case .checking:      return "Checking…"
-            case .upToDate:      return "Codenotch is up to date."
+            case .upToDate:      return "Builder Nutch is up to date."
             case .found(let v):  return "Version \(v) is available and will install shortly."
             case .unreachable:
                 // The one people actually hit, and the one Sparkle's wording
                 // hides: nothing is wrong with the app or the machine.
-                return "Couldn't reach the update server. Codenotch will try "
+                return "Couldn't reach the update server. Builder Nutch will try "
                      + "again on its own — nothing is wrong with this copy."
             case .failed(let why): return why
             }

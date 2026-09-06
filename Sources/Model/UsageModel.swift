@@ -175,7 +175,7 @@ struct ProviderSnapshot: Identifiable, Equatable {
         case .accessDenied:
             // Says what happened and what fixes it. "Sign in to Claude Code"
             // would send someone who *is* signed in to fix the wrong thing.
-            return "Codenotch was refused access to \(displayName)'s saved "
+            return "Builder Nutch was refused access to \(displayName)'s saved "
                  + "login. Click this ring to ask again, and choose Always Allow."
         case .unsupported(let why): return why
         case .error(let why): return "Couldn't read usage — \(why)"
