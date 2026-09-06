@@ -1,4 +1,4 @@
-# Codenotch Accounts
+# Builder Nutch
 
 This community fork builds directly on [vinzdg/codenotch](https://github.com/vinzdg/codenotch), under its MIT license. Preserve the notch and usage presentation while adding unlimited local account profiles for Claude Code and Codex.
 

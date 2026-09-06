@@ -4,4 +4,4 @@ build:
 test:
 	./Scripts/build-accounts.sh test
 run: build
-	open build/AccountsDerivedData/Build/Products/Release/Codenotch.app
+	open "build/AccountsDerivedData/Build/Products/Release/Builder Nutch.app"

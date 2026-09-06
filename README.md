@@ -1,10 +1,10 @@
-# Codenotch Accounts
+# Builder Nutch
 
-**All your AI accounts. More room to ship.**
+**Big ideas. Lean R&D. Keep building.**
 
-A native macOS account manager built directly on [Codenotch by Vinz](https://github.com/vinzdg/codenotch). Keep the screen-edge notch and usage rings; add separate Claude Code and Codex accounts, official browser sign-in, and one-click selection for your next session.
+Put the AI subscriptions you already pay for to work: more experiments, ambitious R&D and real products. Builder Nutch is a native macOS account manager built directly on [Codenotch by Vinz](https://github.com/vinzdg/codenotch). Keep the screen-edge notch and usage rings; add separate Claude Code and Codex accounts, official browser sign-in, and one-click selection for your next session.
 
-[Website](https://codenotch-accounts.alexandre-cormeraie.chatgpt.site) · [Releases](https://github.com/Connected-Mate/codenotch-accounts/releases)
+[Website](https://codenotch-accounts.alexandre-cormeraie.chatgpt.site) · [Releases](https://github.com/Connected-Mate/builder-nutch/releases)
 
 ## What it does
 
@@ -20,12 +20,16 @@ A native macOS account manager built directly on [Codenotch by Vinz](https://git
 ## Connect your first account
 
 1. Install the official [Claude Code](https://code.claude.com/docs/en/quickstart) and/or [Codex CLI](https://developers.openai.com/codex/cli/).
-2. Open Codenotch Accounts and choose a provider.
+2. Open Builder Nutch and choose a provider.
 3. Add an account with a label and optional email hint, then select **Connect**.
 4. Complete the provider's browser login. Repeat for your other accounts.
 5. Select an account and a project folder, then launch a session.
 
 The account manager never reads or replaces your existing default Claude Code or Codex login. New managed profiles start disconnected. Browser login is performed by you, and each provider remains responsible for its credentials and token refresh.
+
+## Updating from Codenotch Accounts
+
+Builder Nutch is the new name for this fork. Install **Builder Nutch.app** and keep using your existing profiles. The application identity, preferences and profile locations remain stable, so the rename does not invalidate saved sign-ins. Close the old application before opening the new version.
 
 ## How account isolation works
 
@@ -47,12 +51,12 @@ Requires macOS 26+, Xcode 26+, and an internet connection for the initial depend
 
 ```sh
 ./Scripts/build-accounts.sh build
-open build/AccountsDerivedData/Build/Products/Release/Codenotch.app
+open "build/AccountsDerivedData/Build/Products/Release/Builder Nutch.app"
 ```
 
 The build script downloads a pinned XcodeGen release and verifies its SHA-256. Homebrew is not required. Local builds use ad-hoc signing; distributed builds use this fork maintainer's own Developer ID.
 
-To install your local build, copy `Codenotch.app` into Applications as **Codenotch Accounts.app**. It uses the independent bundle identifier `com.connectedmate.codenotch-accounts` and can coexist with upstream Codenotch.
+To install your local build, copy **Builder Nutch.app** into Applications. It retains the independent bundle identifier `com.connectedmate.codenotch-accounts` and can coexist with upstream Codenotch.
 
 ### Tests
 
