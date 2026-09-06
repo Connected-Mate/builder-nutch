@@ -6,8 +6,8 @@ const display = Barlow_Condensed({ variable: '--font-display', subsets: ['latin'
 const body = Manrope({ variable: '--font-body', subsets: ['latin'] });
 export const metadata: Metadata = {
   metadataBase: new URL('https://codenotch-accounts.alexandre-cormeraie.chatgpt.site'),
-  title: 'Codenotch Accounts — Built for people who ship',
-  description: 'Your Claude Code and Codex accounts, together on your Mac. Connect through official browser login, see usage, and choose the account for your next session.',
+  title: 'Builder Nutch — Big ideas. Lean R&D. Keep building.',
+  description: 'Put your AI subscriptions to work. Manage Claude Code and Codex accounts on your Mac, see remaining usage, and automatically choose an available account for your next session. Built for ambitious experiments and real products.',
   icons: { icon: '/app-icon.png' },
 };
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

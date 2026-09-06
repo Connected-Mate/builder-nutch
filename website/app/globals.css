@@ -16,3 +16,5 @@
 
 /* Final readability and keyboard/touch pass. */
 .overline{text-decoration:none}.account-label strong,.select-account{font-size:.875rem!important}.select-account{min-height:44px;min-width:64px}.provider-tabs [data-slot=tabs-trigger]{min-height:44px;font-size:.875rem!important}.steps p,.ownership-copy p,.faq details p,.get-app p:not(.overline){font-size:1rem}.faq summary{font-size:1rem}.preview-footer,.account-label>span{font-size:.75rem}.sample-label{font-size:.75rem}.preview-heading{flex-wrap:wrap}.window-top{font-size:.75rem}@media(max-width:480px){.sample-label{display:none}nav a{min-height:44px}.hero-actions .text-link{min-height:44px}.preview-footer{line-height:1.8}.compatibility{font-size:.75rem}}
+
+.preview-auto{padding:.1rem 1.5rem 1rem}.auto-pick{width:100%;min-height:44px;color:var(--primary);border:1px solid var(--border);font-size:.875rem;white-space:normal}.auto-pick:hover{background:var(--muted)}
