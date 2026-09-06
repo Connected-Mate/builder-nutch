@@ -13,7 +13,7 @@ final class AccountManagerTests: XCTestCase {
     func testTwelveAccountsPersistAndSelectionDoesNotTouchDefault() throws {
         let root = try temporary()
         let manager = AccountManager(rootURL: root)
-        for provider in AccountProvider.allCases {
+        for provider in [AccountProvider.claude, .codex] {
             for index in 1...6 { try manager.add(provider: provider, label: "\(provider.title) \(index)", emailHint: nil) }
         }
         let last = try XCTUnwrap(manager.accounts.last)

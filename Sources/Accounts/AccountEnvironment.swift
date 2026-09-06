@@ -6,11 +6,13 @@ enum AccountEnvironment {
         let allowed: Set<String> = ["HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM", "SSH_AUTH_SOCK", "SYSTEMROOT"]
         var result = inherited.filter { allowed.contains($0.key) }
         result["PATH"] = result["PATH"] ?? "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-        result[provider == .claude ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME"] = profile.path
+        if provider == .claude { result["CLAUDE_CONFIG_DIR"] = profile.path }
+        if provider == .codex { result["CODEX_HOME"] = profile.path }
         return result
     }
 
     static func executable(for provider: AccountProvider) -> URL? {
+        guard !provider.isBrowserProfile else { return nil }
         let home = FileManager.default.homeDirectoryForCurrentUser
         let name = provider == .claude ? "claude" : "codex"
         var candidates = [home.appendingPathComponent(".local/bin/\(name)").path,

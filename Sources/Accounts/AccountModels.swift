@@ -1,9 +1,70 @@
 import Foundation
 
 enum AccountProvider: String, Codable, CaseIterable, Identifiable {
-    case claude, codex
+    case claude, codex, cursor, kimi, grok, chatgpt, gemini, perplexity, deepseek, mistral
     var id: String { rawValue }
-    var title: String { self == .claude ? "Claude Code" : "Codex" }
+    var title: String {
+        switch self {
+        case .claude: return "Claude"
+        case .codex: return "Codex"
+        case .cursor: return "Cursor"
+        case .kimi: return "Kimi"
+        case .grok: return "Grok"
+        case .chatgpt: return "ChatGPT"
+        case .gemini: return "Gemini"
+        case .perplexity: return "Perplexity"
+        case .deepseek: return "DeepSeek"
+        case .mistral: return "Mistral"
+        }
+    }
+    var isBrowserProfile: Bool { self != .claude && self != .codex }
+    var supportsAutomaticSelection: Bool { !isBrowserProfile }
+    var symbolName: String {
+        switch self {
+        case .claude: return "sparkles"
+        case .codex: return "terminal"
+        case .cursor: return "cursorarrow"
+        case .kimi: return "moon.stars"
+        case .grok: return "slash.circle"
+        case .chatgpt: return "bubble.left.and.bubble.right"
+        case .gemini: return "sparkle"
+        case .perplexity: return "asterisk"
+        case .deepseek: return "water.waves"
+        case .mistral: return "wind"
+        }
+    }
+    var connectionDetail: String {
+        switch self {
+        case .claude: return "Sign in with your Claude subscription. Launch Claude Code and follow its available usage."
+        case .codex: return "Sign in with ChatGPT. Launch Codex and follow its available usage."
+        case .cursor: return "Sign in to your Cursor dashboard in a separate browser profile. This does not switch the Cursor editor account."
+        default: return "Sign in on \(title)'s official website. Each account keeps its own browser profile."
+        }
+    }
+    var website: URL {
+        let address: String
+        switch self {
+        case .claude: address = "https://claude.ai/"
+        case .codex, .chatgpt: address = "https://chatgpt.com/"
+        case .cursor: address = "https://cursor.com/dashboard"
+        case .kimi: address = "https://www.kimi.com/"
+        case .grok: address = "https://grok.com/"
+        case .gemini: address = "https://gemini.google.com/"
+        case .perplexity: address = "https://www.perplexity.ai/"
+        case .deepseek: address = "https://chat.deepseek.com/"
+        case .mistral: address = "https://chat.mistral.ai/"
+        }
+        return URL(string: address)!
+    }
+    var glyph: ProviderGlyph {
+        switch self {
+        case .claude: return .claude
+        case .codex, .chatgpt: return .openai
+        case .cursor: return .cursor
+        case .gemini: return .antigravity
+        default: return .third
+        }
+    }
 }
 
 struct ManagedAccount: Identifiable, Codable, Equatable {
@@ -12,6 +73,10 @@ struct ManagedAccount: Identifiable, Codable, Equatable {
     var label: String
     var emailHint: String?
     let createdAt: Date
+    var emoji: String? = nil
+    /// A user confirmation, not a claim that the website session is still authenticated.
+    var browserConfirmedAt: Date? = nil
+    var browserBundleIdentifier: String? = nil
 }
 
 struct ManagedAccountState {
@@ -35,11 +100,13 @@ struct ManagedAccountState {
 }
 
 enum ManagedAccountError: LocalizedError {
-    case invalidLabel, invalidEmail, unsafePath, corruptCatalog, missingCLI(AccountProvider)
+    case invalidLabel, invalidEmail, invalidEmoji, unsafePath, corruptCatalog, missingCLI(AccountProvider), missingBrowser
     case busy, cancelled, timedOut, commandFailed(Int32), invalidResponse, notConnected, unavailable
     var errorDescription: String? {
         switch self {
         case .invalidLabel: return "Choose a name between 1 and 80 characters."
+        case .invalidEmoji: return "Choose one emoji, or leave it empty."
+        case .missingBrowser: return "Install Google Chrome, Brave or Microsoft Edge to keep each web account separate, then try again."
         case .invalidEmail: return "Enter a valid email hint, or leave it empty."
         case .unsafePath: return "The account folder is not safe to use. Choose a private local folder."
         case .corruptCatalog: return "The account catalog could not be read. It was preserved; restore it before adding accounts."
@@ -57,7 +124,8 @@ enum ManagedAccountError: LocalizedError {
 
 enum AccountSelection {
     static func best(provider: AccountProvider, accounts: [ManagedAccount], states: [UUID: ManagedAccountState], now: Date = Date()) -> ManagedAccount? {
-        accounts.filter { account in
+        guard provider.supportsAutomaticSelection else { return nil }
+        return accounts.filter { account in
             guard account.provider == provider, let state = states[account.id], state.isConnected,
                   !state.isBusy, state.message == nil, state.isFresh(at: now), !state.windows.isEmpty else { return false }
             return state.windows.allSatisfy { window in

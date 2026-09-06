@@ -22,6 +22,8 @@ final class AccountManager: ObservableObject {
     private let runner: any AccountCommandRunning
     private let resolveExecutable: (AccountProvider) -> URL?
     private let openTerminal: (URL) -> Bool
+    private let openBrowser: (URL, URL, String?) async throws -> String
+    private var browserOpenedIDs: Set<UUID> = []
     private var operations: [UUID: AccountCancellation] = [:]
     private var loaded = false
     private var catalogError: Error?
@@ -33,8 +35,10 @@ final class AccountManager: ObservableObject {
     }
 
     init(rootURL: URL?, runner: any AccountCommandRunning,
-         executable: @escaping (AccountProvider) -> URL?, openTerminal: @escaping (URL) -> Bool = { _ in false }) {
+         executable: @escaping (AccountProvider) -> URL?, openTerminal: @escaping (URL) -> Bool = { _ in false },
+         openBrowser: @escaping (URL, URL, String?) async throws -> String = AccountBrowser.open) {
         self.runner = runner; self.resolveExecutable = executable; self.openTerminal = openTerminal
+        self.openBrowser = openBrowser
         let root = rootURL ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Codenotch Accounts", isDirectory: true)
         do {
@@ -42,7 +46,9 @@ final class AccountManager: ObservableObject {
             let catalog = try storage.load()
             self.storage = storage
             accounts = catalog.accounts; selected = catalog.selected; automaticSelection = catalog.automaticSelection
-            states = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, ManagedAccountState(message: "Refresh to check this account.")) })
+            states = Dictionary(uniqueKeysWithValues: accounts.map {
+                ($0.id, $0.provider.isBrowserProfile ? Self.browserState($0) : ManagedAccountState(message: "Refresh to check this account."))
+            })
         } catch {
             self.storage = nil; catalogError = error; notice = error.localizedDescription
         }
@@ -77,11 +83,51 @@ final class AccountManager: ObservableObject {
         try persist(accounts: updated, selected: selected); accounts = updated
     }
 
+    func personalize(_ account: ManagedAccount, label: String, emoji: String?) throws {
+        guard let index = accounts.firstIndex(where: { $0.id == account.id }) else { throw ManagedAccountError.unavailable }
+        var updated = accounts
+        updated[index].label = try AccountStorage.validLabel(label)
+        updated[index].emoji = try AccountStorage.validEmoji(emoji)
+        try persist(accounts: updated, selected: selected)
+        accounts = updated
+    }
+
+    private static func browserState(_ account: ManagedAccount) -> ManagedAccountState {
+        ManagedAccountState(isConnected: account.browserConfirmedAt != nil,
+                            plan: "Browser profile", message: account.browserConfirmedAt == nil ? "Sign in on the official website, then confirm here." : nil)
+    }
+
+    func confirmBrowserConnection(_ account: ManagedAccount) throws {
+        guard account.provider.isBrowserProfile, browserOpenedIDs.contains(account.id),
+              let index = accounts.firstIndex(where: { $0.id == account.id }) else { throw ManagedAccountError.notConnected }
+        var updated = accounts
+        updated[index].browserConfirmedAt = Date()
+        try persist(accounts: updated, selected: selected)
+        accounts = updated
+        states[account.id] = Self.browserState(updated[index])
+        browserOpenedIDs.remove(account.id)
+        notice = "Browser profile saved. Your sign-in stays in its browser; usage is shown on the website."
+    }
+
+    private func showBrowser(_ account: ManagedAccount) async throws {
+        guard let current = accounts.first(where: { $0.id == account.id && $0.provider == account.provider }),
+              current.provider.isBrowserProfile else { throw ManagedAccountError.unavailable }
+        let profile = try usableStorage().profile(current).appendingPathComponent("browser", isDirectory: true)
+        try AccountStorage.privateDirectory(profile)
+        let identifier = try await openBrowser(profile, current.provider.website, current.browserBundleIdentifier)
+        guard let index = accounts.firstIndex(where: { $0.id == current.id }) else { throw ManagedAccountError.unavailable }
+        var updated = accounts
+        updated[index].browserBundleIdentifier = identifier
+        try persist(accounts: updated, selected: selected)
+        accounts = updated
+        browserOpenedIDs.insert(current.id)
+    }
+
     func select(_ account: ManagedAccount) throws {
         guard accounts.contains(where: { $0.id == account.id && $0.provider == account.provider }) else { throw ManagedAccountError.unavailable }
         var updated = selected; updated[account.provider] = account.id
         try persist(accounts: accounts, selected: updated); selected = updated
-        notice = "\(account.label) is selected for future sessions. Existing sessions keep their account."
+        notice = account.provider.isBrowserProfile ? "\(account.label) is selected. Open it to use its separate browser profile." : "\(account.label) is selected for future sessions. Existing sessions keep their account."
     }
 
     func remove(_ account: ManagedAccount) throws {
@@ -91,6 +137,7 @@ final class AccountManager: ObservableObject {
         if selection[account.provider] == account.id { selection[account.provider] = updated.first { $0.provider == account.provider }?.id }
         try persist(accounts: updated, selected: selection)
         accounts = updated; selected = selection; states.removeValue(forKey: account.id)
+        browserOpenedIDs.remove(account.id)
         notice = "Account removed from the list. Its private profile and official app credentials were retained; existing sessions continue."
     }
 
@@ -105,10 +152,11 @@ final class AccountManager: ObservableObject {
 
     private func prepare(_ account: ManagedAccount) throws -> (URL, URL, [String: String]) {
         guard accounts.contains(where: { $0.id == account.id && $0.provider == account.provider }) else { throw ManagedAccountError.unavailable }
+        guard !account.provider.isBrowserProfile else { throw ManagedAccountError.unavailable }
         guard let executable = resolveExecutable(account.provider) else { throw ManagedAccountError.missingCLI(account.provider) }
         let profile = try usableStorage().profile(account)
         if account.provider == .claude { try ClaudeAccountStatusLine.configure(profile: profile) }
-        else {
+        else if account.provider == .codex {
             let config = profile.appendingPathComponent("config.toml")
             try AccountStorage.rejectSymlink(config)
             if !FileManager.default.fileExists(atPath: config.path) {
@@ -135,6 +183,12 @@ final class AccountManager: ObservableObject {
         states[account.id]?.message = "Complete sign-in in your browser. Only this profile will be connected."
         defer { loginAccountID = nil; finish(account.id) }
         do {
+            if account.provider.isBrowserProfile {
+                try await showBrowser(account)
+                states[account.id]?.message = "Finish signing in on the website, then choose ‘I’ve signed in’ here."
+                notice = "\(account.provider.title) opened in its own browser profile."
+                return
+            }
             let (executable, profile, environment) = try prepare(account)
             var args = account.provider == .claude ? ["auth", "login", "--claudeai"] : ["--config", "cli_auth_credentials_store=\"keyring\"", "login"]
             if account.provider == .claude, let hint = account.emailHint { args += ["--email", hint] }
@@ -158,6 +212,10 @@ final class AccountManager: ObservableObject {
     }
 
     private func read(_ account: ManagedAccount, cancellation: AccountCancellation) async throws -> ManagedAccountState {
+        if account.provider.isBrowserProfile {
+            guard let current = accounts.first(where: { $0.id == account.id }) else { throw ManagedAccountError.unavailable }
+            return Self.browserState(current)
+        }
         let (executable, profile, environment) = try prepare(account)
         let codex = account.provider == .codex
         let arguments = codex ? ["--config", "cli_auth_credentials_store=\"keyring\"", "app-server"] : ["auth", "status", "--json"]
@@ -197,6 +255,12 @@ final class AccountManager: ObservableObject {
 
     func launch(_ account: ManagedAccount, project: URL) async {
         do {
+            if account.provider.isBrowserProfile {
+                try await showBrowser(account)
+                try select(account)
+                notice = "Opened \(account.label). Your other browser accounts stay separate."
+                return
+            }
             var directory: ObjCBool = false
             guard project.isFileURL, FileManager.default.fileExists(atPath: project.path, isDirectory: &directory), directory.boolValue else { throw CocoaError(.fileReadNoSuchFile) }
             var chosen = account
@@ -224,12 +288,13 @@ final class AccountManager: ObservableObject {
             let state = state(for: account)
             let status: ProviderStatus
             if !state.isConnected { status = .needsAuth }
+            else if provider.isBrowserProfile { status = .unsupported("Open \(provider.title) to see usage. Browser sign-in is kept by the website.") }
             else if !state.windows.isEmpty && !state.isFresh() { status = .stale(since: state.refreshedAt ?? .distantPast) }
             else if let message = state.message { status = .unsupported(message) }
             else { status = .ok }
             let exhausted = state.windows.first { ($0.usedFraction ?? 0) >= 1 }
-            return ProviderSnapshot(id: account.id.uuidString, displayName: account.label,
-                                    glyph: provider == .claude ? .claude : .openai, fidelity: .official,
+            return ProviderSnapshot(id: account.id.uuidString, displayName: account.emoji.map { "\($0) \(account.label)" } ?? account.label,
+                                    glyph: provider.glyph, fidelity: provider.isBrowserProfile ? .manual : .official,
                                     status: status, windows: state.windows,
                                     headlineID: provider == .claude ? "five_hour" : "primary",
                                     block: exhausted.map { UsageBlock(reason: "\($0.label) reached", resetsAt: $0.resetsAt) })

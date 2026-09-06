@@ -58,7 +58,7 @@ struct AccountStorage {
             let catalog = try JSONDecoder().decode(AccountCatalog.self, from: data)
             guard catalog.version == 1, Set(catalog.accounts.map(\.id)).count == catalog.accounts.count,
                   catalog.accounts.allSatisfy({ account in
-                      do { _ = try Self.validLabel(account.label); _ = try Self.validEmail(account.emailHint); return true }
+                      do { _ = try Self.validLabel(account.label); _ = try Self.validEmail(account.emailHint); _ = try Self.validEmoji(account.emoji); return true }
                       catch { return false }
                   }),
                   catalog.selected.allSatisfy({ provider, id in catalog.accounts.contains { $0.id == id && $0.provider == provider } }) else {
@@ -86,6 +86,16 @@ struct AccountStorage {
             throw ManagedAccountError.invalidLabel
         }
         return label
+    }
+
+    static func validEmoji(_ value: String?) throws -> String? {
+        guard let emoji = value?.trimmingCharacters(in: .whitespacesAndNewlines), !emoji.isEmpty else { return nil }
+        guard emoji.count == 1, emoji.utf8.count <= 64,
+              emoji.unicodeScalars.contains(where: { $0.properties.isEmojiPresentation || $0.value == 0xFE0F }),
+              !emoji.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw ManagedAccountError.invalidEmoji
+        }
+        return emoji
     }
 
     static func validEmail(_ value: String?) throws -> String? {
