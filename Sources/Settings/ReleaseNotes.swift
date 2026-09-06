@@ -31,6 +31,23 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.3.1",
+            headline: "Your assistants, one place.",
+            changes: [
+                .init(title: "Release history included", detail: "This update includes the in-app notes for the new assistant experience.")
+            ]
+        ),
+        ReleaseNote(
+            version: "0.3.0",
+            headline: "Choose a service. Sign in. Make it yours.",
+            changes: [
+                .init(title: "Add an assistant before naming it", detail: "Choose the service and complete its official sign-in, then add an optional nickname and emoji."),
+                .init(title: "More assistants, separate accounts", detail: "Claude, Codex and Kimi Code use their official tools. Grok, ChatGPT, Gemini, Perplexity, DeepSeek, Mistral and Cursor dashboards open in separate browser profiles."),
+                .init(title: "One visual language", detail: "The manager and appearance settings now match the notch’s black surfaces and green accents."),
+                .init(title: "Invisible until you need it", detail: "Auto-hide reveals the notch when your pointer reaches the selected screen edge and hides it again when you leave.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.2.0",
             headline: "Builder Nutch, for builders running more than one AI account.",
             changes: [
