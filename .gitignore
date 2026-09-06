@@ -7,3 +7,12 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 .swiftpm/
+.tools/
+node_modules/
+.env
+.env.*
+!.env.example
+*.xcresult
+.build/
+website/dist/
+website/.wrangler/
