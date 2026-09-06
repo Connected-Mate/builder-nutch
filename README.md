@@ -4,7 +4,7 @@
 
 Put the AI subscriptions you already pay for to work: more experiments, ambitious R&D and real products. Builder Nutch is a native macOS account manager built directly on [Codenotch by Vinz](https://github.com/vinzdg/codenotch). Keep the screen-edge notch and usage rings; add separate assistant accounts, official browser sign-in, and one-click selection for your next session.
 
-[Website](https://codenotch-accounts.alexandre-cormeraie.chatgpt.site) · [Releases](https://github.com/Connected-Mate/builder-nutch/releases)
+[Website](https://connected-mate.github.io/builder-nutch/) · [Releases](https://github.com/Connected-Mate/builder-nutch/releases)
 
 ## What it does
 
@@ -78,7 +78,7 @@ The test host skips application startup. Account tests use temporary directories
 
 ## Website
 
-The public introduction is at [codenotch-accounts.alexandre-cormeraie.chatgpt.site](https://codenotch-accounts.alexandre-cormeraie.chatgpt.site). Its complete source is in `website/`. Run `npm ci`, `npm run dev`, or `npm run build` from that directory. The interactive account preview uses clearly labeled sample data; it never accesses local accounts.
+The public introduction is hosted on [GitHub Pages](https://connected-mate.github.io/builder-nutch/). Its complete source is in `website/`. From that directory, run `npm ci`, `npm run dev`, `npm run check`, or `npm run build`. The static build uses the `/builder-nutch/` base path and writes to `website/dist`. The website workflow checks pull requests and publishes successful builds from `main` through GitHub Actions. Any sample account preview uses clearly labeled sample data; the website never accesses local accounts.
 
 Maintainers distributing a Developer ID build must run `Scripts/sign-release.sh APP_PATH 'Developer ID Application: …'`, notarize the resulting archive, and staple the accepted ticket before publishing. The signing helper signs each embedded Sparkle executable with a secure timestamp and strips development-only entitlements from the application.
 
