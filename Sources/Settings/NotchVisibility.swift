@@ -2,16 +2,16 @@ import Foundation
 
 /// How much of itself the notch shows when you are not using it.
 ///
-/// Three states rather than the two that get asked for, because the default is
-/// neither: at rest the notch is already a small pill that opens on contact.
-/// Offering only "always" and "hidden" would quietly delete the behaviour the
-/// app was designed around.
+/// The original pill remains distinct from an invisible edge trigger. Stored
+/// raw values stay compatible with earlier versions.
 enum NotchVisibility: String, CaseIterable, Identifiable {
     /// Pinned open. The readings are always on screen.
     case alwaysShow
     /// A pill at the edge that unfolds when the pointer reaches it. The default.
     case onHover
-    /// Nothing on screen at all.
+    /// Invisible at rest; reaching the selected screen edge opens the notch.
+    case autoHide
+    /// Off until the user changes the setting.
     case hidden
 
     var id: String { rawValue }
@@ -20,7 +20,8 @@ enum NotchVisibility: String, CaseIterable, Identifiable {
         switch self {
         case .alwaysShow: return "Always show"
         case .onHover:    return "Show on hover"
-        case .hidden:     return "Hide"
+        case .autoHide:   return "Auto-hide"
+        case .hidden:     return "Off"
         }
     }
 
@@ -30,6 +31,8 @@ enum NotchVisibility: String, CaseIterable, Identifiable {
             return "The notch stays open with every reading visible."
         case .onHover:
             return "A small pill at the screen edge that opens when you reach it."
+        case .autoHide:
+            return "Nothing visible at rest. Move the pointer to the selected screen edge to reveal the notch; move away to hide it again."
         case .hidden:
             // Said here because a hidden notch is also a hidden way back in.
             return "Nothing on screen. Open Builder Nutch again from Applications "

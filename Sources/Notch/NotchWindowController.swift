@@ -14,6 +14,18 @@ final class NotchWindowController {
     /// fade rather than take our word for it.
     var panelFrameForTesting: CGRect? { panel?.frame }
     var panelAlphaForTesting: CGFloat { panel?.alphaValue ?? 0 }
+    var panelVisibleForTesting: Bool { panel?.isVisible ?? false }
+    var panelIgnoresMouseForTesting: Bool { panel?.ignoresMouseEvents ?? true }
+    func pollCursorForTesting() { cursorMoved() }
+
+    private let cursorLocation: () -> CGPoint
+    private var visibility: NotchVisibility = .onHover
+    private var visibilityChange = 0
+    private var lastScreenFrame: CGRect?
+
+    init(cursorLocation: @escaping () -> CGPoint = { NSEvent.mouseLocation }) {
+        self.cursorLocation = cursorLocation
+    }
 
     /// Hooked up by the app delegate; drives the menu's "Refresh now".
     var onRefresh: (() -> Void)?
@@ -102,6 +114,7 @@ final class NotchWindowController {
         let size = model.panelSize(cellCount: cellCount ?? model.snapshots.count)
         let frame = NotchGeometry.panelFrame(for: screen, panelSize: size, edge: model.edge)
         lastVisibleFrame = screen.visibleFrame
+        lastScreenFrame = screen.frame
 
         if let panel {
             panel.setFrame(frame, display: true)
@@ -132,7 +145,9 @@ final class NotchWindowController {
             container.addSubview(hosting)
             panel.contentView = container
             panel.ignoresMouseEvents = true
-            panel.orderFrontRegardless()
+            if visibility != .hidden, visibility != .autoHide || model.isExpanded {
+                panel.orderFrontRegardless()
+            }
             self.panel = panel
             self.hostingView = hosting
         }
@@ -142,6 +157,9 @@ final class NotchWindowController {
             Log.usage.debug("panel \(NSStringFromRect(panel.frame), privacy: .public) on screen \(NSStringFromRect(screen.frame), privacy: .public)")
         }
         updateInteractiveRects()
+        if visibility == .hidden || (visibility == .autoHide && !model.isExpanded) {
+            panel?.orderOut(nil)
+        }
     }
 
     // MARK: - Hit regions
@@ -233,6 +251,11 @@ final class NotchWindowController {
     }
 
     private func updateInteractiveRects() {
+        guard visibility != .hidden, visibility != .autoHide || model.isExpanded else {
+            hostingView?.interactiveRects = []
+            panel?.ignoresMouseEvents = true
+            return
+        }
         var rects = [liveRect]
         if model.isExpanded, let index = model.hoveredIndex, let card = tooltipRect(index: index) {
             rects.append(card)
@@ -281,7 +304,7 @@ final class NotchWindowController {
     }
 
     private func localCursor(in frame: CGRect) -> CGPoint {
-        let mouse = NSEvent.mouseLocation
+        let mouse = cursorLocation()
         return CGPoint(x: mouse.x - frame.minX, y: frame.maxY - mouse.y)
     }
 
@@ -295,11 +318,18 @@ final class NotchWindowController {
 
     private func cursorMoved() {
         guard let panel else { return }
+        guard visibility != .hidden else { return }
         let local = localCursor(in: panel.frame)
         let overTooltip = model.hoveredIndex
             .flatMap(tooltipRect(index:))
             .map { model.isExpanded && $0.contains(local) } ?? false
-        setExpanded(liveRect.contains(local) || overTooltip)
+        let atEdge = visibility == .autoHide && lastScreenFrame.map {
+            NotchGeometry.isAtRevealEdge(cursorLocation(), screenFrame: $0, edge: model.edge)
+        } == true
+        // Invisible mode cannot wake from the old, deliberately generous pill
+        // rectangle. Only touching the physical edge is a reveal gesture.
+        let overNotch = visibility == .autoHide && !model.isExpanded ? false : liveRect.contains(local)
+        setExpanded(atEdge || overNotch || overTooltip)
 
         var target: Int?
         if model.isExpanded, notchRect.contains(local) {
@@ -344,11 +374,16 @@ final class NotchWindowController {
     /// Opens on contact, folds shut after a pause — unless it has been pinned
     /// open, in which case the pointer is not what decides.
     private func setExpanded(_ wanted: Bool) {
+        guard visibility != .hidden else { return }
         if wanted {
             foldWork?.cancel()
             foldWork = nil
             guard !model.isExpanded else { return }
             withAnimation(NotchMotion.unfold) { model.isExpanded = true }
+            if visibility == .autoHide {
+                panel?.alphaValue = 1
+                panel?.orderFrontRegardless()
+            }
             return
         }
 
@@ -364,6 +399,7 @@ final class NotchWindowController {
                 }
                 self.setPointing(false)
                 self.updateInteractiveRects()
+                if self.visibility == .autoHide { self.panel?.orderOut(nil) }
             }
         }
         foldWork = work
@@ -391,6 +427,7 @@ final class NotchWindowController {
     /// A click on a ring refetches that provider; a click anywhere else on the
     /// open notch pins it. The ring is the more specific target, so it wins.
     func handleClick() {
+        guard visibility != .hidden, visibility != .autoHide || model.isExpanded else { return }
         guard let panel, model.isExpanded else {
             // Opens it, the same as the pointer arriving would — it must not
             // also pin it. The pill's hot zone is deliberately generous, since
@@ -435,6 +472,19 @@ final class NotchWindowController {
     /// slide.
     func apply(edge: NotchEdge) {
         guard model.edge != edge else { return }
+        cancelPendingHover()
+        // Invisible/off modes relocate without a flash or a stale arrival
+        // callback reopening a notch the user explicitly put away.
+        if visibility == .autoHide || visibility == .hidden {
+            edgeChange += 1
+            model.isExpanded = false
+            model.isPinned = false
+            model.edge = edge
+            relocate()
+            panel?.alphaValue = 1
+            panel?.orderOut(nil)
+            return
+        }
         guard let panel else {   // before there is anything on screen to fade
             model.edge = edge
             relocate()
@@ -442,6 +492,7 @@ final class NotchWindowController {
         }
 
         let wasOpen = model.isExpanded
+        let modeChange = visibilityChange
         model.hoveredIndex = nil
         setPointing(false)
 
@@ -465,14 +516,19 @@ final class NotchWindowController {
                 self.relocate()
                 self.updateInteractiveRects()
                 panel.alphaValue = 1
+                guard self.visibility != .hidden,
+                      self.visibility != .autoHide else {
+                    panel.orderOut(nil)
+                    return
+                }
 
-                guard wasOpen else { return }
+                guard wasOpen, modeChange == self.visibilityChange else { return }
                 // A beat, then open. Not decoration: setting it shut and open
                 // again inside one turn lets SwiftUI coalesce the pair, and the
                 // notch arrives at full size having animated nothing.
                 DispatchQueue.main.asyncAfter(deadline: .now() + Self.arrivalBeat) {
                     MainActor.assumeIsolated {
-                        guard change == self.edgeChange else { return }
+                        guard change == self.edgeChange, modeChange == self.visibilityChange else { return }
                         withAnimation(NotchMotion.unfold) { self.model.isExpanded = true }
                         self.updateInteractiveRects()
                     }
@@ -489,6 +545,10 @@ final class NotchWindowController {
     private var edgeChange = 0
 
     func apply(_ visibility: NotchVisibility) {
+        self.visibility = visibility
+        visibilityChange += 1
+        cancelPendingHover()
+        panel?.alphaValue = 1
         switch visibility {
         case .alwaysShow:
             panel?.orderFrontRegardless()
@@ -510,7 +570,7 @@ final class NotchWindowController {
                 model.isExpanded = false
                 model.hoveredIndex = nil
             }
-        case .hidden:
+        case .autoHide, .hidden:
             model.isAlwaysOn = false
             model.isPinned = false
             model.isExpanded = false
@@ -523,13 +583,22 @@ final class NotchWindowController {
         updateInteractiveRects()
     }
 
+    private func cancelPendingHover() {
+        foldWork?.cancel(); foldWork = nil
+        clearHoverWork?.cancel(); clearHoverWork = nil
+        model.hoveredIndex = nil
+        model.isHoveringSettings = false
+        setPointing(false)
+    }
+
     /// Clicking the open notch pins it, so it stays put while you read it.
     ///
     /// A no-op while Settings says Always show: there the notch is already
     /// held open by a standing choice, and letting a click release it meant
     /// the setting said one thing and the notch did another.
     func togglePinned() {
-        guard !model.isAlwaysOn else { return }
+        guard !model.isAlwaysOn, visibility != .hidden,
+              visibility != .autoHide || model.isExpanded else { return }
         model.isPinned.toggle()
         if model.isPinned {
             foldWork?.cancel()

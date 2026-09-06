@@ -40,6 +40,22 @@ extension NSScreen: ScreenDescribing {
 }
 
 enum NotchGeometry {
+    /// A narrow physical-edge trigger, independent of the menu bar or Dock.
+    /// Tracking this region never requires a window there or takes its clicks.
+    /// Global AppKit coordinates can be negative on secondary displays.
+    static func isAtRevealEdge(_ point: CGPoint, screenFrame: CGRect, edge: NotchEdge) -> Bool {
+        guard screenFrame.width > 0, screenFrame.height > 0,
+              point.x >= screenFrame.minX, point.x <= screenFrame.maxX,
+              point.y >= screenFrame.minY, point.y <= screenFrame.maxY else { return false }
+        let reach: CGFloat = 2
+        switch edge {
+        case .left: return point.x <= screenFrame.minX + reach
+        case .right: return point.x >= screenFrame.maxX - reach
+        case .top: return point.y >= screenFrame.maxY - reach
+        case .bottom: return point.y <= screenFrame.minY + reach
+        }
+    }
+
     /// The panel hugs the chosen edge and is centred along it.
     ///
     /// **Which edge it hugs is `visibleFrame`'s, not `frame`'s.** That is what
