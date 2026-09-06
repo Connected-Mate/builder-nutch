@@ -2,28 +2,34 @@
 
 **Big ideas. Lean R&D. Keep building.**
 
-Put the AI subscriptions you already pay for to work: more experiments, ambitious R&D and real products. Builder Nutch is a native macOS account manager built directly on [Codenotch by Vinz](https://github.com/vinzdg/codenotch). Keep the screen-edge notch and usage rings; add separate Claude Code and Codex accounts, official browser sign-in, and one-click selection for your next session.
+Put the AI subscriptions you already pay for to work: more experiments, ambitious R&D and real products. Builder Nutch is a native macOS account manager built directly on [Codenotch by Vinz](https://github.com/vinzdg/codenotch). Keep the screen-edge notch and usage rings; add separate assistant accounts, official browser sign-in, and one-click selection for your next session.
 
 [Website](https://codenotch-accounts.alexandre-cormeraie.chatgpt.site) · [Releases](https://github.com/Connected-Mate/builder-nutch/releases)
 
 ## What it does
 
 - Manage six or more accounts per provider. There is no six-account cap.
-- Connect each account using the **unmodified official CLI's browser login**. No passwords, tokens or browser cookies are collected by this app.
-- Name accounts, see connection state, usage windows and reset times, and choose a project folder.
-- Select an account in one click and launch a new Claude Code or Codex terminal session with it.
+- Choose a service with **Add assistant**, then sign in on its official page. No name or email field blocks sign-in.
+- Connect Claude Code, Codex and Kimi Code subscriptions with their official tools.
+- Open separate browser accounts for Grok, ChatGPT, Gemini, Perplexity, DeepSeek, Mistral and the Cursor dashboard. Web profiles use Google Chrome, Brave or Microsoft Edge; the Cursor editor keeps its own login.
+- Add an optional nickname and emoji after sign-in; edit them whenever you like.
+- See connection state, available usage windows and reset times, and choose a project folder.
+- Select an account in one click and launch a new Claude Code, Codex or Kimi Code terminal session with it.
 - Enable automatic selection to choose an available account from fresh readings before a new launch.
-- Keep the selected accounts in Codenotch's familiar notch, with the full list in a resizable native window.
+- Keep selected assistants in Codenotch's familiar notch, with the full list in a matching black-and-green window.
+- Choose **Auto-hide** for an invisible notch that appears when the pointer reaches the selected screen edge. **Show on hover** keeps a small pill; **Off** disables the notch.
 
 **A selection applies to new sessions launched from this manager. It does not change an already-running process, switch Claude.ai/ChatGPT browser sessions, or sign the separate desktop apps into another account. Running work is never killed to switch an account.** Each subscription keeps its own limits and terms; this app does not create unlimited usage.
 
 ## Connect your first account
 
-1. Install the official [Claude Code](https://code.claude.com/docs/en/quickstart) and/or [Codex CLI](https://developers.openai.com/codex/cli/).
-2. Open Builder Nutch and choose a provider.
-3. Add an account with a label and optional email hint, then select **Connect**.
-4. Complete the provider's browser login. Repeat for your other accounts.
-5. Select an account and a project folder, then launch a session.
+1. Open Builder Nutch and click **Add assistant** (or press ⌘N).
+2. Choose the service you want: Claude, Codex, Kimi, Grok, Cursor or another listed assistant.
+3. Complete the official sign-in in the browser. For web profiles, return and choose **I've finished signing in**.
+4. Optionally choose a nickname and emoji, then **Finish**. Repeat for your other accounts.
+5. Use **Launch** for a coding assistant or **Open** for a browser account.
+
+Coding assistants require their official [Claude Code](https://code.claude.com/docs/en/quickstart), [Codex CLI](https://developers.openai.com/codex/cli/) or [Kimi Code](https://www.kimi.com/code/docs/en/kimi-code-cli/) tool. Web assistants require [Google Chrome](https://www.google.com/chrome/), Brave or Microsoft Edge; they never reuse your default browser's shared account.
 
 The account manager never reads or replaces your existing default Claude Code or Codex login. New managed profiles start disconnected. Browser login is performed by you, and each provider remains responsible for its credentials and token refresh.
 
@@ -33,14 +39,18 @@ Builder Nutch is the new name for this fork. Install **Builder Nutch.app** and k
 
 ## How account isolation works
 
-Each profile has a stable UUID directory under `~/Library/Application Support/Codenotch Accounts/profiles/`. Claude Code runs with that profile's `CLAUDE_CONFIG_DIR`; Codex runs with its `CODEX_HOME` and its official `keyring` credential storage. Credential/provider environment overrides are excluded from launched processes so another account or API key cannot silently take precedence.
+Each profile has a stable UUID directory under `~/Library/Application Support/Codenotch Accounts/profiles/`. Claude Code runs with that profile's `CLAUDE_CONFIG_DIR`; Codex runs with its `CODEX_HOME` and its official `keyring` credential storage; Kimi Code runs with its `KIMI_CODE_HOME`. Credential/provider environment overrides are excluded from launched processes so another account or API key cannot silently take precedence.
 
-The app stores account labels, identifiers and selection locally. Profile folders have owner-only permissions. The official tools may also keep their configuration and conversation history there. Do not sync, publish or share these folders. Removing a profile from the list leaves the vendor's local profile intact, as the confirmation explains.
+Browser accounts each get a private `browser/` directory, and the browser chosen on first launch stays pinned to that profile. Browser authentication is confirmed by you, not inferred from cookies. A fixed managed `UserDataDir` policy blocks browser launch rather than sharing a company profile.
+
+The app stores nicknames, emoji, identifiers, browser confirmation dates and selection locally. Profile folders have owner-only permissions. The official tools may also keep their configuration and conversation history there. Do not sync, publish or share these folders. Removing a profile from the list leaves the vendor's local profile intact, as the confirmation explains.
 
 ### Usage accuracy
 
 - **Codex:** read from the official app-server `account/read` and `account/rateLimits/read` methods.
 - **Claude Code:** a per-profile status-line helper captures only the documented `rate_limits` fields. Readings appear after you use a managed Claude Code session. No undocumented subscription API is queried by the managed-account runtime.
+- **Kimi Code:** subscription status and usage are read from an authenticated, temporary loopback instance of the official local web server. Its credentials remain vendor-owned.
+- **Web profiles:** usage is available on each service’s website. Builder Nutch does not claim to verify browser sign-in or use these profiles for automatic quota selection.
 - Unknown or old readings remain unknown or stale. They are excluded from automatic selection; a weekly or session limit at 100% also makes an account unavailable.
 
 The upstream provider adapters remain in the source history for attribution and reference. This fork's composition root does not start those token-reading adapters.

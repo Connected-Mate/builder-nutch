@@ -252,13 +252,18 @@ private struct AssistantRow: View {
         }.frame(width: 48, height: 48).accessibilityHidden(true)
     }
 
+    private var awaitingClaudeUsage: Bool {
+        account.provider == .claude && state.needsFirstUsage
+            && state.message == "Usage appears after the first Claude Code session launched here."
+    }
+
     @ViewBuilder private var statusLine: some View {
         if isLoginPending { Label("Sign-in in progress", systemImage: "clock").foregroundStyle(Palette.watch) }
         else if state.isBusy { Label("Checking…", systemImage: "arrow.triangle.2.circlepath").foregroundStyle(Palette.textSecondary) }
         else if !state.isConnected {
             Label(state.message ?? "Not connected", systemImage: "circle")
                 .foregroundStyle(state.message == nil ? Palette.textSecondary : Palette.watch).lineLimit(2)
-        } else if !account.provider.isBrowserProfile, state.needsFirstUsage {
+        } else if awaitingClaudeUsage {
             Label("Usage appears after your first session", systemImage: "info.circle")
                 .foregroundStyle(Palette.textSecondary)
         } else if let message = state.message {
@@ -277,12 +282,12 @@ private struct AssistantRow: View {
                 Text(account.provider.connectionDetail).font(.callout).foregroundStyle(Palette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        } else if state.needsFirstUsage {
+        } else if awaitingClaudeUsage {
             Color.clear.frame(height: 1).accessibilityHidden(true)
         } else if state.windows.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Usage unavailable").font(.callout.weight(.semibold))
-                Text(state.isConnected ? "Start a session, then refresh to read official limits." : "Connect to read official limits.")
+                Text(state.isConnected ? "Refresh to check the service’s available limits." : "Connect to read official limits.")
                     .font(.callout).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
             }
         } else {
