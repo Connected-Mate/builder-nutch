@@ -169,6 +169,10 @@ final class NotchClickDetailsTests: XCTestCase {
         }
         window.sendEvent(try event(.leftMouseDown, dragStart, 3))
         window.sendEvent(try event(.leftMouseDragged, dragEnd, 4))
+        XCTAssertEqual(controller.model.accountPicker?.accounts.map(\.id), [current, later, next],
+                       "The dragged ring and its neighbours should reorder before mouse-up")
+        XCTAssertEqual(controller.model.accountPicker?.accounts.map(\.isNext), [false, true, false],
+                       "NEXT should travel with the live queue position")
         window.sendEvent(try event(.leftMouseUp, dragEnd, 5))
         XCTAssertEqual(moved?.0, later)
         XCTAssertEqual(moved?.1, next)

@@ -113,10 +113,6 @@ struct NotchRootView: View {
                     snapshot: snapshot,
                     edge: model.edge,
                     displayMode: model.usageDisplayMode,
-                    onMove: {
-                        model.onMoveAccount?($0, $1)
-                        model.onDismissAccountPicker?()
-                    },
                     onChooseNext: {
                         model.onChooseNextAccount?($0)
                         model.onDismissAccountPicker?()

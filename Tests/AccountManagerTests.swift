@@ -144,6 +144,12 @@ final class AccountManagerTests: XCTestCase {
         XCTAssertEqual(manager.rotationAccounts(for: .claude).map(\.id), [third.id, first.id, second.id])
         XCTAssertEqual(AccountManager(rootURL: root).rotationAccounts(for: .claude).map(\.id),
                        [third.id, first.id, second.id])
+
+        try manager.moveInRotation(accountID: third.id, to: second.id)
+        XCTAssertEqual(manager.rotationAccounts(for: .claude).map(\.id), [first.id, second.id, third.id],
+                       "Dropping downward should occupy the target's visible position")
+        XCTAssertEqual(AccountManager(rootURL: root).rotationAccounts(for: .claude).map(\.id),
+                       [first.id, second.id, third.id])
     }
 
     @MainActor

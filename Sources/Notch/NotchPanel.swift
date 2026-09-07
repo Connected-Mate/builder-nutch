@@ -13,6 +13,7 @@ final class NotchPanel: NSPanel {
     /// menu is: the hit test lands on a SwiftUI subview that may consume it.
     var onClick: (() -> Void)?
     var onLongPress: (() -> Void)?
+    var onDragChanged: ((NSPoint, NSPoint) -> Void)?
     var onDragEnded: ((NSPoint, NSPoint) -> Void)?
     var isLeftButtonPressed: () -> Bool = {
         CGEventSource.buttonState(.combinedSessionState, button: .left)
@@ -50,6 +51,7 @@ final class NotchPanel: NSPanel {
                hypot(event.locationInWindow.x - origin.x, event.locationInWindow.y - origin.y) > 7 {
                 didDrag = true
                 cancelLongPress(resetGesture: false)
+                onDragChanged?(origin, event.locationInWindow)
             }
         case .leftMouseUp:
             let origin = mouseDownLocation

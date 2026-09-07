@@ -184,9 +184,9 @@ final class AccountManager: ObservableObject {
               accountID != targetID,
               ids.contains(accountID), ids.contains(targetID)
         else { return }
-        ids.removeAll { $0 == accountID }
         guard let destination = ids.firstIndex(of: targetID) else { return }
-        ids.insert(accountID, at: destination)
+        ids.removeAll { $0 == accountID }
+        ids.insert(accountID, at: min(destination, ids.count))
         rotationOrder[account.provider] = ids
         try persist(accounts: accounts, selected: selected)
     }

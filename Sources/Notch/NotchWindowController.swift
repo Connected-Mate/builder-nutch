@@ -50,6 +50,7 @@ final class NotchWindowController {
     private let foldGrace: TimeInterval = 0.45
     private var foldWork: DispatchWorkItem?
     private var automaticSwitchWork: DispatchWorkItem?
+    private var accountDrag: (source: UUID, target: UUID)?
     /// Whether we have pushed the pointing hand onto the cursor stack.
     private var isPointing = false
     /// The usable area the panel was last placed against.
@@ -151,7 +152,10 @@ final class NotchWindowController {
             panel.contextMenuProvider = { [weak self] in self?.contextMenu() }
             panel.onClick = { [weak self] in self?.handleClick() }
             panel.onLongPress = { [weak self] in self?.presentAccountPickerAtCursor() }
-            panel.onDragEnded = { [weak self] start, end in self?.moveAccount(from: start, to: end) }
+            panel.onDragChanged = { [weak self] start, current in
+                self?.previewAccountMove(from: start, to: current)
+            }
+            panel.onDragEnded = { [weak self] _, _ in self?.finishAccountMove() }
 
             // The hosting view goes *inside* a plain container rather than
             // being the content view itself.
@@ -354,6 +358,7 @@ final class NotchWindowController {
         else { return }
         let snapshotID = model.snapshots[index].id
         guard let picker = onAccountPicker?(snapshotID), picker.accounts.count > 1 else { return }
+        accountDrag = nil
         withAnimation(NotchMotion.unfold) {
             model.accountPicker = picker
             model.selectedIndex = nil
@@ -362,19 +367,60 @@ final class NotchWindowController {
         updateInteractiveRects()
     }
 
-    private func moveAccount(from start: NSPoint, to end: NSPoint) {
+    private func accountIndex(at point: NSPoint, in panel: NotchPanel) -> Int? {
+        let topLeft = CGPoint(x: point.x, y: panel.frame.height - point.y)
+        guard notchRect.contains(topLeft) else { return nil }
+        return visualCellIndex(along: placement.along(of: topLeft))
+    }
+
+    /// Reorders the visible queue while the pointer moves so neighbouring
+    /// rings visibly make room instead of waiting for mouse-up to jump.
+    private func previewAccountMove(from start: NSPoint, to current: NSPoint) {
         guard let panel, let picker = model.accountPicker else { return }
-        func visualIndex(_ point: NSPoint) -> Int? {
-            let topLeft = CGPoint(x: point.x, y: panel.frame.height - point.y)
-            guard notchRect.contains(topLeft) else { return nil }
-            return visualCellIndex(along: placement.along(of: topLeft))
+        let sourceID: UUID
+        if let existing = accountDrag?.source {
+            sourceID = existing
+        } else {
+            guard let sourceIndex = accountIndex(at: start, in: panel),
+                  picker.accounts.indices.contains(sourceIndex) else { return }
+            sourceID = picker.accounts[sourceIndex].id
         }
-        guard let sourceIndex = visualIndex(start), let targetIndex = visualIndex(end),
-              picker.accounts.indices.contains(sourceIndex),
+        guard let sourceIndex = picker.accounts.firstIndex(where: { $0.id == sourceID }),
+              !picker.accounts[sourceIndex].isCurrent,
+              let targetIndex = accountIndex(at: current, in: panel),
               picker.accounts.indices.contains(targetIndex),
               sourceIndex != targetIndex else { return }
-        model.onMoveAccount?(picker.accounts[sourceIndex].id,
-                             picker.accounts[targetIndex].id)
+
+        let targetID = picker.accounts[targetIndex].id
+        var accounts = picker.accounts
+        let moving = accounts.remove(at: sourceIndex)
+        accounts.insert(moving, at: min(targetIndex, accounts.count))
+        accounts = accounts.enumerated().map { index, account in
+            NotchAccountItem(
+                id: account.id,
+                name: account.name,
+                subtitle: account.subtitle,
+                usage: account.usage,
+                usedFraction: account.usedFraction,
+                isCurrent: index == 0,
+                isNext: index == 1
+            )
+        }
+        accountDrag = (sourceID, targetID)
+        withAnimation(NotchMotion.glide) {
+            model.accountPicker = NotchAccountPicker(
+                provider: picker.provider,
+                snapshotID: picker.snapshotID,
+                title: picker.title,
+                accounts: accounts
+            )
+        }
+    }
+
+    private func finishAccountMove() {
+        guard let drag = accountDrag else { return }
+        model.onMoveAccount?(drag.source, drag.target)
+        accountDrag = nil
         dismissAccountPicker()
     }
 
@@ -588,6 +634,7 @@ final class NotchWindowController {
 
     private func dismissAccountPicker(fold: Bool = false) {
         guard model.accountPicker != nil else { return }
+        accountDrag = nil
         withAnimation(NotchMotion.crossfade) { model.accountPicker = nil }
         model.isPinned = false
         updateInteractiveRects()

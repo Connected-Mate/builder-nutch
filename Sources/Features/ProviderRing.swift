@@ -206,41 +206,47 @@ struct InlineAccountRotation: View {
     let snapshot: ProviderSnapshot
     let edge: NotchEdge
     let displayMode: UsageDisplayMode
-    let onMove: (UUID, UUID) -> Void
     let onChooseNext: (UUID) -> Void
 
     var body: some View {
-        Group {
+        ZStack(alignment: .topLeading) {
+            if picker.accounts.count > 1 {
+                currentToNextConnector
+            }
             if edge.isVertical {
                 VStack(spacing: NotchLayout.cellSpacing) { accountCells }
             } else {
                 HStack(spacing: NotchLayout.cellSpacing) { accountCells }
             }
         }
-        .padding(edge.isVertical ? .horizontal : .vertical, Design.px(12))
-        .background(
-            Palette.ringTrack.opacity(0.72),
-            in: RoundedRectangle(cornerRadius: Design.px(24), style: .continuous)
-        )
+        .animation(NotchMotion.glide, value: picker.accounts.map(\.id))
         .transition(.opacity.combined(with: .scale(scale: 0.96)))
+    }
+
+    /// A single quiet rail explains the handoff from NOW to NEXT. Accounts
+    /// later in the queue stay on the notch's black surface.
+    private var currentToNextConnector: some View {
+        let pitch = NotchLayout.cellPitch(for: edge)
+        return Capsule()
+            .fill(Palette.ringTrack.opacity(0.72))
+            .frame(
+                width: edge.isVertical ? NotchLayout.trackStroke : pitch,
+                height: edge.isVertical ? pitch : NotchLayout.trackStroke
+            )
+            .offset(
+                x: edge.isVertical
+                    ? (NotchLayout.ringDiameter - NotchLayout.trackStroke) / 2
+                    : NotchLayout.ringDiameter / 2,
+                y: edge.isVertical
+                    ? NotchLayout.ringDiameter / 2
+                    : (NotchLayout.ringDiameter - NotchLayout.trackStroke) / 2
+            )
     }
 
     private var accountCells: some View {
         ForEach(picker.accounts) { account in
             accountCell(account)
                 .frame(width: edge.isVertical ? nil : NotchLayout.cellAlong(for: edge))
-                .draggable(account.id.uuidString) {
-                    ProviderGlyphView(glyph: picker.provider.glyph, size: NotchLayout.glyphSize)
-                        .foregroundStyle(Palette.textPrimary)
-                        .padding(Design.px(12))
-                        .background(Palette.ringTrack, in: Circle())
-                }
-                .dropDestination(for: String.self) { values, _ in
-                    guard let raw = values.first,
-                          let source = UUID(uuidString: raw), source != account.id else { return false }
-                    onMove(source, account.id)
-                    return true
-                }
         }
     }
 

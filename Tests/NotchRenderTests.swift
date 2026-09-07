@@ -83,6 +83,42 @@ final class NotchRenderTests: XCTestCase {
             )
         }
     }
+
+    func testAccountQueueOnlyLinksCurrentToNext() throws {
+        let ids = [UUID(), UUID(), UUID()]
+        let snapshot = ProviderSnapshot(
+            id: "claude", displayName: "Claude", glyph: .claude,
+            fidelity: .official, status: .ok, windows: []
+        )
+        let picker = NotchAccountPicker(
+            provider: .claude, snapshotID: snapshot.id, title: "Claude accounts",
+            accounts: ids.enumerated().map { index, id in
+                NotchAccountItem(
+                    id: id, name: "Account \(index)", subtitle: nil,
+                    usage: "100% left", usedFraction: 0,
+                    isCurrent: index == 0, isNext: index == 1
+                )
+            }
+        )
+        let height = 3 * NotchLayout.cellExtent + 2 * NotchLayout.cellSpacing
+        let renderer = ImageRenderer(content: InlineAccountRotation(
+            picker: picker, snapshot: snapshot, edge: .right,
+            displayMode: .remaining, onChooseNext: { _ in }
+        ).frame(width: NotchLayout.ringDiameter, height: height, alignment: .top))
+        renderer.scale = 1
+        let image = try XCTUnwrap(renderer.cgImage)
+        let rep = NSBitmapImageRep(cgImage: image)
+        let x = rep.pixelsWide / 2
+        func alpha(atTopY y: CGFloat) -> CGFloat {
+            rep.colorAt(x: x, y: Int(y))?.alphaComponent ?? 0
+        }
+        let firstGap = NotchLayout.ringDiameter / 2 + NotchLayout.cellPitch(for: .right) / 2
+        let secondGap = firstGap + NotchLayout.cellPitch(for: .right)
+        XCTAssertGreaterThan(alpha(atTopY: firstGap), 0.5,
+                             "NOW and NEXT should have a visible grey connector")
+        XCTAssertLessThan(alpha(atTopY: secondGap), 0.1,
+                          "later accounts should not inherit a grey background")
+    }
 }
 
 /// The panel's size is worked out by `NotchGeometry` and by nobody else.
