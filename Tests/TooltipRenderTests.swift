@@ -18,7 +18,7 @@ final class TooltipRenderTests: XCTestCase {
 
     func testTheCardLaysOutEverySessionState() throws {
         let snapshot = ProviderSnapshot(
-            id: "claude", displayName: "Claude", glyph: .claude,
+            id: "claude", displayName: "Claude Work", accountEmail: "builder@example.test", glyph: .claude,
             fidelity: .official, status: .ok,
             windows: [LimitWindow(id: "session", label: "Session", usedFraction: 0.47)]
         )
@@ -43,6 +43,34 @@ final class TooltipRenderTests: XCTestCase {
         XCTAssertGreaterThan(image.size.width, NotchLayout.cardWidth)
 
         if let path = ProcessInfo.processInfo.environment["TOOLTIP_RENDER_PATH"] {
+            let tiff = try XCTUnwrap(image.tiffRepresentation)
+            let png = try XCTUnwrap(NSBitmapImageRep(data: tiff)?
+                .representation(using: .png, properties: [:]))
+            try png.write(to: URL(fileURLWithPath: path))
+        }
+    }
+
+    func testAutomaticAccountSwitchReceiptRenders() throws {
+        let oldID = UUID(), newID = UUID()
+        let snapshot = ProviderSnapshot(
+            id: newID.uuidString, displayName: "Claude Production",
+            accountEmail: "production@example.test", glyph: .claude,
+            fidelity: .official, status: .ok, windows: []
+        )
+        let event = AutomaticAccountSwitch(provider: .claude, fromID: oldID,
+                                           fromName: "Claude Research", toID: newID,
+                                           toName: "Claude Production")
+        let view = TooltipCard(snapshot: snapshot, automaticSwitch: event, now: Date())
+            .padding(20)
+            .background(Color.gray)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 3
+        let image = try XCTUnwrap(renderer.nsImage)
+        XCTAssertGreaterThan(image.size.width, NotchLayout.cardWidth)
+        XCTAssertGreaterThan(image.size.height,
+                             NotchLayout.automaticSwitchCardHeight(identitySubtitle: true))
+
+        if let path = ProcessInfo.processInfo.environment["AUTOMATIC_SWITCH_RENDER_PATH"] {
             let tiff = try XCTUnwrap(image.tiffRepresentation)
             let png = try XCTUnwrap(NSBitmapImageRep(data: tiff)?
                 .representation(using: .png, properties: [:]))

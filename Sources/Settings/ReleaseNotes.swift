@@ -31,6 +31,14 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.7.0",
+            headline: "See every automatic account handoff.",
+            changes: [
+                .init(title: "Automatic switches made visible", detail: "When Builder Nutch advances to another subscription, the notch opens briefly and shows the account change before returning to its normal mode."),
+                .init(title: "The right account at a glance", detail: "Click a provider to see the account name with its email directly underneath. Hidden personal details remain hidden.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.6.2",
             headline: "Every OpenAI allowance, clearly separated.",
             changes: [

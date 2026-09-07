@@ -13,6 +13,9 @@ final class NotchViewModel: ObservableObject {
     /// Details are selected explicitly by a click or an accessibility action.
     @Published var selectedIndex: Int?
     var onToggleDetails: ((Int) -> Void)?
+    /// A short, self-dismissing account-rotation receipt. While present it
+    /// holds the notch open even when the pointer is elsewhere.
+    @Published var automaticSwitch: AutomaticAccountSwitch?
     /// Ticked on refresh so the "Resets in N min" copy stays honest.
     @Published var now: Date = Date()
 
@@ -30,7 +33,7 @@ final class NotchViewModel: ObservableObject {
     @Published var isAlwaysOn = false
 
     /// Held open, by either route. What the folding logic actually asks.
-    var staysOpen: Bool { isPinned || isAlwaysOn }
+    var staysOpen: Bool { isPinned || isAlwaysOn || automaticSwitch != nil }
     /// Providers with a fetch in flight, driven by the store.
     @Published var refreshing: Set<String> = []
     /// The settings handle is under the cursor.

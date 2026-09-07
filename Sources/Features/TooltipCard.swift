@@ -108,6 +108,7 @@ private struct TooltipShell<Content: View>: View {
 
 private struct TooltipHeader<Mark: View>: View {
     let title: String
+    var subtitle: String?
     /// Sits on the header's own line, so saying when a reading was taken costs
     /// the card no extra height.
     var note: String?
@@ -116,9 +117,18 @@ private struct TooltipHeader<Mark: View>: View {
     var body: some View {
         HStack(spacing: NotchLayout.headerGap) {
             mark
-            Text(title)
-                .font(Typography.cardTitle)
-                .foregroundStyle(Palette.textPrimary)
+            VStack(alignment: .leading, spacing: NotchLayout.sessionRowGap) {
+                Text(title)
+                    .font(Typography.cardTitle)
+                    .foregroundStyle(Palette.textPrimary)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(Typography.cardBody)
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
             if let note {
                 Spacer(minLength: Design.px(20))
                 Text(note)
@@ -283,7 +293,8 @@ private struct ProviderTooltip: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            TooltipHeader(title: "\(snapshot.displayName) Usage", note: readingAge) {
+            TooltipHeader(title: snapshot.displayName, subtitle: snapshot.accountEmail,
+                          note: readingAge) {
                 ProviderGlyphView(glyph: snapshot.glyph)
                     .foregroundStyle(Palette.textPrimary)
             }
@@ -305,6 +316,31 @@ private struct ProviderTooltip: View {
                         .padding(.top, index == 0 ? NotchLayout.headerToBlock : NotchLayout.blockSpacing)
                 }
             }
+        }
+    }
+}
+
+private struct AutomaticSwitchTooltip: View {
+    let snapshot: ProviderSnapshot
+    let event: AutomaticAccountSwitch
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            TooltipHeader(title: snapshot.displayName, subtitle: snapshot.accountEmail) {
+                ProviderGlyphView(glyph: snapshot.glyph)
+                    .foregroundStyle(Palette.textPrimary)
+            }
+            VStack(alignment: .leading, spacing: NotchLayout.sessionRowGap) {
+                Text("Switched automatically")
+                HStack(spacing: NotchLayout.sessionRowGap) {
+                    Text(event.fromName).lineLimit(1)
+                    Image(systemName: "arrow.right")
+                    Text(event.toName).lineLimit(1)
+                }
+            }
+                .font(Typography.cardBody)
+                .foregroundStyle(Palette.textPrimary)
+                .padding(.top, NotchLayout.headerToBlock)
         }
     }
 }
@@ -427,6 +463,7 @@ private struct SessionList: View {
 struct TooltipCard: View {
     let snapshot: ProviderSnapshot
     var activity: ActivitySummary?
+    var automaticSwitch: AutomaticAccountSwitch?
     let now: Date
     /// Which way the card sits from the notch, which follows from the edge.
     var direction: NotchEdge.TooltipDirection = .leading
@@ -437,12 +474,17 @@ struct TooltipCard: View {
     /// The same figure the hover region uses, so what is drawn and what is
     /// reachable can never drift apart.
     private var height: CGFloat {
-        NotchLayout.cardHeight(
+        if automaticSwitch != nil {
+            return NotchLayout.automaticSwitchCardHeight(
+                identitySubtitle: snapshot.accountEmail?.isEmpty == false)
+        }
+        return NotchLayout.cardHeight(
             windowCount: snapshot.windows.count,
             sessionCount: activity?.sessions.count ?? 0,
             sessionCap: sessionCap,
             statusMessage: snapshot.statusMessage,
-            blockMessage: snapshot.block?.summary(now: now)
+            blockMessage: snapshot.block?.summary(now: now),
+            identitySubtitle: snapshot.accountEmail?.isEmpty == false
         )
     }
 
@@ -453,19 +495,20 @@ struct TooltipCard: View {
             // instead of shoving each other around. Top-aligned so neither
             // drifts while the card resizes around them.
             ZStack(alignment: .topLeading) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ProviderTooltip(snapshot: snapshot, now: now)
-                    if let activity {
-                        SessionList(summary: activity, now: now, cap: sessionCap)
+                if let automaticSwitch {
+                    AutomaticSwitchTooltip(snapshot: snapshot, event: automaticSwitch)
+                        .id(automaticSwitch.id)
+                        .transition(.opacity.animation(NotchMotion.crossfade))
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ProviderTooltip(snapshot: snapshot, now: now)
+                        if let activity {
+                            SessionList(summary: activity, now: now, cap: sessionCap)
+                        }
                     }
+                    .id(snapshot.id)
+                    .transition(.opacity.animation(NotchMotion.crossfade))
                 }
-                // An identity, so one provider's rows are never interpolated
-                // into another's — that is what slid text through positions
-                // belonging to neither layout. A crossfade rather than an
-                // instant swap, so the change is part of the movement instead
-                // of a cut in the middle of it.
-                .id(snapshot.id)
-                .transition(.opacity.animation(NotchMotion.crossfade))
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }

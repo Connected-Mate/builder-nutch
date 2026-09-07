@@ -272,9 +272,13 @@ enum NotchLayout {
     static func cardHeight(windowCount: Int, sessionCount: Int = 0,
                            sessionCap: Int = defaultSessionCap,
                            statusMessage: String? = nil,
-                           blockMessage: String? = nil) -> CGFloat {
+                           blockMessage: String? = nil,
+                           identitySubtitle: Bool = false) -> CGFloat {
         let header = max(glyphSize, cardTitleLineHeight)
         var height = 2 * cardPadding + header
+        if identitySubtitle {
+            height += sessionRowGap + cardBodyLineHeight
+        }
 
         // The blocked line sits under the header, above everything else — it
         // is the reading that stops you working, so it leads.
@@ -304,6 +308,17 @@ enum NotchLayout {
             }
         }
         return height
+    }
+
+    /// The automatic handoff receipt always has a two-line message: the event
+    /// label, followed by the old and new account names.
+    static func automaticSwitchCardHeight(identitySubtitle: Bool) -> CGFloat {
+        let header = max(glyphSize, cardTitleLineHeight)
+        var height = 2 * cardPadding + header
+        if identitySubtitle {
+            height += sessionRowGap + cardBodyLineHeight
+        }
+        return height + headerToBlock + 2 * cardBodyLineHeight + sessionRowGap
     }
 
 
@@ -361,7 +376,8 @@ enum NotchLayout {
             // the nth row can never be what pushes the summary line off the
             // bottom of the card.
             let height = cardHeight(windowCount: windowCount,
-                                    sessionCount: n + 1, sessionCap: n)
+                                    sessionCount: n + 1, sessionCap: n,
+                                    identitySubtitle: true)
             guard height <= cardBudget else { break }
             fits = n
         }
@@ -384,7 +400,8 @@ enum NotchLayout {
     /// solved for.
     static func maxCardHeight(sessionCap: Int) -> CGFloat {
         cardHeight(windowCount: maxWindowCount,
-                   sessionCount: sessionCap + 1, sessionCap: sessionCap)
+                   sessionCount: sessionCap + 1, sessionCap: sessionCap,
+                   identitySubtitle: true)
     }
 
     static let defaultMaxCardHeight = maxCardHeight(sessionCap: defaultSessionCap)

@@ -11,6 +11,7 @@ final class AccountManager: ObservableObject {
     @Published private(set) var loginAccountID: UUID?
     @Published var notice: String?
     @Published private(set) var discoveryNotice: String?
+    @Published private(set) var automaticSwitch: AutomaticAccountSwitch?
     private var ignoredExistingProfiles: Set<String> = []
     private var discoveryAttempts: [String: Date] = [:]
     private var externalRetryAfter: [UUID: Date] = [:]
@@ -452,7 +453,10 @@ final class AccountManager: ObservableObject {
             else if let message = state.message { status = .unsupported(message) }
             else { status = .ok }
             let exhausted = state.windows.first { ($0.usedFraction ?? 0) >= 1 }
+            let email = UserDefaults.standard.bool(forKey: "accounts.hidePersonalDetails")
+                ? nil : (state.email ?? account.emailHint)
             return ProviderSnapshot(id: account.id.uuidString, displayName: account.emoji.map { "\($0) \(account.label)" } ?? account.label,
+                                    accountEmail: email,
                                     glyph: provider.glyph, fidelity: provider.isBrowserProfile ? .manual : .official,
                                     status: status, windows: state.windows,
                                     headlineID: provider == .claude ? "five_hour" : "primary",
@@ -473,12 +477,27 @@ final class AccountManager: ObservableObject {
         normalizeRotationOrder()
         let providers = provider.map { [$0] } ?? AccountProvider.allCases.filter(\.supportsAutomaticSelection)
         var changed = false
+        var switches: [AutomaticAccountSwitch] = []
         for provider in providers {
             guard let candidate = AccountSelection.rotating(provider: provider, accounts: accounts, states: states,
                 order: rotationOrder[provider] ?? [], currentID: selected[provider],
                 thresholdPercent: switchThresholdPercent) else { continue }
-            if selected[provider] != candidate.id { selected[provider] = candidate.id; changed = true }
+            if selected[provider] != candidate.id {
+                if let previousID = selected[provider],
+                   let previous = accounts.first(where: { $0.id == previousID }) {
+                    switches.append(AutomaticAccountSwitch(
+                        provider: provider,
+                        fromID: previousID,
+                        fromName: previous.label,
+                        toID: candidate.id,
+                        toName: candidate.label
+                    ))
+                }
+                selected[provider] = candidate.id
+                changed = true
+            }
         }
         if changed, loaded { try? persist(accounts: accounts, selected: selected) }
+        switches.forEach { automaticSwitch = $0 }
     }
 }

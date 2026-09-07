@@ -101,4 +101,63 @@ final class NotchClickDetailsTests: XCTestCase {
         window.sendEvent(event)
         XCTAssertEqual(controller.model.selectedIndex, 0, "The native responder chain lost the ring click")
     }
+
+    func testAutomaticAccountSwitchOpensShowsAndRestoresAutoHide() throws {
+        let oldID = UUID(), newID = UUID()
+        let controller = NotchWindowController(
+            cursorLocation: { CGPoint(x: -100000, y: -100000) },
+            automaticSwitchDuration: 0.05
+        )
+        controller.model.snapshots = [ProviderSnapshot(
+            id: newID.uuidString,
+            displayName: "Production",
+            accountEmail: "builder@example.test",
+            glyph: .claude,
+            fidelity: .official,
+            status: .ok,
+            windows: [LimitWindow(id: "w", label: "Session", usedFraction: 0.1)]
+        )]
+        let event = AutomaticAccountSwitch(provider: .claude, fromID: oldID,
+                                           fromName: "Research", toID: newID,
+                                           toName: "Production")
+        controller.show()
+        controller.apply(.autoHide)
+        defer { controller.apply(.hidden); controller.stop() }
+
+        XCTAssertFalse(controller.panelVisibleForTesting)
+        controller.presentAutomaticSwitch(event)
+        XCTAssertEqual(controller.model.automaticSwitch, event)
+        XCTAssertEqual(controller.model.selectedIndex, 0)
+        XCTAssertTrue(controller.model.isExpanded)
+        XCTAssertTrue(controller.model.staysOpen)
+        XCTAssertTrue(controller.panelVisibleForTesting)
+
+        RunLoop.current.run(until: Date().addingTimeInterval(0.65))
+        XCTAssertNil(controller.model.automaticSwitch)
+        XCTAssertNil(controller.model.selectedIndex)
+        XCTAssertFalse(controller.model.isExpanded)
+        XCTAssertFalse(controller.panelVisibleForTesting)
+    }
+
+    func testClickDuringAutomaticSwitchKeepsRequestedDetailsOpen() {
+        let oldID = UUID(), newID = UUID(), otherID = UUID()
+        let controller = NotchWindowController(automaticSwitchDuration: 10)
+        controller.model.snapshots = [
+            ProviderSnapshot(id: newID.uuidString, displayName: "Claude Work", glyph: .claude,
+                             fidelity: .official, status: .ok, windows: []),
+            ProviderSnapshot(id: otherID.uuidString, displayName: "Codex Personal", glyph: .openai,
+                             fidelity: .official, status: .ok, windows: [])
+        ]
+        controller.show()
+        controller.apply(.alwaysShow)
+        defer { controller.apply(.hidden); controller.stop() }
+        controller.presentAutomaticSwitch(AutomaticAccountSwitch(
+            provider: .claude, fromID: oldID, fromName: "Claude Personal",
+            toID: newID, toName: "Claude Work"))
+
+        controller.toggleDetails(index: 1)
+        XCTAssertNil(controller.model.automaticSwitch)
+        XCTAssertEqual(controller.model.selectedIndex, 1)
+        XCTAssertTrue(controller.model.isExpanded)
+    }
 }

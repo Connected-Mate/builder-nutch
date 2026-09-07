@@ -103,6 +103,9 @@ struct UsageBlock: Equatable {
 struct ProviderSnapshot: Identifiable, Equatable {
     let id: String
     let displayName: String
+    /// Account identity belongs under the user-facing name in managed-account
+    /// tooltips. Other providers leave it nil.
+    var accountEmail: String? = nil
     let glyph: ProviderGlyph
     let fidelity: Fidelity
     var status: ProviderStatus

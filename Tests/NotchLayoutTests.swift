@@ -55,6 +55,16 @@ final class NotchLayoutTests: XCTestCase {
         )
     }
 
+    func testAccountEmailAndAutomaticSwitchHaveReservedSpace() {
+        let plain = NotchLayout.cardHeight(windowCount: 1)
+        let identified = NotchLayout.cardHeight(windowCount: 1, identitySubtitle: true)
+        XCTAssertEqual(identified - plain,
+                       NotchLayout.sessionRowGap + NotchLayout.cardBodyLineHeight,
+                       accuracy: 0.001)
+        XCTAssertGreaterThan(NotchLayout.automaticSwitchCardHeight(identitySubtitle: true),
+                             NotchLayout.automaticSwitchCardHeight(identitySubtitle: false))
+    }
+
     /// The activity indicator lives in the gap between the glyph and the inside
     /// edge of the track, and must not touch either.
     func testActivityRingClearsTheGlyphAndTheTrack() {
@@ -780,14 +790,13 @@ final class SessionCapTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(model.sessionCap(cellCount: 4), 6)
     }
 
-    /// Even the shortest display Macs ship with lists at least what the fixed
-    /// cap used to, so solving for the screen never costs anyone a row.
-    @MainActor func testTheSmallestLaptopIsNoWorseOffThanTheFixedCap() {
+    /// The shortest display still keeps three live sessions alongside four
+    /// limit windows and the newly visible account identity.
+    @MainActor func testTheSmallestLaptopKeepsThreeSessionsWithAccountIdentity() {
         let model = NotchViewModel()
         model.edge = .right
         model.screenSize = CGSize(width: 1470, height: 956)   // 13-inch Air
-        XCTAssertGreaterThanOrEqual(model.sessionCap(cellCount: 4),
-                                    NotchLayout.defaultSessionCap)
+        XCTAssertGreaterThanOrEqual(model.sessionCap(cellCount: 4), 3)
     }
 
     /// And the panel it implies still has to land on the screen.

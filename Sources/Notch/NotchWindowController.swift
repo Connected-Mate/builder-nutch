@@ -19,11 +19,14 @@ final class NotchWindowController {
     func pollCursorForTesting() { cursorMoved() }
 
     private let cursorLocation: () -> CGPoint
+    private let automaticSwitchDuration: TimeInterval
     private var visibility: NotchVisibility = .onHover
     private var visibilityChange = 0
 
-    init(cursorLocation: @escaping () -> CGPoint = { NSEvent.mouseLocation }) {
+    init(cursorLocation: @escaping () -> CGPoint = { NSEvent.mouseLocation },
+         automaticSwitchDuration: TimeInterval = 4.5) {
         self.cursorLocation = cursorLocation
+        self.automaticSwitchDuration = automaticSwitchDuration
     }
 
     /// Hooked up by the app delegate; drives the menu's "Refresh now".
@@ -45,6 +48,7 @@ final class NotchWindowController {
     /// Allow the pointer to cross from the notch to an opened detail card.
     private let foldGrace: TimeInterval = 0.45
     private var foldWork: DispatchWorkItem?
+    private var automaticSwitchWork: DispatchWorkItem?
     /// Whether we have pushed the pointing hand onto the cursor stack.
     private var isPointing = false
     /// The usable area the panel was last placed against.
@@ -105,6 +109,7 @@ final class NotchWindowController {
     func stop() {
         setPointing(false)
         foldWork?.cancel()
+        automaticSwitchWork?.cancel()
         cursorTimer?.invalidate()
         cursorTimer = nil
         clockTimer?.invalidate()
@@ -229,13 +234,18 @@ final class NotchWindowController {
     private func tooltipRect(index: Int) -> CGRect? {
         guard model.snapshots.indices.contains(index) else { return nil }
         let snapshot = model.snapshots[index]
-        let cardHeight = NotchLayout.cardHeight(
-            windowCount: snapshot.windows.count,
-            sessionCount: model.activity(for: snapshot.id)?.sessions.count ?? 0,
-            sessionCap: model.sessionCap,
-            statusMessage: snapshot.statusMessage,
-            blockMessage: snapshot.block?.summary(now: model.now)
-        )
+        let accountSwitch = model.automaticSwitch?.toID.uuidString == snapshot.id
+            ? model.automaticSwitch : nil
+        let cardHeight = accountSwitch == nil
+            ? NotchLayout.cardHeight(
+                windowCount: snapshot.windows.count,
+                sessionCount: model.activity(for: snapshot.id)?.sessions.count ?? 0,
+                sessionCap: model.sessionCap,
+                statusMessage: snapshot.statusMessage,
+                blockMessage: snapshot.block?.summary(now: model.now),
+                identitySubtitle: snapshot.accountEmail?.isEmpty == false)
+            : NotchLayout.automaticSwitchCardHeight(
+                identitySubtitle: snapshot.accountEmail?.isEmpty == false)
         // Across the stack the region is the card, its tail, and the gap the
         // pointer has to cross. Along it, the card's own extent.
         let cardAcross = model.edge.isVertical ? NotchLayout.cardWidth : cardHeight
@@ -434,11 +444,62 @@ final class NotchWindowController {
     func toggleDetails(index: Int) {
         guard visibility != .hidden, model.isExpanded,
               model.snapshots.indices.contains(index) else { return }
+        if model.automaticSwitch != nil {
+            automaticSwitchWork?.cancel()
+            automaticSwitchWork = nil
+            withAnimation(NotchMotion.crossfade) {
+                model.automaticSwitch = nil
+                model.selectedIndex = index
+            }
+            onRefreshProvider?(model.snapshots[index].id)
+            updateInteractiveRects()
+            return
+        }
         withAnimation(.spring(response: 0.18, dampingFraction: 0.85)) {
             model.selectedIndex = model.selectedIndex == index ? nil : index
         }
         updateInteractiveRects()
         if model.selectedIndex != nil { onRefreshProvider?(model.snapshots[index].id) }
+    }
+
+    /// Opens the notch long enough to make an automatic rotation visible, then
+    /// restores the user's normal visibility mode. Clicking during the receipt
+    /// keeps the ordinary usage card open for inspection.
+    func presentAutomaticSwitch(_ event: AutomaticAccountSwitch) {
+        automaticSwitchWork?.cancel()
+        automaticSwitchWork = nil
+        guard visibility != .hidden,
+              let index = model.snapshots.firstIndex(where: { $0.id == event.toID.uuidString })
+        else { return }
+
+        foldWork?.cancel()
+        foldWork = nil
+        withAnimation(NotchMotion.unfold) {
+            model.automaticSwitch = event
+            model.selectedIndex = index
+            model.isExpanded = true
+        }
+        if visibility == .autoHide {
+            panel?.alphaValue = 1
+            panel?.orderFrontRegardless()
+        }
+        updateInteractiveRects()
+
+        let eventID = event.id
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.model.automaticSwitch?.id == eventID else { return }
+                self.automaticSwitchWork = nil
+                withAnimation(NotchMotion.crossfade) {
+                    self.model.automaticSwitch = nil
+                    if self.model.selectedIndex == index { self.model.selectedIndex = nil }
+                }
+                self.updateInteractiveRects()
+                self.setExpanded(false)
+            }
+        }
+        automaticSwitchWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + automaticSwitchDuration, execute: work)
     }
 
     /// Dismiss without consuming the click intended for another application.
@@ -540,6 +601,9 @@ final class NotchWindowController {
         self.visibility = visibility
         visibilityChange += 1
         cancelPendingHover()
+        automaticSwitchWork?.cancel()
+        automaticSwitchWork = nil
+        model.automaticSwitch = nil
         panel?.alphaValue = 1
         switch visibility {
         case .alwaysShow:

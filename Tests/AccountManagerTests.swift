@@ -132,6 +132,33 @@ final class AccountManagerTests: XCTestCase {
         XCTAssertEqual(restored.switchThresholdPercent, 25)
     }
 
+    @MainActor
+    func testAutomaticRotationPublishesTheExactAccountHandoff() async throws {
+        let runner = SequencedQuotaRunner(outputs: [
+            #"{"account":{"type":"chatgpt","email":"old@example.test"},"limits":{"rateLimits":{"primary":{"usedPercent":100,"windowDurationMins":300}}}}"#,
+            #"{"account":{"type":"chatgpt","email":"new@example.test"},"limits":{"rateLimits":{"primary":{"usedPercent":10,"windowDurationMins":300}}}}"#
+        ])
+        let manager = AccountManager(rootURL: try temporary(), runner: runner,
+            executable: { _ in URL(fileURLWithPath: "/fake/codex") })
+        let old = try manager.add(provider: .codex, label: "Research", emailHint: nil)
+        let new = try manager.add(provider: .codex, label: "Production", emailHint: nil)
+        try manager.select(old)
+        manager.automaticSelection = true
+
+        await manager.refresh(old)
+        XCTAssertNil(manager.automaticSwitch)
+        await manager.refresh(new)
+        manager.reconcileAutomaticSelection()
+
+        let event = try XCTUnwrap(manager.automaticSwitch)
+        XCTAssertEqual(event.provider, .codex)
+        XCTAssertEqual(event.fromID, old.id)
+        XCTAssertEqual(event.fromName, "Research")
+        XCTAssertEqual(event.toID, new.id)
+        XCTAssertEqual(event.toName, "Production")
+        XCTAssertEqual(manager.selectedAccount(for: .codex)?.id, new.id)
+    }
+
     func testQuotaParsingFreshnessAndAllCodexBuckets() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let status = Data(#"{"loggedIn":true,"email":"test@example.test","subscriptionType":"max"}"#.utf8)
@@ -298,5 +325,18 @@ private final class FakeAccountRunner: AccountCommandRunning {
         while waitForCancellation && !cancellation.isCancelled { try await Task.sleep(nanoseconds: 1_000_000) }
         if cancellation.isCancelled { throw ManagedAccountError.cancelled }
         return Data(#"{"account":{"type":"chatgpt","email":"test@example.test","planType":"plus"},"limits":{"rateLimits":{"primary":{"usedPercent":20,"windowDurationMins":300}}}}"#.utf8)
+    }
+}
+
+private final class SequencedQuotaRunner: AccountCommandRunning {
+    private var outputs: [Data]
+
+    init(outputs: [String]) {
+        self.outputs = outputs.map { Data($0.utf8) }
+    }
+
+    func run(_ command: AccountCommand, cancellation: AccountCancellation) async throws -> Data {
+        guard !outputs.isEmpty else { throw ManagedAccountError.commandFailed(1) }
+        return outputs.removeFirst()
     }
 }

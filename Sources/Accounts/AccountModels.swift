@@ -102,6 +102,17 @@ struct ManagedAccount: Identifiable, Codable, Equatable {
     var existingProfile: ExistingAccountProfile? = nil
 }
 
+/// A real automatic rotation, kept separate from manual account selection so
+/// the notch only announces changes Builder Nutch made on the user's behalf.
+struct AutomaticAccountSwitch: Identifiable, Equatable {
+    let id = UUID()
+    let provider: AccountProvider
+    let fromID: UUID
+    let fromName: String
+    let toID: UUID
+    let toName: String
+}
+
 struct ManagedAccountState {
     var isConnected = false
     var email: String? = nil

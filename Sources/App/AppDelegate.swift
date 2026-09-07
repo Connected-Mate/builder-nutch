@@ -74,6 +74,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
             self?.updateNotch()
         }.store(in: &cancellables)
+        manager.$automaticSwitch.compactMap { $0 }.receive(on: RunLoop.main).sink { [weak self] event in
+            self?.updateNotch()
+            self?.notchController?.presentAutomaticSwitch(event)
+        }.store(in: &cancellables)
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.refresh() }
             .store(in: &cancellables)

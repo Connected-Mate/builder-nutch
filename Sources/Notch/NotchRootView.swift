@@ -41,6 +41,8 @@ struct NotchRootView: View {
                     TooltipCard(
                         snapshot: snapshot,
                         activity: model.activity(for: snapshot.id),
+                        automaticSwitch: model.automaticSwitch?.toID.uuidString == snapshot.id
+                            ? model.automaticSwitch : nil,
                         now: model.now,
                         direction: model.edge.tooltipDirection,
                         sessionCap: model.sessionCap
@@ -195,13 +197,16 @@ struct NotchRootView: View {
     ) -> CGPoint {
         let card = model.edge.isVertical
             ? NotchLayout.cardWidth
-            : NotchLayout.cardHeight(
-                windowCount: snapshot.windows.count,
-                sessionCount: model.activity(for: snapshot.id)?.sessions.count ?? 0,
-                sessionCap: model.sessionCap,
-                statusMessage: snapshot.statusMessage,
-                blockMessage: snapshot.block?.summary(now: model.now)
-            )
+            : model.automaticSwitch?.toID.uuidString == snapshot.id
+                ? NotchLayout.automaticSwitchCardHeight(
+                    identitySubtitle: snapshot.accountEmail?.isEmpty == false)
+                : NotchLayout.cardHeight(
+                    windowCount: snapshot.windows.count,
+                    sessionCount: model.activity(for: snapshot.id)?.sessions.count ?? 0,
+                    sessionCap: model.sessionCap,
+                    statusMessage: snapshot.statusMessage,
+                    blockMessage: snapshot.block?.summary(now: model.now),
+                    identitySubtitle: snapshot.accountEmail?.isEmpty == false)
         return place.point(
             along: model.slack + model.ringCenter(index: index),
             across: model.tooltipInset + (NotchLayout.tailLength + card) / 2
