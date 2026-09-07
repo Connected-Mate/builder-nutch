@@ -21,6 +21,7 @@
 "NEXT" = "PROCHAIN";
 "NEXT SESSION" = "PROCHAINE SESSION";
 "REMAINING" = "RESTANT";
+"USED" = "UTILISÉ";
 "ACCOUNT" = "COMPTE";
 "Next" = "Prochain";
 "Set next" = "Choisir ensuite";
@@ -78,6 +79,15 @@
 "Make room for your work." = "Faites de la place à votre travail.";
 "Choose where Builder Nutch lives, and when it appears." = "Choisissez où Builder Nutch apparaît et quand il se montre.";
 "Appearance" = "Apparence";
+"Usage display" = "Affichage du quota";
+"Remaining" = "Restant";
+"Used" = "Utilisé";
+"See what you can still use. Rings empty as quota runs out." = "Voyez ce que vous pouvez encore utiliser. Les anneaux se vident à mesure que le quota diminue.";
+"See what you have used. Rings fill as quota runs out." = "Voyez ce que vous avez utilisé. Les anneaux se remplissent à mesure que le quota diminue.";
+"What should your quota show?" = "Que doit afficher votre quota ?";
+"Choose the number you want to see at a glance. You can change this anytime in Settings." = "Choisissez le nombre à voir en un coup d’œil. Vous pourrez le modifier à tout moment dans les réglages.";
+"One quota, your preferred point of view." = "Un seul quota, présenté comme vous le préférez.";
+"Continue" = "Continuer";
 "General" = "Général";
 "Language" = "Langue";
 "System" = "Système";

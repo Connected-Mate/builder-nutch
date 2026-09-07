@@ -52,6 +52,17 @@ struct SettingsView: View {
             // read as three unrelated settings, and "Where Codenotch appears"
             // was a header long enough to look like a warning.
             settingsSection("Appearance") {
+                SettingsChoices(label: "Usage display", choices: UsageDisplayMode.allCases,
+                                selection: Binding(
+                                    get: { preferences.usageDisplayMode },
+                                    set: { preferences.chooseUsageDisplay($0) }
+                                ), title: { $0.title })
+
+                Text(LocalizedStringKey(preferences.usageDisplayMode.explanation))
+                    .font(AppTheme.font(.caption))
+                    .foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 SettingsChoices(label: "Show", choices: NotchVisibility.allCases,
                                 selection: $preferences.notchVisibility, title: { $0.title })
 

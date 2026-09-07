@@ -14,6 +14,7 @@ private extension AccountProvider {
 /// The native account manager. Public screenshots are captured from this live view.
 struct AccountsView: View {
     @ObservedObject var manager: AccountManager
+    @ObservedObject var preferences: Preferences
     let onOpenSettings: (() -> Void)?
     @State private var filter: AccountProvider?
     @State private var showingAdd = false
@@ -27,8 +28,9 @@ struct AccountsView: View {
     @AppStorage("accounts.projectFolder") private var savedProjectPath = ""
     @AppStorage("app.language") private var appLanguage = AppLanguage.system.rawValue
 
-    init(manager: AccountManager, onOpenSettings: (() -> Void)? = nil, projectFolder: URL? = nil) {
+    init(manager: AccountManager, preferences: Preferences, onOpenSettings: (() -> Void)? = nil, projectFolder: URL? = nil) {
         self.manager = manager
+        self.preferences = preferences
         self.onOpenSettings = onOpenSettings
         _filter = State(initialValue: manager.accounts.first?.provider)
         if let projectFolder {
@@ -70,6 +72,15 @@ struct AccountsView: View {
         .sheet(item: $connecting) { account in
             AddAssistantFlow(manager: manager, initialAccount: account) { localError = $0 }
                 .preferredColorScheme(.light)
+        }
+        .sheet(isPresented: Binding(
+            get: { !preferences.hasChosenUsageDisplay },
+            set: { _ in }
+        )) {
+            UsageDisplayOnboarding(preferences: preferences)
+                .interactiveDismissDisabled()
+                .preferredColorScheme(.light)
+                .environment(\.locale, (AppLanguage(rawValue: appLanguage) ?? .system).locale)
         }
         .sheet(item: $personalizing) { account in
             PersonalizeAssistantView(account: account, manager: manager) { localError = $0 }
@@ -255,7 +266,7 @@ struct AccountsView: View {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     Text("ACCOUNT").frame(maxWidth: .infinity, alignment: .leading)
-                    Text("REMAINING").frame(width: 110)
+                    Text(LocalizedStringKey(preferences.usageDisplayMode.columnTitle)).frame(width: 110)
                     Text("NEXT SESSION").frame(width: 110)
                 }
                 .font(AppTheme.font(size: 9, weightValue: 500)).tracking(0.8).foregroundStyle(AppTheme.muted)
@@ -268,6 +279,7 @@ struct AccountsView: View {
                                          isSelected: manager.isSelected(account),
                                          isLoginPending: manager.loginAccountID == account.id,
                                          loginInProgress: manager.loginAccountID != nil,
+                                         displayMode: preferences.usageDisplayMode,
                                          projectURL: projectURL, manager: manager,
                                          connect: { connecting = account },
                                          personalize: { personalizing = account },
@@ -464,6 +476,7 @@ private struct AssistantRow: View {
     let isSelected: Bool
     let isLoginPending: Bool
     let loginInProgress: Bool
+    let displayMode: UsageDisplayMode
     let projectURL: URL
     @ObservedObject var manager: AccountManager
     let connect: () -> Void
@@ -547,19 +560,21 @@ private struct AssistantRow: View {
     private var quotaDescription: String {
         if account.provider.isBrowserProfile { return "Check usage on the official website" }
         guard let remaining = state.remainingPercent, state.isConnected else { return "Usage unavailable" }
-        return "\(Int(remaining.rounded())) percent remaining\(state.isFresh() ? "" : ", last known; refresh needed")"
+        let value = displayMode == .remaining ? remaining : 100 - remaining
+        return "\(Int(value.rounded())) percent \(displayMode.unit)\(state.isFresh() ? "" : ", last known; refresh needed")"
     }
 
     private var quotaRing: some View {
         ZStack {
             Circle().stroke(AppTheme.track, lineWidth: 3)
             if let remaining = state.remainingPercent, state.isConnected, !account.provider.isBrowserProfile {
-                Circle().trim(from: 0, to: min(max(remaining / 100, 0), 1))
+                let shown = displayMode == .remaining ? remaining : 100 - remaining
+                Circle().trim(from: 0, to: min(max(shown / 100, 0), 1))
                     .stroke(AppTheme.ink.opacity(state.isFresh() ? 1 : 0.45),
                             style: StrokeStyle(lineWidth: 3, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                 HStack(alignment: .firstTextBaseline, spacing: 1) {
-                    Text("\(Int(remaining.rounded()))").font(AppTheme.font(size: 11, weightValue: 600))
+                    Text("\(Int(shown.rounded()))").font(AppTheme.font(size: 11, weightValue: 600))
                     Text("%").font(AppTheme.font(size: 8, weightValue: 450))
                 }
             } else {
@@ -611,7 +626,8 @@ private struct AssistantRow: View {
         if account.provider == .codex {
             let readings = codexUsageGroups.compactMap { group -> String? in
                 guard let remaining = group.remainingPercent else { return nil }
-                return "\(group.title) \(remaining)% left"
+                let value = displayMode == .remaining ? remaining : 100 - remaining
+                return "\(group.title) \(value)% \(displayMode.unit)"
             }
             if !readings.isEmpty { return readings.joined(separator: " · ") }
         }
@@ -637,13 +653,14 @@ private struct AssistantRow: View {
                             Text(LocalizedStringKey(group.title)).font(AppTheme.font(size: 13, weightValue: 650))
                             Spacer()
                             if let remaining = group.remainingPercent {
-                                Text("\(remaining)% left").font(AppTheme.font(size: 12, weightValue: 600)).monospacedDigit()
+                                let value = displayMode == .remaining ? remaining : 100 - remaining
+                                Text("\(value)% \(displayMode.unit)").font(AppTheme.font(size: 12, weightValue: 600)).monospacedDigit()
                             }
                         }
                         ForEach(group.windows, id: \.window.id) { entry in
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(LocalizedStringKey(entry.duration)).font(AppTheme.font(size: 11, weightValue: 600))
-                                Text(entry.window.summary).monospacedDigit()
+                                Text(entry.window.summary(for: displayMode)).monospacedDigit()
                                 if let reset = entry.window.resetsAt {
                                     Text("Resets \(reset.formatted(date: .abbreviated, time: .shortened))")
                                         .foregroundStyle(AppTheme.muted)
@@ -658,7 +675,7 @@ private struct AssistantRow: View {
                 ForEach(state.windows) { window in
                     VStack(alignment: .leading, spacing: 5) {
                         Text(window.label).font(AppTheme.font(size: 12, weightValue: 600))
-                        Text(window.summary).monospacedDigit()
+                        Text(window.summary(for: displayMode)).monospacedDigit()
                         if let reset = window.resetsAt {
                             Text("Resets \(reset.formatted(date: .abbreviated, time: .shortened))")
                                 .foregroundStyle(AppTheme.muted)

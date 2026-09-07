@@ -6,10 +6,12 @@ import SwiftUI
 final class AccountsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let manager: AccountManager
+    private let preferences: Preferences
     private let onOpenSettings: (() -> Void)?
 
-    init(manager: AccountManager, onOpenSettings: (() -> Void)? = nil) {
+    init(manager: AccountManager, preferences: Preferences, onOpenSettings: (() -> Void)? = nil) {
         self.manager = manager
+        self.preferences = preferences
         self.onOpenSettings = onOpenSettings
         super.init()
     }
@@ -36,7 +38,7 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
         window.titlebarAppearsTransparent = false
         window.delegate = self
         window.contentView = NSHostingView(
-            rootView: AccountsView(manager: manager, onOpenSettings: onOpenSettings)
+            rootView: AccountsView(manager: manager, preferences: preferences, onOpenSettings: onOpenSettings)
         )
         window.center()
         self.window = window

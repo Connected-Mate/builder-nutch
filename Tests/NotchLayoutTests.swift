@@ -637,6 +637,28 @@ final class NotchVisibilityTests: XCTestCase {
     }
 }
 
+final class UsageDisplayPreferenceTests: XCTestCase {
+    private func defaults() -> UserDefaults {
+        let name = "UsageDisplayPreferenceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    @MainActor
+    func testItOnboardsIntoRemainingAndPersistsTheChoice() {
+        let defaults = defaults()
+        let fresh = Preferences(defaults: defaults)
+        XCTAssertEqual(fresh.usageDisplayMode, .remaining)
+        XCTAssertFalse(fresh.hasChosenUsageDisplay)
+
+        fresh.chooseUsageDisplay(.used)
+        let restarted = Preferences(defaults: defaults)
+        XCTAssertEqual(restarted.usageDisplayMode, .used)
+        XCTAssertTrue(restarted.hasChosenUsageDisplay)
+    }
+}
+
 /// Renaming the app renames its defaults domain, so every setting moves to a
 /// new empty one unless it is carried across.
 final class RenameMigrationTests: XCTestCase {

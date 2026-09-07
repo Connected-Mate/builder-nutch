@@ -43,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             signOut: { _ in }, signIn: { _ in false },
             switchAccount: { _ in false }, retry: { _ in }, managedAccounts: true
         )
-        let accounts = AccountsWindowController(manager: manager, onOpenSettings: { [weak appearance] in
+        let accounts = AccountsWindowController(manager: manager, preferences: preferences, onOpenSettings: { [weak appearance] in
             appearance?.show()
         })
         self.accountManager = manager
@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.settings = appearance
         self.updater = updater
         controller.model.edge = preferences.notchEdge
+        controller.model.usageDisplayMode = preferences.usageDisplayMode
         controller.onOpenSettings = { [weak accounts] in accounts?.show() }
         controller.onRefresh = { [weak self] in self?.refresh() }
         controller.onRefreshProvider = { [weak manager] id in
@@ -71,6 +72,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences.$notchEdge.receive(on: RunLoop.main).sink { [weak controller] in
             controller?.apply(edge: $0)
         }.store(in: &cancellables)
+        preferences.$usageDisplayMode.receive(on: RunLoop.main).sink { [weak controller] in
+            controller?.model.usageDisplayMode = $0
+        }.store(in: &cancellables)
         manager.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
             self?.updateNotch()
         }.store(in: &cancellables)
@@ -87,7 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in self?.refresh() }
         }
         refresh()
-        if preferences.isFirstLaunch || manager.accounts.isEmpty {
+        if preferences.isFirstLaunch || manager.accounts.isEmpty || !preferences.hasChosenUsageDisplay {
             accounts.show()
         }
     }

@@ -31,6 +31,14 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.8.0",
+            headline: "See quota your way.",
+            changes: [
+                .init(title: "A clear first choice", detail: "A short onboarding lets you choose whether Builder Nutch shows quota remaining or quota used."),
+                .init(title: "Change it anytime", detail: "The same choice now lives in Settings and updates account lists, rings, labels, and usage details together.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.7.0",
             headline: "See every automatic account handoff.",
             changes: [

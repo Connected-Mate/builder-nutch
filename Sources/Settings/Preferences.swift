@@ -31,6 +31,12 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(appPresence.rawValue, forKey: Keys.presence) }
     }
 
+    @Published var usageDisplayMode: UsageDisplayMode {
+        didSet { defaults.set(usageDisplayMode.rawValue, forKey: Keys.usageDisplayMode) }
+    }
+
+    @Published private(set) var hasChosenUsageDisplay: Bool
+
     /// The version whose changes have already been shown.
     ///
     /// Written when the What's New dialogue is dismissed rather than when it
@@ -60,6 +66,8 @@ final class Preferences: ObservableObject {
         static let presence = "appPresence"
         static let edge = "notchEdge"
         static let lastSeenVersion = "lastSeenVersion"
+        static let usageDisplayMode = "usageDisplayMode"
+        static let hasChosenUsageDisplay = "hasChosenUsageDisplay"
     }
 
     /// True the very first time this copy runs, and never again.
@@ -113,6 +121,9 @@ final class Preferences: ObservableObject {
         // side of a Mac that no system chrome claims by default.
         self.notchEdge = defaults.string(forKey: Keys.edge)
             .flatMap(NotchEdge.init(rawValue:)) ?? .right
+        self.usageDisplayMode = defaults.string(forKey: Keys.usageDisplayMode)
+            .flatMap(UsageDisplayMode.init(rawValue:)) ?? .remaining
+        self.hasChosenUsageDisplay = defaults.bool(forKey: Keys.hasChosenUsageDisplay)
         // Absent means nothing has been shown yet, which is true of a fresh
         // install — so the current release reads as new to it.
         self.lastSeenVersion = defaults.string(forKey: Keys.lastSeenVersion)
@@ -131,6 +142,12 @@ final class Preferences: ObservableObject {
         } else {
             disconnectedProviders.insert(providerID)
         }
+    }
+
+    func chooseUsageDisplay(_ mode: UsageDisplayMode) {
+        usageDisplayMode = mode
+        hasChosenUsageDisplay = true
+        defaults.set(true, forKey: Keys.hasChosenUsageDisplay)
     }
 
     /// Forget everything this app has stored and quit.

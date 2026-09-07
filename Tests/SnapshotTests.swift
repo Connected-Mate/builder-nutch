@@ -2,6 +2,17 @@ import XCTest
 @testable import Codenotch
 
 final class SnapshotTests: XCTestCase {
+    func testPercentagePresentationCanBeRemainingOrUsed() {
+        let s = ProviderSnapshot(id: "test", displayName: "Test", glyph: .claude,
+                                 fidelity: .official, status: .ok,
+                                 windows: [LimitWindow(id: "main", label: "Limit", usedFraction: 0.93)],
+                                 headlineID: "main")
+        XCTAssertEqual(s.headlineText(for: .remaining), "7%")
+        XCTAssertEqual(s.headlineText(for: .used), "93%")
+        XCTAssertEqual(s.ringFraction(for: UsageDisplayMode.remaining) ?? -1, 0.07, accuracy: 0.0001)
+        XCTAssertEqual(s.ringFraction(for: UsageDisplayMode.used) ?? -1, 0.93, accuracy: 0.0001)
+    }
+
     private func window(_ id: String, _ used: Double) -> LimitWindow {
         LimitWindow(id: id, label: id, usedFraction: used, resetsAt: Date())
     }

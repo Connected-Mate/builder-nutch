@@ -242,6 +242,7 @@ private struct LimitWindowRow: View {
     let window: LimitWindow
     let fidelity: Fidelity
     let now: Date
+    let displayMode: UsageDisplayMode
 
     private var band: UsageBand { UsageBand.band(for: window.usedFraction ?? 0) }
     private var trackWidth: CGFloat { NotchLayout.cardWidth - 2 * NotchLayout.cardPadding }
@@ -270,7 +271,7 @@ private struct LimitWindowRow: View {
                 .padding(.top, NotchLayout.labelToBar)
             }
 
-            Text("\(window.usedFraction == nil ? "" : fidelity.qualifier)\(window.summary)")
+            Text("\(window.usedFraction == nil ? "" : fidelity.qualifier)\(window.summary(for: displayMode))")
                 .font(Typography.cardBody)
                 .foregroundStyle(Palette.textPrimary)
                 .padding(.top, NotchLayout.barToUsed)
@@ -281,6 +282,7 @@ private struct LimitWindowRow: View {
 private struct ProviderTooltip: View {
     let snapshot: ProviderSnapshot
     let now: Date
+    let displayMode: UsageDisplayMode
 
     /// Only worth saying when the numbers are not current. A remembered reading
     /// has to be dated, or it quietly passes itself off as live.
@@ -312,7 +314,8 @@ private struct ProviderTooltip: View {
                     .padding(.top, NotchLayout.headerToBlock)
             } else {
                 ForEach(Array(snapshot.windows.enumerated()), id: \.element.id) { index, window in
-                    LimitWindowRow(window: window, fidelity: snapshot.fidelity, now: now)
+                    LimitWindowRow(window: window, fidelity: snapshot.fidelity, now: now,
+                                   displayMode: displayMode)
                         .padding(.top, index == 0 ? NotchLayout.headerToBlock : NotchLayout.blockSpacing)
                 }
             }
@@ -465,6 +468,7 @@ struct TooltipCard: View {
     var activity: ActivitySummary?
     var automaticSwitch: AutomaticAccountSwitch?
     let now: Date
+    var displayMode: UsageDisplayMode = .used
     /// Which way the card sits from the notch, which follows from the edge.
     var direction: NotchEdge.TooltipDirection = .leading
     /// How many sessions this screen has room to list. Solved from the display
@@ -501,7 +505,7 @@ struct TooltipCard: View {
                         .transition(.opacity.animation(NotchMotion.crossfade))
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
-                        ProviderTooltip(snapshot: snapshot, now: now)
+                        ProviderTooltip(snapshot: snapshot, now: now, displayMode: displayMode)
                         if let activity {
                             SessionList(summary: activity, now: now, cap: sessionCap)
                         }

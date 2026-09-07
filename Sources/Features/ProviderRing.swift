@@ -12,6 +12,7 @@ struct ProviderRing: View {
     /// there is no arc to draw, and inventing one would be a lie in a shape.
     let usedFraction: Double?
     let glyph: ProviderGlyph
+    var displayMode: UsageDisplayMode = .used
     var isStale: Bool = false
     /// Blocked right now. Shown as spent whatever the arc says, because that is
     /// what it means for you — a ring reading 16% while the account is paused
@@ -27,7 +28,11 @@ struct ProviderRing: View {
     private var band: UsageBand {
         isBlocked ? .exhausted : UsageBand.band(for: usedFraction ?? 0)
     }
-    private var sweep: CGFloat { CGFloat(min(max(usedFraction ?? 0, 0), 1)) }
+    private var sweep: CGFloat {
+        guard let usedFraction else { return 0 }
+        if isBlocked { return displayMode == .remaining ? 0 : 1 }
+        return CGFloat(displayMode.fraction(fromUsedFraction: usedFraction))
+    }
 
     var body: some View {
         ZStack {
@@ -159,10 +164,11 @@ struct ProviderCell: View {
     let snapshot: ProviderSnapshot
     var activity: ActivitySummary?
     var isRefreshing: Bool = false
+    var displayMode: UsageDisplayMode = .used
 
     /// A dash, not "0%": nothing read is not the same as nothing used.
     private var percentText: String {
-        snapshot.hasReading ? snapshot.headlineText : "—"
+        snapshot.hasReading ? snapshot.headlineText(for: displayMode) : "—"
     }
 
     var body: some View {
@@ -170,6 +176,7 @@ struct ProviderCell: View {
             ProviderRing(
                 usedFraction: snapshot.hasReading ? snapshot.ringFraction : nil,
                 glyph: snapshot.glyph,
+                displayMode: displayMode,
                 isStale: snapshot.status.isStale || !snapshot.hasReading,
                 isBlocked: snapshot.block != nil,
                 activity: activity,

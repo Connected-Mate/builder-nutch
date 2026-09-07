@@ -73,6 +73,15 @@ struct LimitWindow: Identifiable, Codable, Equatable {
         }
         return "No reading"
     }
+
+    func summary(for mode: UsageDisplayMode) -> String {
+        if let usedFraction {
+            return "\(mode.percentage(fromUsedFraction: usedFraction))% \(mode.unit)"
+        }
+        if let remaining { return remaining == 1 ? "1 left" : "\(remaining) left" }
+        if let used { return used == 1 ? "1 used" : "\(used) used" }
+        return "No reading"
+    }
 }
 
 /// A limit that has been *reached*, even where the headline still shows room.
@@ -143,6 +152,18 @@ struct ProviderSnapshot: Identifiable, Equatable {
         if let remaining = headline?.remaining { return "\(remaining)" }
         if let used = headline?.used { return "\(used)" }
         return "—"
+    }
+
+
+    func headlineText(for mode: UsageDisplayMode) -> String {
+        if let usedFraction { return "\(mode.percentage(fromUsedFraction: usedFraction))%" }
+        if let remaining = headline?.remaining { return "\(remaining)" }
+        if let used = headline?.used { return "\(used)" }
+        return "—"
+    }
+
+    func ringFraction(for mode: UsageDisplayMode) -> Double? {
+        usedFraction.map(mode.fraction(fromUsedFraction:))
     }
 
     /// True when there is no reading to show — the cell draws an empty ring and

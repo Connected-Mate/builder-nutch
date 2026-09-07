@@ -110,6 +110,11 @@ final class ResetCopyDistantDateTests: XCTestCase {
 /// "87% remaining" reads as two different numbers rather than one seen from
 /// either end. That is what made a correct reading look wrong.
 final class WindowSummaryTests: XCTestCase {
+    func testItCanShowOnlyTheSideTheUserChose() {
+        XCTAssertEqual(window(0.93).summary(for: .remaining), "7% left")
+        XCTAssertEqual(window(0.93).summary(for: .used), "93% used")
+    }
+
     private func window(_ fraction: Double) -> LimitWindow {
         LimitWindow(id: "w", label: "Monthly limit", usedFraction: fraction)
     }

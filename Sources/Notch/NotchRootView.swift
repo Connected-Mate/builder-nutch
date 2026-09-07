@@ -44,6 +44,7 @@ struct NotchRootView: View {
                         automaticSwitch: model.automaticSwitch?.toID.uuidString == snapshot.id
                             ? model.automaticSwitch : nil,
                         now: model.now,
+                        displayMode: model.usageDisplayMode,
                         direction: model.edge.tooltipDirection,
                         sessionCap: model.sessionCap
                     )
@@ -108,7 +109,8 @@ struct NotchRootView: View {
             ProviderCell(
                 snapshot: snapshot,
                 activity: model.activity(for: snapshot.id),
-                isRefreshing: model.refreshing.contains(snapshot.id)
+                isRefreshing: model.refreshing.contains(snapshot.id),
+                displayMode: model.usageDisplayMode
             )
                 // Pinned to what the cell claims along the stack, or the drawn
                 // rings stop lining up with the centres `ringCenter` hands to
@@ -118,7 +120,7 @@ struct NotchRootView: View {
                 .frame(width: model.edge.isVertical ? nil : NotchLayout.cellAlong(for: model.edge))
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(snapshot.displayName) usage details")
-                .accessibilityValue("\(snapshot.hasReading ? snapshot.headlineText + " used" : "Usage unavailable"). Details \(model.selectedIndex == index ? "open" : "closed").")
+                .accessibilityValue("\(snapshot.hasReading ? snapshot.headlineText(for: model.usageDisplayMode) + " " + model.usageDisplayMode.unit : "Usage unavailable"). Details \(model.selectedIndex == index ? "open" : "closed").")
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAction { model.onToggleDetails?(index) }
                 .accessibilityHidden(!model.isExpanded)
