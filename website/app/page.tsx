@@ -402,6 +402,14 @@ export default function Home() {
           </p>
         </div>
         <div className="footer-links">
+          <a
+            href="https://x.com/AlexCormeraie"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Follow Alex Cormeraie on X"
+          >
+            X · @AlexCormeraie <ArrowUpRight size={14} />
+          </a>
           <a href={repository}>
             Source <ArrowUpRight size={14} />
           </a>
