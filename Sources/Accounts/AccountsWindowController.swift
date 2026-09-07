@@ -21,19 +21,19 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
         }
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 980, height: 700),
+            contentRect: NSRect(x: 0, y: 0, width: 1080, height: 720),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Builder Nutch"
-        window.minSize = NSSize(width: 760, height: 520)
+        window.minSize = NSSize(width: 900, height: 560)
         window.setFrameAutosaveName("CodenotchAccountsWindow")
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = .black
-        window.titlebarAppearsTransparent = true
+        window.appearance = NSAppearance(named: .aqua)
+        window.backgroundColor = AppTheme.windowBackground
+        window.titlebarAppearsTransparent = false
         window.delegate = self
         window.contentView = NSHostingView(
             rootView: AccountsView(manager: manager, onOpenSettings: onOpenSettings)
