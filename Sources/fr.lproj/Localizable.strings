@@ -42,6 +42,9 @@
 "Last known usage · refresh to update" = "Dernière utilisation connue · actualisez pour mettre à jour";
 "Personal details hidden" = "Données personnelles masquées";
 "Usage unavailable" = "Utilisation indisponible";
+"All Codex models" = "Tous les modèles Codex";
+"5h limit" = "Limite de 5 h";
+"Weekly limit" = "Limite hebdomadaire";
 "%@ loop" = "Boucle %@";
 "Settings" = "Réglages";
 "Project folder" = "Dossier du projet";

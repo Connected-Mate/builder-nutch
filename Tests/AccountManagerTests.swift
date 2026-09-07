@@ -144,6 +144,11 @@ final class AccountManagerTests: XCTestCase {
         let parsed = try AccountQuotas.codex(codex, now: now)
         XCTAssertEqual(parsed.windows.count, 3)
         XCTAssertEqual(parsed.windows.first?.usedFraction, 0.25)
+        XCTAssertEqual(parsed.windows.map(\.label), [
+            "All Codex models · 5h limit",
+            "All Codex models · Weekly limit",
+            "review · Session limit"
+        ])
         XCTAssertEqual(parsed.remainingPercent, 0)
         XCTAssertFalse(try AccountQuotas.codex(Data(#"{"account":{"type":"apiKey"}}"#.utf8)).isConnected)
         XCTAssertNil(AccountQuotas.percentage(["used": true], key: "used"))
@@ -151,7 +156,7 @@ final class AccountManagerTests: XCTestCase {
         let blockedData = Data(#"{"account":{"type":"chatgpt"},"limits":{"rateLimits":{"rateLimitReachedType":"workspaceCredits","primary":{"usedPercent":10,"windowDurationMins":15}}}}"#.utf8)
         let blocked = try AccountQuotas.codex(blockedData, now: now)
         XCTAssertNotNil(blocked.message)
-        XCTAssertEqual(blocked.windows.first?.label, "15 min limit")
+        XCTAssertEqual(blocked.windows.first?.label, "All Codex models · 15 min limit")
         let candidate = ManagedAccount(id: UUID(), provider: .codex, label: "Blocked", createdAt: now)
         XCTAssertNil(AccountSelection.best(provider: .codex, accounts: [candidate], states: [candidate.id: blocked], now: now))
     }

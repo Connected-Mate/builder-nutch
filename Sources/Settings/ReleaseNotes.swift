@@ -31,6 +31,13 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.6.2",
+            headline: "Every OpenAI allowance, clearly separated.",
+            changes: [
+                .init(title: "OpenAI model usage clarified", detail: "The shared Codex allowance and model-specific limits are now grouped and named separately, with one remaining percentage per model.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.6.1",
             headline: "The new icon, immediately.",
             changes: [

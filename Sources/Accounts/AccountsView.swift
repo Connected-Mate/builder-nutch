@@ -448,6 +448,16 @@ private struct WorkspaceSelectionStyle: ButtonStyle {
     }
 }
 
+private struct CodexUsageGroup: Identifiable {
+    let id: String
+    let title: String
+    var windows: [(window: LimitWindow, duration: String)]
+
+    var remainingPercent: Int? {
+        windows.compactMap(\.window.usedFraction).map { max(0, 100 - Int(($0 * 100).rounded())) }.min()
+    }
+}
+
 private struct AssistantRow: View {
     let account: ManagedAccount
     let state: ManagedAccountState
@@ -598,6 +608,13 @@ private struct AssistantRow: View {
             return message
         }
         if !state.windows.isEmpty && !state.isFresh() { return "Last known usage · refresh to update" }
+        if account.provider == .codex {
+            let readings = codexUsageGroups.compactMap { group -> String? in
+                guard let remaining = group.remainingPercent else { return nil }
+                return "\(group.title) \(remaining)% left"
+            }
+            if !readings.isEmpty { return readings.joined(separator: " · ") }
+        }
         if let limit = state.windows.filter({ $0.usedFraction != nil }).max(by: {
             ($0.usedFraction ?? 0) < ($1.usedFraction ?? 0)
         }), let reset = limit.resetsAt {
@@ -613,6 +630,30 @@ private struct AssistantRow: View {
                 Text("Usage stays on \(account.provider.title)’s website.")
             } else if state.windows.isEmpty {
                 Text(LocalizedStringKey(statusDescription))
+            } else if account.provider == .codex {
+                ForEach(codexUsageGroups) { group in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(LocalizedStringKey(group.title)).font(AppTheme.font(size: 13, weightValue: 650))
+                            Spacer()
+                            if let remaining = group.remainingPercent {
+                                Text("\(remaining)% left").font(AppTheme.font(size: 12, weightValue: 600)).monospacedDigit()
+                            }
+                        }
+                        ForEach(group.windows, id: \.window.id) { entry in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(LocalizedStringKey(entry.duration)).font(AppTheme.font(size: 11, weightValue: 600))
+                                Text(entry.window.summary).monospacedDigit()
+                                if let reset = entry.window.resetsAt {
+                                    Text("Resets \(reset.formatted(date: .abbreviated, time: .shortened))")
+                                        .foregroundStyle(AppTheme.muted)
+                                }
+                            }
+                            .padding(.leading, 12)
+                        }
+                    }
+                }
+                usageFooter
             } else {
                 ForEach(state.windows) { window in
                     VStack(alignment: .leading, spacing: 5) {
@@ -624,15 +665,36 @@ private struct AssistantRow: View {
                         }
                     }
                 }
-                if let date = state.refreshedAt {
-                    Text("\(state.isFresh() ? "Updated" : "Last known") \(date.formatted(.relative(presentation: .named)))")
-                        .foregroundStyle(AppTheme.muted)
-                }
-                if let message = state.message { Text(message).foregroundStyle(AppTheme.muted) }
+                usageFooter
             }
         }
-        .font(AppTheme.font(size: 12)).padding(24).frame(width: 340, alignment: .leading)
+        .font(AppTheme.font(size: 12)).padding(24).frame(width: 390, alignment: .leading)
         .background(AppTheme.surface).foregroundStyle(AppTheme.ink).preferredColorScheme(.light)
+    }
+
+    @ViewBuilder private var usageFooter: some View {
+        if let date = state.refreshedAt {
+            Text("\(state.isFresh() ? "Updated" : "Last known") \(date.formatted(.relative(presentation: .named)))")
+                .foregroundStyle(AppTheme.muted)
+        }
+        if let message = state.message { Text(message).foregroundStyle(AppTheme.muted) }
+    }
+
+    private var codexUsageGroups: [CodexUsageGroup] {
+        var groups: [CodexUsageGroup] = []
+        for window in state.windows {
+            let pieces = window.label.components(separatedBy: " · ")
+            let title = pieces.count > 1 ? pieces.dropLast().joined(separator: " · ") : "All Codex models"
+            let duration = pieces.last ?? window.label
+            let idPieces = window.id.split(separator: ".")
+            let groupID = idPieces.count > 1 ? idPieces.dropLast().joined(separator: ".") : "codex"
+            if let index = groups.firstIndex(where: { $0.id == groupID }) {
+                groups[index].windows.append((window, duration))
+            } else {
+                groups.append(CodexUsageGroup(id: groupID, title: title, windows: [(window, duration)]))
+            }
+        }
+        return groups
     }
 }
 

@@ -76,7 +76,11 @@ enum AccountQuotas {
                 let fraction = percentage(window, key: "usedPercent")
                 let minutes = (window["windowDurationMins"] as? NSNumber)?.intValue
                 let duration = minutes == 10080 ? "Weekly limit" : minutes == 300 ? "5h limit" : minutes.map { $0 < 60 || $0 % 60 != 0 ? "\($0) min limit" : "\($0 / 60)h limit" } ?? (key == "primary" ? "Session limit" : "Longer limit")
-                let title = bucketID == "codex" ? duration : "\(bucket["limitName"] as? String ?? bucketID) · \(duration)"
+                // The main `codex` bucket is an allowance shared by the Codex
+                // models. It is not the allowance of whichever named model is
+                // returned beside it, so keep that scope visible in the UI.
+                let scope = bucketID == "codex" ? "All Codex models" : (bucket["limitName"] as? String ?? bucketID)
+                let title = "\(scope) · \(duration)"
                 state.windows.append(LimitWindow(id: bucketID == "codex" ? key : "\(bucketID).\(key)", label: title, usedFraction: fraction, resetsAt: date(window["resetsAt"])))
             }
         }
