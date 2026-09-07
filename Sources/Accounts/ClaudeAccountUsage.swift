@@ -73,7 +73,11 @@ enum ClaudeAccountUsage {
                 state.windows.append(try window(row, id: "additional-\(state.windows.count)", label: "Additional subscription limit", percentage: "utilization"))
             }
         }
-        var blocking = false
+        // A nonempty vendor lock overrides otherwise available percentages.
+        // Paid usage is separate and must not restrict the subscription buckets.
+        var blocking = rates.contains { key, value in
+            key != "extra_usage" && key != "spend" && containsLock(value)
+        }
         if let raw = rates["limits"], !(raw is NSNull) {
             guard let limits = raw as? [[String: Any]], limits.count <= 50 else { throw ManagedAccountError.invalidResponse }
             for (index, row) in limits.enumerated() {
@@ -95,6 +99,16 @@ enum ClaudeAccountUsage {
         state.refreshedAt = known ? now : nil
         state.message = !known ? unavailable : blocking ? "Claude reports a subscription restriction. Choose an account manually or refresh its usage." : nil
         return state
+    }
+
+    private static func containsLock(_ value: Any) -> Bool {
+        if let rows = value as? [Any] { return rows.contains(where: containsLock) }
+        guard let row = value as? [String: Any] else { return false }
+        if let reason = row["locked_reason"], !(reason is NSNull) {
+            guard let reason = reason as? String else { return true }
+            if !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+        }
+        return row.values.contains(where: containsLock)
     }
 
     private static func window(_ row: [String: Any], id: String, label: String, percentage: String) throws -> LimitWindow {

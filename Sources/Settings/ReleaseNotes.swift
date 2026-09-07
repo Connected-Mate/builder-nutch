@@ -31,6 +31,15 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.5.0",
+            headline: "Already connected. Ready to build.",
+            changes: [
+                .init(title: "Find your existing accounts", detail: "Signed-in Claude Code, Codex and Kimi Code profiles on this Mac appear automatically. Existing sign-ins stay in place."),
+                .init(title: "Claude limits before your first message", detail: "Recent Claude Code versions can check subscription limits without starting a conversation. Unavailable usage stays clearly marked."),
+                .init(title: "A clearer icon, real app screenshots", detail: "A bold neutral icon stays readable at small sizes. Hide personal details with the eye button; the website now shows the actual Mac app.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.4.1",
             headline: "The workspace you saw on the website.",
             changes: [

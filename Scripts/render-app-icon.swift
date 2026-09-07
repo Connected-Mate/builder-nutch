@@ -1,17 +1,8 @@
-// Regenerate the neutral app icon: xcrun swift Scripts/render-app-icon.swift "$PWD"
+// Regenerate Builder Nutch's geometric N at every native macOS icon size.
+// xcrun swift Scripts/render-app-icon.swift "$PWD"
 import AppKit
-import CoreText
 import Foundation
 let root = URL(fileURLWithPath: CommandLine.arguments[1])
-let fontURL = root.appendingPathComponent("Sources/Fonts/BricolageGrotesque.ttf")
-CTFontManagerRegisterFontsForURL(fontURL as CFURL, .process, nil)
-let descriptors = CTFontManagerCreateFontDescriptorsFromURL(fontURL as CFURL) as! [CTFontDescriptor]
-let name = CTFontDescriptorCopyAttribute(descriptors[0], kCTFontNameAttribute) as! String
-let descriptor = CTFontDescriptorCreateWithAttributes([
-  kCTFontNameAttribute: name,
-  kCTFontVariationAttribute: [NSNumber(value: 0x77676874):700,NSNumber(value:0x77647468):100,NSNumber(value:0x6f70737a):96]
-] as CFDictionary)
-let font = CTFontCreateWithFontDescriptor(descriptor, 480, nil)
 let catalog = root.appendingPathComponent("Sources/Assets.xcassets/AppIcon.appiconset")
 let json = try JSONSerialization.jsonObject(with: Data(contentsOf: catalog.appendingPathComponent("Contents.json"))) as! [String:Any]
 for item in json["images"] as! [[String:String]] {
@@ -22,12 +13,18 @@ for item in json["images"] as! [[String:String]] {
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep:rep)
     let transform=NSAffineTransform();transform.scale(by:CGFloat(pixels)/1024);transform.concat()
-    let shape=NSBezierPath(roundedRect:NSRect(x:48,y:48,width:928,height:928),xRadius:205,yRadius:205)
-    NSColor(calibratedWhite:0.98,alpha:1).setFill();shape.fill()
-    NSColor(calibratedWhite:0.88,alpha:1).setStroke();shape.lineWidth=2;shape.stroke()
-    let title=NSAttributedString(string:"bn.",attributes:[.font:font,.foregroundColor:NSColor(calibratedWhite:0.14,alpha:1),.kern:-25])
-    let bounds=title.size()
-    title.draw(at:NSPoint(x:(1024-bounds.width)/2+8,y:(1024-bounds.height)/2+12))
+    let tile=NSBezierPath(roundedRect:NSRect(x:48,y:48,width:928,height:928),xRadius:205,yRadius:205)
+    NSColor(calibratedWhite:36.0/255,alpha:1).setFill();tile.fill()
+    NSColor(calibratedWhite:1,alpha:0.12).setStroke();tile.lineWidth=4;tile.stroke()
+    // A large, solid mark survives the 16 px menu/Dock sizes. No tiny lettering.
+    let mark=NSBezierPath()
+    mark.move(to:NSPoint(x:270,y:254))
+    for p in [NSPoint(x:270,y:770),NSPoint(x:389,y:770),NSPoint(x:638,y:438),
+              NSPoint(x:638,y:770),NSPoint(x:754,y:770),NSPoint(x:754,y:254),
+              NSPoint(x:635,y:254),NSPoint(x:386,y:586),NSPoint(x:386,y:254)] { mark.line(to:p) }
+    mark.close()
+    NSColor.white.setFill();mark.fill()
     NSGraphicsContext.restoreGraphicsState()
     try rep.representation(using:.png,properties:[:])!.write(to:catalog.appendingPathComponent(filename))
+    if pixels == 1024 { try rep.representation(using:.png,properties:[:])!.write(to:root.appendingPathComponent("website/public/app-icon.png")) }
 }

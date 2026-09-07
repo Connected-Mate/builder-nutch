@@ -10,20 +10,20 @@ Put the AI subscriptions you already pay for to work: more experiments, ambitiou
 
 - Manage six or more accounts per provider. There is no six-account cap.
 - Choose a service with **Add assistant**, then sign in on its official page. No name or email field blocks sign-in.
-- Connect Claude Code, Codex and Kimi Code subscriptions with their official tools.
+- Automatically detect signed-in Claude Code, Codex and Kimi Code profiles already on this Mac; add more through their official tools.
 - Open separate browser accounts for Grok, ChatGPT, Gemini, Perplexity, DeepSeek, Mistral and the Cursor dashboard. Web profiles use Google Chrome, Brave or Microsoft Edge; the Cursor editor keeps its own login.
 - Add an optional nickname and emoji after sign-in; edit them whenever you like.
 - See connection state, available usage windows and reset times, and choose a project folder.
 - Select an account in one click and launch a new Claude Code, Codex or Kimi Code terminal session with it.
 - Enable automatic selection to choose an available account from fresh readings before a new launch.
-- Keep selected assistants in Codenotch's familiar notch, with the full list in a matching black-and-green window.
+- Keep selected assistants in Codenotch's familiar notch, with the full list in a neutral white-and-gray window.
 - Choose **Auto-hide** for an invisible notch that appears when the pointer reaches the selected screen edge. **Show on hover** keeps a small pill; **Off** disables the notch.
 
 **A selection applies to new sessions launched from this manager. It does not change an already-running process, switch Claude.ai/ChatGPT browser sessions, or sign the separate desktop apps into another account. Running work is never killed to switch an account.** Each subscription keeps its own limits and terms; this app does not create unlimited usage.
 
 ## Connect your first account
 
-1. Open Builder Nutch and click **Add assistant** (or press ⌘N).
+1. Open Builder Nutch. Existing signed-in coding accounts appear automatically. To add another, click **Add assistant** (or press ⌘N).
 2. Choose the service you want: Claude, Codex, Kimi, Grok, Cursor or another listed assistant.
 3. Complete the official sign-in in the browser. For web profiles, return and choose **I've finished signing in**.
 4. Optionally choose a nickname and emoji, then **Finish**. Repeat for your other accounts.
@@ -31,7 +31,7 @@ Put the AI subscriptions you already pay for to work: more experiments, ambitiou
 
 Coding assistants require their official [Claude Code](https://code.claude.com/docs/en/quickstart), [Codex CLI](https://developers.openai.com/codex/cli/) or [Kimi Code](https://www.kimi.com/code/docs/en/kimi-code-cli/) tool. Web assistants require [Google Chrome](https://www.google.com/chrome/), Brave or Microsoft Edge; they never reuse your default browser's shared account.
 
-The account manager never reads or replaces your existing default Claude Code or Codex login. New managed profiles start disconnected. Browser login is performed by you, and each provider remains responsible for its credentials and token refresh.
+Existing coding profiles are checked through the official tools and linked automatically when signed in. Confirmed duplicate identities are skipped. Credentials stay in their original vendor storage, and existing configuration is not rewritten by the manager. New isolated profiles start disconnected. Browser login is performed by you, and each provider remains responsible for its credentials and token refresh.
 
 ## Updating from Codenotch Accounts
 
@@ -39,7 +39,9 @@ Builder Nutch is the new name for this fork. Install **Builder Nutch.app** and k
 
 ## How account isolation works
 
-Each profile has a stable UUID directory under `~/Library/Application Support/Codenotch Accounts/profiles/`. Claude Code runs with that profile's `CLAUDE_CONFIG_DIR`; Codex runs with its `CODEX_HOME` and its official `keyring` credential storage; Kimi Code runs with its `KIMI_CODE_HOME`. Credential/provider environment overrides are excluded from launched processes so another account or API key cannot silently take precedence.
+Each new isolated profile has a stable UUID directory under `~/Library/Application Support/Codenotch Accounts/profiles/`. Claude Code runs with that profile's `CLAUDE_CONFIG_DIR`; Codex runs with its `CODEX_HOME` and its official `keyring` credential storage; Kimi Code runs with its `KIMI_CODE_HOME`. Credential/provider environment overrides are excluded from launched processes so another account or API key cannot silently take precedence.
+
+Discovered profiles instead keep a reference to their original directory. Default Claude preserves its unsuffixed Keychain identity; discovered Codex preserves its original credential-store configuration; discovered Kimi preserves its original home. Removing a discovered profile records that choice so background discovery does not add it again.
 
 Browser accounts each get a private `browser/` directory, and the browser chosen on first launch stays pinned to that profile. Browser authentication is confirmed by you, not inferred from cookies. A fixed managed `UserDataDir` policy blocks browser launch rather than sharing a company profile.
 
@@ -48,7 +50,7 @@ The app stores nicknames, emoji, identifiers, browser confirmation dates and sel
 ### Usage accuracy
 
 - **Codex:** read from the official app-server `account/read` and `account/rateLimits/read` methods.
-- **Claude Code:** a per-profile status-line helper captures only the documented `rate_limits` fields. Readings appear after you use a managed Claude Code session. No undocumented subscription API is queried by the managed-account runtime.
+- **Claude Code:** recent official CLI versions provide the SDK `get_usage` control request, so subscription limits can be read before sending a model prompt. The reader sends only initialize and usage controls, disables user customizations, tools and MCP servers, and requests no session persistence. Five-hour, weekly and model-scoped constraints are included. This [official SDK interface is experimental](https://github.com/anthropics/claude-agent-sdk-typescript/releases/tag/v0.3.169); unsupported or unavailable responses remain unavailable. Older status-line readings may stay visible but a failed live check cannot mark them fresh for automatic selection.
 - **Kimi Code:** subscription status and usage are read from an authenticated, temporary loopback instance of the official local web server. Its credentials remain vendor-owned.
 - **Web profiles:** usage is available on each service’s website. Builder Nutch does not claim to verify browser sign-in or use these profiles for automatic quota selection.
 - Unknown or old readings remain unknown or stale. They are excluded from automatic selection; a weekly or session limit at 100% also makes an account unavailable.
@@ -78,7 +80,7 @@ The test host skips application startup. Account tests use temporary directories
 
 ## Website
 
-The public introduction is hosted on [GitHub Pages](https://connected-mate.github.io/builder-nutch/). Its complete source is in `website/`. From that directory, run `npm ci`, `npm run dev`, `npm run check`, or `npm run build`. The static build uses the `/builder-nutch/` base path and writes to `website/dist`. The website workflow checks pull requests and publishes successful builds from `main` through GitHub Actions. Any sample account preview uses clearly labeled sample data; the website never accesses local accounts.
+The public introduction is hosted on [GitHub Pages](https://connected-mate.github.io/builder-nutch/). Its complete source is in `website/`. From that directory, run `npm ci`, `npm run dev`, `npm run check`, or `npm run build`. The static build uses the `/builder-nutch/` base path and writes to `website/dist`. The website workflow checks pull requests and publishes successful builds from `main` through GitHub Actions. The website shows real screenshots captured from the running Mac app with personal details hidden. It never accesses local accounts.
 
 Maintainers distributing a Developer ID build must run `Scripts/sign-release.sh APP_PATH 'Developer ID Application: …'`, notarize the resulting archive, and staple the accepted ticket before publishing. The signing helper signs each embedded Sparkle executable with a secure timestamp and strips development-only entitlements from the application.
 

@@ -51,6 +51,23 @@ final class ClaudeAccountUsageTests: XCTestCase {
         XCTAssertNil(AccountSelection.best(provider: .claude, accounts: [account], states: [account.id: state], now: now))
     }
 
+    func testVendorLocksOverrideAvailableQuotaInEverySubscriptionBucket() throws {
+        let account = ManagedAccount(id: UUID(), provider: .claude, label: "Locked fixture", createdAt: now)
+        for bucket: [String: Any] in [
+            ["five_hour": ["utilization": 0, "locked_reason": "subscription_restricted"]],
+            ["model_scoped": [["display_name": "Model", "utilization": 5, "locked_reason": "restricted"]]],
+            ["limits": [["kind": "session", "percent": 5, "severity": "normal", "locked_reason": "restricted"]]],
+            ["future_bucket": ["utilization": 1, "locked_reason": true]]
+        ] {
+            let state = try ClaudeAccountUsage.state(status: ManagedAccountState(isConnected: true), usage: data(["rate_limits_available": true, "rate_limits": bucket]), now: now)
+            XCTAssertNotNil(state.message)
+            XCTAssertNil(AccountSelection.best(provider: .claude, accounts: [account], states: [account.id: state], now: now))
+        }
+        let available = try ClaudeAccountUsage.state(status: ManagedAccountState(isConnected: true), usage: data(["rate_limits_available": true, "rate_limits": ["five_hour": ["utilization": 0, "locked_reason": NSNull()], "extra_usage": ["locked_reason": "disabled"]]]), now: now)
+        XCTAssertNil(available.message)
+        XCTAssertEqual(AccountSelection.best(provider: .claude, accounts: [account], states: [account.id: available], now: now)?.id, account.id)
+    }
+
     func testUnavailableUnknownAndMalformedNeverBecomeFreeAllowance() throws {
         let status = ManagedAccountState(isConnected: true)
         for object: [String: Any] in [

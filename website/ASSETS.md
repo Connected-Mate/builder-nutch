@@ -39,3 +39,18 @@ https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..
 - `licenses/Simple-Icons-CC0.md` — CC0-1.0 plus trademark reminder.
 - `licenses/OpenAI-Cookbook-MIT` — MIT.
 - `licenses/Mistral-Platform-Docs-License` — Apache-2.0.
+
+## Actual app screenshots
+
+Captured 7 September 2026 from the installed, notarized Builder Nutch 0.5.0 for macOS. `Scripts/capture-app.swift` uses ScreenCaptureKit and targets only the installed application's process. It requires the app's **Hide personal details** control to be enabled before capture. Names, email addresses and project paths are masked by the running app; account states and percentages are actual readings. No replacement UI, invented percentages or image retouching.
+
+- `screenshots/accounts.png`: Claude account manager, including a disconnected account and real subscription limits.
+- `screenshots/assistants.png`: native assistant picker, with the same official provider artwork as the app.
+- `screenshots/codex.png`: native Codex account manager and quota.
+- `screenshots/appearance.png`: native appearance settings.
+
+These are static screenshots taken at that time. The website does not read current accounts or usage.
+
+## Builder Nutch icon
+
+`app-icon.png` and `favicon.svg` use the project's own large geometric N on the existing charcoal palette. The native asset catalog is generated at every macOS icon size by `Scripts/render-app-icon.swift`; provider logos remain unchanged.

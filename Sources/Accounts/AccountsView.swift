@@ -11,7 +11,7 @@ private extension AccountProvider {
     }
 }
 
-/// Native translation of the approved website's AccountPreview.
+/// The native account manager. Public screenshots are captured from this live view.
 struct AccountsView: View {
     @ObservedObject var manager: AccountManager
     let onOpenSettings: (() -> Void)?
@@ -22,6 +22,7 @@ struct AccountsView: View {
     @State private var removing: ManagedAccount?
     @State private var localError: String?
     @State private var projectURL: URL
+    @AppStorage("accounts.hidePersonalDetails") private var hidePersonalDetails = false
     @AppStorage("accounts.projectFolder") private var savedProjectPath = ""
 
     init(manager: AccountManager, onOpenSettings: (() -> Void)? = nil, projectFolder: URL? = nil) {
@@ -43,7 +44,13 @@ struct AccountsView: View {
             VStack(spacing: 0) {
                 header
                 if manager.loginAccountID != nil { loginBanner }
-                if let notice = manager.notice { noticeBanner(notice) }
+                if let notice = manager.notice, !hidePersonalDetails { noticeBanner(notice) }
+                if let discovery = manager.discoveryNotice {
+                    Label(discovery, systemImage: "checkmark.circle")
+                        .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 30).padding(.vertical, 10).background(AppTheme.paper)
+                }
                 if showingAdd {
                     providerCatalog
                 } else {
@@ -66,7 +73,7 @@ struct AccountsView: View {
                 .preferredColorScheme(.light)
         }
         .confirmationDialog(
-            "Remove \(removing?.label ?? "assistant")?",
+            "Remove \(removing.map { displayName(for: $0) } ?? "assistant")?",
             isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
             titleVisibility: .visible, presenting: removing
         ) { account in
@@ -76,7 +83,7 @@ struct AccountsView: View {
             }
             Button("Cancel", role: .cancel) { removing = nil }
         } message: { account in
-            Text("This removes \(account.label) from the list. The official service keeps its saved sign-in.")
+            Text("This removes \(displayName(for: account)) from the list. The official service keeps its saved sign-in.")
         }
         .alert("Builder Nutch", isPresented: Binding(
             get: { localError != nil }, set: { if !$0 { localError = nil } }
@@ -84,7 +91,7 @@ struct AccountsView: View {
             Button("OK") { localError = nil }
         } message: { Text(localError ?? "") }
         .onChange(of: providerIDs) { _, _ in
-            if let filter, !providers.contains(filter) { self.filter = providers.first }
+            if filter == nil || !providers.contains(where: { $0 == filter }) { self.filter = providers.first }
         }
     }
 
@@ -131,13 +138,13 @@ struct AccountsView: View {
             .frame(maxHeight: .infinity)
             VStack(alignment: .leading, spacing: 4) {
                 Button(action: chooseProjectFolder) {
-                    Label(projectURL.lastPathComponent.isEmpty ? "Project folder" : projectURL.lastPathComponent,
+                    Label(hidePersonalDetails || projectURL.lastPathComponent.isEmpty ? "Project folder" : projectURL.lastPathComponent,
                           systemImage: "folder")
                         .lineLimit(1).truncationMode(.middle)
                         .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
                 }
                 .buttonStyle(WorkspaceQuietButtonStyle())
-                .help("Project folder: \(projectURL.path(percentEncoded: false))")
+                .help(hidePersonalDetails ? "Choose project folder" : "Project folder: \(projectURL.path(percentEncoded: false))")
                 .accessibilityLabel("Choose project folder")
                 if let onOpenSettings {
                     Button(action: onOpenSettings) {
@@ -195,6 +202,13 @@ struct AccountsView: View {
                     .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
             }
             Spacer(minLength: 12)
+            Button { hidePersonalDetails.toggle() } label: {
+                Image(systemName: hidePersonalDetails ? "eye.slash" : "eye")
+                    .frame(width: 28, height: 32)
+            }
+            .buttonStyle(WorkspaceQuietButtonStyle())
+            .help(hidePersonalDetails ? "Show personal details" : "Hide personal details")
+            .accessibilityLabel(hidePersonalDetails ? "Show personal details" : "Hide personal details")
             if showingAdd {
                 Button("Back") { showingAdd = false }.buttonStyle(WorkspaceSelectionStyle())
             } else {
@@ -320,7 +334,7 @@ struct AccountsView: View {
             if let selectedAccount {
                 Text(selectedAccount.provider.isBrowserProfile ? "Selected profile:" :
                         "Next \(selectedAccount.provider.workspaceTitle) session:")
-                Text(selectedAccount.label).font(AppTheme.font(size: 10, weightValue: 600)).lineLimit(1)
+                Text(displayName(for: selectedAccount)).font(AppTheme.font(size: 10, weightValue: 600)).lineLimit(1)
                 if manager.automaticSelection && selectedAccount.provider.supportsAutomaticSelection {
                     Text("· Auto-select on").foregroundStyle(AppTheme.muted)
                         .help("At launch, a different eligible account may be chosen using fresh verified quota.")
@@ -340,6 +354,12 @@ struct AccountsView: View {
         .padding(.horizontal, 30).padding(.vertical, 10).frame(minHeight: 48)
         .background(AppTheme.sidebar)
         .overlay(alignment: .top) { Rectangle().fill(AppTheme.line).frame(height: 1) }
+    }
+
+    private func displayName(for account: ManagedAccount) -> String {
+        guard hidePersonalDetails else { return account.label }
+        let position = manager.accounts.filter { $0.provider == account.provider }.firstIndex { $0.id == account.id } ?? 0
+        return "\(account.provider.title) \(position + 1)"
     }
 
     private var loginBanner: some View {
@@ -415,6 +435,13 @@ private struct AssistantRow: View {
     let remove: () -> Void
     let reportError: (String) -> Void
     @State private var showingUsage = false
+    @AppStorage("accounts.hidePersonalDetails") private var hidePersonalDetails = false
+
+    private var displayLabel: String {
+        guard hidePersonalDetails else { return account.label }
+        let position = manager.accounts.filter { $0.provider == account.provider }.firstIndex { $0.id == account.id } ?? 0
+        return "\(account.provider.title) \(position + 1)"
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -422,20 +449,20 @@ private struct AssistantRow: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: 8).fill(AppTheme.soft)
                     RoundedRectangle(cornerRadius: 8).stroke(AppTheme.line)
-                    if let emoji = account.emoji, !emoji.isEmpty {
+                    if let emoji = account.emoji, !emoji.isEmpty, !hidePersonalDetails {
                         Text(emoji).font(.system(size: 17))
                     } else {
-                        Text(String(account.label.prefix(1)).uppercased())
+                        Text(String(displayLabel.prefix(1)).uppercased())
                             .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
                     }
                 }
                 .frame(width: 32, height: 34).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(account.label).font(AppTheme.font(size: 13, weightValue: 550)).lineLimit(1)
-                        .help(account.label)
+                    Text(displayLabel).font(AppTheme.font(size: 13, weightValue: 550)).lineLimit(1)
+                        .help(displayLabel)
                     if let email = state.email ?? account.emailHint, !email.isEmpty {
-                        Text(email).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
-                            .lineLimit(1).truncationMode(.middle).help(email)
+                        Text(hidePersonalDetails ? "Personal details hidden" : email).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                            .lineLimit(1).truncationMode(.middle).help(hidePersonalDetails ? "Personal details hidden" : email)
                     }
                     Text(statusDescription).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
                         .lineLimit(1).help(statusDescription)
@@ -451,27 +478,28 @@ private struct AssistantRow: View {
                     if !account.provider.isBrowserProfile {
                         Button("Refresh usage") { Task { await manager.refresh(account) } }.disabled(state.isBusy)
                     }
-                    Button("Nickname & emoji…", action: personalize).disabled(state.isBusy || isLoginPending)
+                    Button(hidePersonalDetails ? "Show personal details to edit nickname…" : "Nickname & emoji…", action: personalize)
+                        .disabled(state.isBusy || isLoginPending || hidePersonalDetails)
                     Divider()
                     Button("Remove…", role: .destructive, action: remove).disabled(state.isBusy || isLoginPending)
                 } label: {
                     Image(systemName: "ellipsis").frame(width: 22, height: 30)
                 }
                 .menuStyle(.borderlessButton).fixedSize()
-                .accessibilityLabel("More actions for \(account.label)")
+                .accessibilityLabel("More actions for \(displayLabel)")
                 .padding(.trailing, 8)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Button { showingUsage = true } label: { quotaRing }
                 .buttonStyle(.plain).frame(width: 110)
-                .accessibilityLabel("Usage details for \(account.label): \(quotaDescription)")
+                .accessibilityLabel("Usage details for \(displayLabel): \(quotaDescription)")
                 .popover(isPresented: $showingUsage) { usageDetails }
             selectionControl.frame(width: 110)
         }
         .padding(.vertical, 8).frame(minHeight: 76)
         .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(account.label), \(account.provider.workspaceTitle), \(statusDescription)")
+        .accessibilityLabel("\(displayLabel), \(account.provider.workspaceTitle), \(statusDescription)")
     }
 
     private var quotaDescription: String {
@@ -516,7 +544,7 @@ private struct AssistantRow: View {
             }
             .buttonStyle(WorkspaceSelectionStyle(primary: isSelected))
             .disabled(state.isBusy || isLoginPending)
-            .accessibilityLabel("\(isSelected ? "Selected" : "Select") \(account.label) for \(account.provider.workspaceTitle)")
+            .accessibilityLabel("\(isSelected ? "Selected" : "Select") \(displayLabel) for \(account.provider.workspaceTitle)")
             .accessibilityAddTraits(isSelected ? .isSelected : [])
         }
     }
@@ -544,7 +572,7 @@ private struct AssistantRow: View {
 
     private var usageDetails: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("\(account.label) · Usage").font(AppTheme.font(size: 16, weightValue: 650))
+            Text("\(displayLabel) · Usage").font(AppTheme.font(size: 16, weightValue: 650))
             if account.provider.isBrowserProfile {
                 Text("Usage stays on \(account.provider.title)’s website.")
             } else if state.windows.isEmpty {

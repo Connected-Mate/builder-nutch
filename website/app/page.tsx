@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import {
   ArrowDown,
   ArrowRight,
@@ -7,8 +7,6 @@ import {
   ChevronDown,
   Download,
   Plus,
-  Settings2,
-  ShieldCheck,
 } from 'lucide-react';
 
 const repository = 'https://github.com/Connected-Mate/builder-nutch';
@@ -41,16 +39,6 @@ const providers = [
   },
   { id: 'mistral', name: 'Mistral', label: 'Mistral', kind: 'Browser profile' },
 ];
-const examples = [
-  {
-    name: 'Personal',
-    detail: 'Limit reached · resets in 42 min',
-    remaining: 0,
-  },
-  { name: 'Client projects', detail: 'Resets in 3 h 18 min', remaining: 81 },
-  { name: 'Experiments', detail: 'Resets in 2 h 06 min', remaining: 64 },
-];
-
 function ProviderLogo({ id, size = 24 }: { id: string; size?: number }) {
   return (
     <img
@@ -63,256 +51,81 @@ function ProviderLogo({ id, size = 24 }: { id: string; size?: number }) {
   );
 }
 
-function QuotaRing({ remaining }: { remaining: number }) {
-  const circumference = 138.23;
-  return (
-    <span className="quota-ring" aria-label={`${remaining}% remaining`}>
-      <svg viewBox="0 0 52 52" aria-hidden="true">
-        <circle className="ring-track" cx="26" cy="26" r="22" />
-        <circle
-          className="ring-value"
-          cx="26"
-          cy="26"
-          r="22"
-          strokeDasharray={circumference}
-          strokeDashoffset={circumference * (1 - remaining / 100)}
-        />
-      </svg>
-      <span>
-        {remaining}
-        <small>%</small>
-      </span>
-    </span>
-  );
-}
+const screenshots = [
+  {
+    file: 'accounts.png',
+    label: 'Your accounts',
+    alt: 'Actual Builder Nutch Mac app showing connected Claude accounts and their live remaining subscription limits. Personal details are hidden.',
+  },
+  {
+    file: 'assistants.png',
+    label: 'Add an assistant',
+    alt: 'Actual Builder Nutch Mac app provider picker with official service logos and connection options.',
+  },
+  {
+    file: 'codex.png',
+    label: 'Codex',
+    alt: 'Actual Builder Nutch Mac app showing a connected Codex subscription and its remaining quota. Personal details are hidden.',
+  },
+];
 
-function AccountPreview() {
-  const [providerIndex, setProviderIndex] = useState(0);
-  const [chosen, setChosen] = useState([0, 0, 0]);
-  const [showProviders, setShowProviders] = useState(false);
-  const addAssistantRef = useRef<HTMLButtonElement>(null);
-  const providerRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const provider = providers[providerIndex];
-  const selected = chosen[providerIndex];
-  function selectAccount(index: number) {
-    setChosen((previous) =>
-      previous.map((value, position) =>
-        position === providerIndex ? index : value,
-      ),
-    );
-  }
+function AppScreenshots() {
+  const [selected, setSelected] = useState(0);
+  const screenshot = screenshots[selected];
   return (
-    <div className="preview-wrap" id="preview">
+    <figure className="preview-wrap app-screenshots" id="preview">
       <div className="preview-annotation">
         <span>One home for your AI accounts.</span>
         <span>
-          TRY THE PREVIEW <ArrowDown size={13} />
+          THE REAL MAC APP <ArrowDown size={13} />
         </span>
       </div>
-      <div className="product-preview">
-        <div className="window-bar">
-          <span className="window-dots" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </span>
-          <span>Builder Nutch</span>
-          <span className="sample-tag">Interactive example</span>
-        </div>
-        <div className="manager">
-          <aside className="manager-sidebar" aria-label="Example assistants">
-            <div className="sidebar-label">
-              Your assistants <span>3</span>
-            </div>
-            <div className="provider-buttons">
-              {providers.slice(0, 3).map((item, index) => (
-                <button
-                  key={item.id}
-                  ref={(node) => {
-                    providerRefs.current[index] = node;
-                  }}
-                  className={
-                    index === providerIndex
-                      ? 'provider-button active'
-                      : 'provider-button'
-                  }
-                  onClick={() => {
-                    setProviderIndex(index);
-                    setShowProviders(false);
-                  }}
-                  aria-pressed={index === providerIndex}
-                >
-                  <ProviderLogo id={item.id} />
-                  <span>{item.label}</span>
-                  <span className="profile-count">3</span>
-                </button>
-              ))}
-            </div>
-            <button
-              ref={addAssistantRef}
-              className="add-assistant"
-              onClick={() => setShowProviders(!showProviders)}
-              aria-expanded={showProviders}
-              aria-controls="preview-content"
-            >
-              <Plus size={16} /> Add assistant
-            </button>
-            <span className="sidebar-bottom">
-              <ShieldCheck size={15} /> On your Mac. In your control.
-            </span>
-          </aside>
-          <div className="manager-content" id="preview-content">
-            {showProviders ? (
-              <div className="provider-catalog">
-                <div className="manager-heading">
-                  <div>
-                    <h2>Add an assistant</h2>
-                    <p>
-                      Choose a service. Sign in on its official page in the Mac
-                      app.
-                    </p>
-                  </div>
-                  <button
-                    className="back-button"
-                    onClick={() => {
-                      setShowProviders(false);
-                      addAssistantRef.current?.focus();
-                    }}
-                  >
-                    Back
-                  </button>
-                </div>
-                <div className="catalog-list">
-                  {providers.map((item, index) => (
-                    <div className="catalog-item" key={item.id}>
-                      <ProviderLogo id={item.id} />
-                      <span>
-                        <strong>{item.label}</strong>
-                        <small>{item.kind}</small>
-                      </span>
-                      {index < 3 ? (
-                        <button
-                          onClick={() => {
-                            setProviderIndex(index);
-                            setShowProviders(false);
-                            providerRefs.current[index]?.focus();
-                          }}
-                          aria-label={`Preview ${item.label}`}
-                        >
-                          Preview <ArrowRight size={14} />
-                        </button>
-                      ) : (
-                        <span className="catalog-availability">
-                          In the Mac app
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <p className="catalog-note">
-                  This website uses sample accounts. Download the app to connect
-                  your own.
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="manager-heading">
-                  <div>
-                    <div className="provider-title">
-                      <ProviderLogo id={provider.id} size={25} />
-                      <h2>{provider.label}</h2>
-                    </div>
-                    <p>Three accounts. Ready for your next session.</p>
-                  </div>
-                  <span className="account-total">3 accounts</span>
-                </div>
-                <div className="table-labels" aria-hidden="true">
-                  <span>ACCOUNT</span>
-                  <span>REMAINING</span>
-                  <span>NEXT SESSION</span>
-                </div>
-                <div className="account-rows">
-                  {examples.map((account, index) => (
-                    <div
-                      className={`account-row ${selected === index ? 'selected' : ''}`}
-                      key={account.name}
-                    >
-                      <div className="account-identity">
-                        <span className="account-avatar" aria-hidden="true">
-                          {['P', 'C', 'E'][index]}
-                        </span>
-                        <span>
-                          <strong>{account.name}</strong>
-                          <small>{account.detail}</small>
-                        </span>
-                      </div>
-                      <QuotaRing remaining={account.remaining} />
-                      <button
-                        className="select-account"
-                        onClick={() => selectAccount(index)}
-                        aria-pressed={selected === index}
-                        aria-label={`Select ${account.name} for ${provider.label}`}
-                      >
-                        {selected === index ? (
-                          <>
-                            <Check size={14} /> Selected
-                          </>
-                        ) : (
-                          <>
-                            Use account <ArrowRight size={14} />
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <div className="auto-select">
-                  <div>
-                    <Settings2 size={17} />
-                    <span>
-                      <strong>Put available quota to work.</strong>
-                      <small>
-                        Choose the account with the most room for the next
-                        session.
-                      </small>
-                    </span>
-                  </div>
-                  <button
-                    onClick={() =>
-                      selectAccount(
-                        examples.reduce(
-                          (best, item, index) =>
-                            item.remaining > examples[best].remaining
-                              ? index
-                              : best,
-                          0,
-                        ),
-                      )
-                    }
-                  >
-                    Try auto-select <ArrowRight size={15} />
-                  </button>
-                </div>
-                <output className="preview-status">
-                  <span className="status-dot" />
-                  Next {provider.label} session:{' '}
-                  <strong>{examples[selected].name}</strong>
-                  <span className="example-only">Sample data</span>
-                </output>
-              </>
-            )}
-          </div>
-        </div>
+      <div className="screenshot-picker" aria-label="App screenshots">
+        {screenshots.map((item, index) => (
+          <button
+            key={item.file}
+            type="button"
+            aria-pressed={selected === index}
+            onClick={() => setSelected(index)}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
-      <p className="preview-footnote">
-        A hands-on example, with sample accounts. Your real accounts stay in the
-        Mac app.
-      </p>
-    </div>
+      <a
+        className="screenshot-frame"
+        href={asset(`screenshots/${screenshot.file}`)}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`Open full-size screenshot: ${screenshot.label}`}
+      >
+        <img
+          src={asset(`screenshots/${screenshot.file}`)}
+          alt={screenshot.alt}
+          width={3024}
+          height={1898}
+          fetchPriority="high"
+        />
+      </a>
+      <figcaption>
+        Captured in Builder Nutch for macOS. Personal details hidden.{' '}
+        <a
+          href={asset(`screenshots/${screenshot.file}`)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          View full size <ArrowUpRight size={12} />
+        </a>
+      </figcaption>
+    </figure>
   );
 }
 
 const faqs = [
+  [
+    'Will it find accounts already on my Mac?',
+    'Yes. Builder Nutch checks the usual Claude Code, Codex and Kimi Code profile locations and adds confirmed signed-in accounts. It reuses the original sign-in without copying tokens. Previously linked profiles and verified duplicate identities are skipped; removed profiles stay removed. Kimi can show separate profiles for the same subscription when its tool does not provide account identity. Browser subscriptions need their own sign-in; browser cookies are not scanned.',
+  ],
   [
     'Can I add six accounts from the same service?',
     'Yes. Create a separate profile for every account you want to use. There is no six-account cap. Choose your service, sign in on its official page, then add a nickname and emoji if you like.',
@@ -327,7 +140,7 @@ const faqs = [
   ],
   [
     'Will I see usage for every account?',
-    'Codex and Kimi Code read usage through their official local tools. Claude Code supplies usage after a managed session has been used. For browser profiles, check usage on the service’s website. Browser profiles are excluded from automatic selection.',
+    'Codex and Kimi Code read usage through their official local tools. Recent Claude Code versions can read plan limits without sending a message. When a service does not return limits, the app shows them as unavailable. For browser profiles, check usage on the service’s website. Browser profiles are excluded from automatic selection.',
   ],
   [
     'Does Builder Nutch give me extra AI usage?',
@@ -401,7 +214,7 @@ export default function Home() {
               </div>
             ))}
           </div>
-          <AccountPreview />
+          <AppScreenshots />
         </section>
         <section
           className="workflow shell"
@@ -429,9 +242,10 @@ export default function Home() {
               <div>
                 <h3>Your service. Your login.</h3>
                 <p>
-                  Click <strong>Add assistant</strong>, choose the provider, and
-                  sign in on its official page. No hunting for tokens. No
-                  password forms here.
+                  Already signed in on your Mac? Claude Code, Codex and Kimi
+                  Code accounts are detected automatically. To add another,
+                  click <strong>Add assistant</strong> and sign in on its
+                  official page.
                 </p>
                 <span className="step-detail">
                   <Plus size={14} /> Choose → Sign in → You’re in
@@ -470,28 +284,23 @@ export default function Home() {
         </section>
         <section className="edge-section" aria-labelledby="edge-title">
           <div className="shell edge-layout">
-            <div
-              className="edge-illustration"
-              aria-label="Illustration of the auto-hidden notch"
-            >
-              <span className="edge-screen-label">
-                YOUR WORK, FRONT AND CENTER
-              </span>
-              <div className="edge-line" />
-              <div className="mini-notch">
-                <ProviderLogo id="claude" size={22} />
-                <span>
-                  81<small>%</small>
-                </span>
-                <ProviderLogo id="openai" size={22} />
-                <span>
-                  64<small>%</small>
-                </span>
-              </div>
-              <span className="edge-hint">
-                <ArrowUpRight size={19} /> Right where you need it.
-              </span>
-            </div>
+            <figure className="appearance-capture">
+              <a
+                href={asset('screenshots/appearance.png')}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open the actual Mac appearance settings screenshot"
+              >
+                <img
+                  src={asset('screenshots/appearance.png')}
+                  width={1280}
+                  height={1424}
+                  loading="lazy"
+                  alt="Actual Builder Nutch appearance settings, with auto-hide and screen edge options."
+                />
+              </a>
+              <figcaption>Your Mac app. Your preferred screen edge.</figcaption>
+            </figure>
             <div className="edge-copy">
               <span className="eyebrow">THERE WHEN YOU NEED IT</span>
               <h2>
