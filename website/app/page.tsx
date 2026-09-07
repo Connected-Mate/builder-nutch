@@ -180,19 +180,23 @@ export default function Home() {
         <section className="hero shell" aria-labelledby="hero-title">
           <div className="hero-heading">
             <p className="eyebrow">
-              <span className="status-dot" /> BUILT FOR PEOPLE WHO BUILD
+              <span className="status-dot" /> BUILT FOR HIGH-OUTPUT AI BUILDERS
             </p>
             <h1 id="hero-title">
-              All your AI.
+              Build more.
               <br />
-              <span>Room to build.</span>
+              <span>While AI is still this affordable.</span>
             </h1>
           </div>
           <div className="hero-copy">
-            <p>Your next idea shouldn’t wait on one account.</p>
             <p>
-              Bring your AI subscriptions together. See what’s available. Pick
-              an account and get back to the work that matters.
+              Today’s AI subscriptions give builders an extraordinary amount
+              of intelligence for a monthly price.
+            </p>
+            <p>
+              Bring the plans you pay for together, keep available capacity
+              visible and turn more experiments into production before the
+              economics change.
             </p>
             <div className="hero-actions">
               <a className="button" href={download}>
@@ -223,17 +227,17 @@ export default function Home() {
         >
           <div className="section-intro">
             <span className="eyebrow">
-              LESS ACCOUNT ADMIN. MORE ACTUAL WORK.
+              MORE CAPACITY. MORE SHIPPED WORK.
             </span>
             <h2 id="workflow-title">
-              From sign-in
+              Use today’s
               <br />
-              to shipping.
+              pricing advantage.
             </h2>
             <p>
-              A few subscriptions. A lot of possibilities.
+              A few subscriptions can unlock a serious R&amp;D pace.
               <br />
-              Keep the setup out of your way.
+              Keep every plan ready for the next build.
             </p>
           </div>
           <ol className="steps">
@@ -324,23 +328,25 @@ export default function Home() {
           aria-labelledby="principles-title"
         >
           <div>
-            <span className="eyebrow">YOUR IDEAS DESERVE THE ATTENTION</span>
+            <span className="eyebrow">THIS WINDOW WILL NOT STAY OPEN FOREVER</span>
             <h2 id="principles-title">
-              Experiment more.
+              Use affordable intelligence.
               <br />
-              Make something real.
+              Ship valuable products.
             </h2>
           </div>
           <div className="principles-copy">
             <p>
-              AI subscriptions are a way to try the ambitious idea, explore a
-              new direction and ship useful work. Get more from the ones you
-              already have.
+              Buying the same volume through direct API or enterprise plans can
+              cost far more. Individual subscriptions make intensive
+              experimentation unusually accessible today. Use that advantage
+              to test ambitious ideas, move faster and put the winners into
+              production.
             </p>
             <p>
-              Builder Nutch stays small: accounts on your Mac, official sign-in,
-              open source. Just a little less friction between you and your next
-              build.
+              Builder Nutch keeps every plan visible and ready on your Mac.
+              Subscribe within each provider’s terms, build aggressively and
+              make the monthly cost earn its place in shipped work.
             </p>
             <a className="quiet-link" href={repository}>
               See the source on GitHub <ArrowUpRight size={16} />
@@ -373,9 +379,9 @@ export default function Home() {
           className="download-section shell"
           aria-labelledby="download-title"
         >
-          <span className="eyebrow">LESS SWITCHING. MORE SHIPPING.</span>
-          <h2 id="download-title">Go build the thing.</h2>
-          <p>Your subscriptions, together. Your next idea, closer.</p>
+          <span className="eyebrow">THE BEST TIME TO BUILD IS NOW</span>
+          <h2 id="download-title">Use the window. Ship the product.</h2>
+          <p>Turn today’s AI pricing into tomorrow’s production software.</p>
           <a className="button" href={download}>
             <Download size={18} /> Get Builder Nutch for Mac
           </a>

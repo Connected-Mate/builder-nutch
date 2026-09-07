@@ -1,8 +1,8 @@
 # Builder Nutch
 
-**Big ideas. Lean R&D. Keep building.**
+**Build more while AI is still this affordable.**
 
-Put the AI subscriptions you already pay for to work: more experiments, ambitious R&D and real products. Builder Nutch is a native macOS account manager built directly on [Codenotch by Vinz](https://github.com/vinzdg/codenotch). Keep the screen-edge notch and usage rings; add separate assistant accounts, official browser sign-in, and one-click selection for your next session.
+Today’s AI subscriptions give builders an unusual amount of intelligence for their monthly price. Put every plan you pay for to work: run more experiments, move ambitious R&D into production and ship while this advantage exists. Builder Nutch is a native macOS account manager built directly on [Codenotch by Vinz](https://github.com/vinzdg/codenotch). Keep the screen-edge notch and usage rings; add separate assistant accounts, official browser sign-in, and one-click selection for your next session.
 
 [Website](https://connected-mate.github.io/builder-nutch/) · [Releases](https://github.com/Connected-Mate/builder-nutch/releases)
 
