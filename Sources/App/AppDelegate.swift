@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        AppTheme.registerFonts()
         guard !isRunningTests else { return }
         let preferences = Preferences()
         let manager = AccountManager()

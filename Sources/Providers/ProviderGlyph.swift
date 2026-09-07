@@ -18,6 +18,22 @@ enum ProviderGlyph: String, Codable, Equatable {
     /// outline — drop a PDF/SVG export from Figma in and it is picked up.
     var assetName: String { "glyph-\(rawValue)" }
 
+    /// Authentic service artwork shared with the public website.
+    var brandAssetName: String? {
+        switch self {
+        case .claude: return "brand-claude"
+        case .openai: return "brand-openai"
+        case .cursor: return "brand-cursor"
+        case .kimi: return "brand-kimi"
+        case .grok: return "brand-grok"
+        case .geminiChat: return "brand-gemini"
+        case .perplexity: return "brand-perplexity"
+        case .deepseek: return "brand-deepseek"
+        case .mistral: return "brand-mistral"
+        case .third, .antigravity, .glm: return nil
+        }
+    }
+
     /// How much to scale this mark so it reads the same size as the others.
     ///
     /// Every outline is normalised into the same unit box, which makes their
@@ -87,10 +103,17 @@ struct GlyphShape: Shape {
 struct ProviderGlyphView: View {
     let glyph: ProviderGlyph
     var size: CGFloat = Design.px(46)
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Group {
-            if let image = NSImage(named: glyph.assetName) {
+            if let name = glyph.brandAssetName,
+               let image = NSImage(named: colorScheme == .dark && glyph == .kimi ? "brand-kimi-dark" : name) {
+                Image(nsImage: image)
+                    .renderingMode(colorScheme == .dark && (glyph == .openai || glyph == .geminiChat) ? .template : .original)
+                    .resizable()
+                    .scaledToFit()
+            } else if let image = NSImage(named: glyph.assetName) {
                 Image(nsImage: image)
                     .renderingMode(.template)
                     .resizable()

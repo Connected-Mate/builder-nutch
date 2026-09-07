@@ -62,6 +62,7 @@ struct NotchRootView: View {
             .animation(motion(NotchMotion.glide), value: model.hoveredIndex)
         }
         .animation(motion(NotchMotion.unfold), value: model.isExpanded)
+        .environment(\.colorScheme, .dark)
     }
 
     /// Opening and closing are not mirror images. Appearing, the arc waits its

@@ -31,6 +31,15 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.4.0",
+            headline: "The same calm workspace, on your Mac.",
+            changes: [
+                .init(title: "White, gray and room to build", detail: "The account manager, sign-in screens and settings now share the website’s neutral design and Bricolage Grotesque typography."),
+                .init(title: "The real provider logos", detail: "Recognize every assistant at a glance, with the same service marks as the website."),
+                .init(title: "Your accounts stay yours", detail: "Existing accounts, nicknames, sign-ins and auto-hide settings are preserved.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.3.1",
             headline: "Your assistants, one place.",
             changes: [
