@@ -31,6 +31,14 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.9.0",
+            headline: "Your account rotation, directly in the notch.",
+            changes: [
+                .init(title: "Long-press any coding provider", detail: "Hold its logo and every connected subscription unfolds inside the same notch block, current account first and next account marked."),
+                .init(title: "Reorder without opening Settings", detail: "Drag the repeated provider logos into the order you want. The rotation is saved immediately.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.8.0",
             headline: "See quota your way.",
             changes: [

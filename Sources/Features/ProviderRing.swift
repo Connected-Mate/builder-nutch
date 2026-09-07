@@ -197,3 +197,81 @@ struct ProviderCell: View {
         .frame(height: NotchLayout.cellExtent)
     }
 }
+
+/// The provider stays one continuous block. Holding its ring unfolds the
+/// accounts in rotation order, using the same ring and spacing as the normal
+/// provider list, so no detached menu obscures the app underneath.
+struct InlineAccountRotation: View {
+    let picker: NotchAccountPicker
+    let snapshot: ProviderSnapshot
+    let edge: NotchEdge
+    let displayMode: UsageDisplayMode
+    let onMove: (UUID, UUID) -> Void
+    let onChooseNext: (UUID) -> Void
+
+    var body: some View {
+        Group {
+            if edge.isVertical {
+                VStack(spacing: NotchLayout.cellSpacing) { accountCells }
+            } else {
+                HStack(spacing: NotchLayout.cellSpacing) { accountCells }
+            }
+        }
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+    }
+
+    private var accountCells: some View {
+        ForEach(picker.accounts) { account in
+            accountCell(account)
+                .frame(width: edge.isVertical ? nil : NotchLayout.cellAlong(for: edge))
+                .draggable(account.id.uuidString) {
+                    ProviderGlyphView(glyph: picker.provider.glyph, size: NotchLayout.glyphSize)
+                        .foregroundStyle(Palette.textPrimary)
+                        .padding(Design.px(12))
+                        .background(Palette.ringTrack, in: Circle())
+                }
+                .dropDestination(for: String.self) { values, _ in
+                    guard let raw = values.first,
+                          let source = UUID(uuidString: raw), source != account.id else { return false }
+                    onMove(source, account.id)
+                    return true
+                }
+        }
+    }
+
+    private func accountCell(_ account: NotchAccountItem) -> some View {
+        VStack(spacing: NotchLayout.ringLabelGap) {
+            ProviderRing(
+                usedFraction: account.usedFraction,
+                glyph: picker.provider.glyph,
+                displayMode: displayMode,
+                isStale: account.usedFraction == nil
+            )
+            .overlay(alignment: .bottom) {
+                if account.isCurrent || account.isNext {
+                    Text(account.isCurrent ? "NOW" : "NEXT")
+                        .font(AppTheme.font(size: Design.fontSize(capPixels: 13), weight: .semibold))
+                        .foregroundStyle(Palette.textPrimary)
+                        .padding(.horizontal, Design.px(12))
+                        .padding(.vertical, Design.px(5))
+                        .background(Palette.notch, in: Capsule())
+                        .overlay(Capsule().stroke(Palette.textSecondary, lineWidth: Design.px(2)))
+                        .offset(y: Design.px(11))
+                }
+            }
+            Text(account.usage.components(separatedBy: " ").first ?? account.usage)
+                .font(Typography.percent)
+                .foregroundStyle(account.isCurrent ? Palette.textPrimary : Palette.textSecondary)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(height: NotchLayout.percentLineHeight)
+        }
+        .frame(height: NotchLayout.cellExtent)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if !account.isCurrent { onChooseNext(account.id) }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(account.name), \(account.usage)\(account.isCurrent ? ", current account" : account.isNext ? ", next account" : "")")
+        .accessibilityHint("Drag to change the account order")
+    }
+}

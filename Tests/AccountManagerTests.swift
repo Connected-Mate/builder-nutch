@@ -133,6 +133,20 @@ final class AccountManagerTests: XCTestCase {
     }
 
     @MainActor
+    func testDragReorderMovesDirectlyToTheDropPositionAndPersists() throws {
+        let root = try temporary()
+        let manager = AccountManager(rootURL: root)
+        let first = try manager.add(provider: .claude, label: "One", emailHint: nil)
+        let second = try manager.add(provider: .claude, label: "Two", emailHint: nil)
+        let third = try manager.add(provider: .claude, label: "Three", emailHint: nil)
+
+        try manager.moveInRotation(accountID: third.id, to: first.id)
+        XCTAssertEqual(manager.rotationAccounts(for: .claude).map(\.id), [third.id, first.id, second.id])
+        XCTAssertEqual(AccountManager(rootURL: root).rotationAccounts(for: .claude).map(\.id),
+                       [third.id, first.id, second.id])
+    }
+
+    @MainActor
     func testAutomaticRotationPublishesTheExactAccountHandoff() async throws {
         let runner = SequencedQuotaRunner(outputs: [
             #"{"account":{"type":"chatgpt","email":"old@example.test"},"limits":{"rateLimits":{"primary":{"usedPercent":100,"windowDurationMins":300}}}}"#,

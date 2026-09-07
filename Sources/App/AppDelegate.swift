@@ -60,6 +60,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let manager, let account = manager.accounts.first(where: { $0.id.uuidString == id }) else { return }
             Task { await manager.refresh(account) }
         }
+        controller.onAccountPicker = { [weak self] id in self?.accountPicker(for: id) }
+        controller.model.onMoveAccount = { [weak self, weak manager, weak controller] source, target in
+            do { try manager?.moveInRotation(accountID: source, to: target) }
+            catch { manager?.notice = error.localizedDescription }
+            if let provider = manager?.accounts.first(where: { $0.id == source })?.provider {
+                controller?.model.accountPicker = self?.accountPicker(for: provider)
+            }
+        }
+        controller.model.onChooseNextAccount = { [weak self, weak manager, weak controller] id in
+            guard let account = manager?.accounts.first(where: { $0.id == id }) else { return }
+            do { try manager?.setNext(account) }
+            catch { manager?.notice = error.localizedDescription }
+            controller?.model.accountPicker = self?.accountPicker(for: account.provider)
+        }
         let item = StatusItemController { [weak accounts] in accounts?.show() }
         self.statusItem = item
         preferences.$appPresence.receive(on: RunLoop.main).sink { presence in
@@ -129,6 +143,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             monitors[id] = monitor
             monitor.start()
         }
+    }
+
+    private func accountPicker(for snapshotID: String) -> NotchAccountPicker? {
+        guard let manager = accountManager,
+              let account = manager.accounts.first(where: { $0.id.uuidString == snapshotID })
+        else { return nil }
+        return accountPicker(for: account.provider)
+    }
+
+    private func accountPicker(for provider: AccountProvider) -> NotchAccountPicker? {
+        guard let manager = accountManager, provider.supportsAutomaticSelection else { return nil }
+        let hideDetails = UserDefaults.standard.bool(forKey: "accounts.hidePersonalDetails")
+        let mode = preferences?.usageDisplayMode ?? .remaining
+        let ordered = manager.rotationAccounts(for: provider)
+        let currentIndex = ordered.firstIndex(where: manager.isSelected) ?? 0
+        let displayed = Array(ordered[currentIndex...] + ordered[..<currentIndex])
+        let accounts = displayed.enumerated().map { index, account in
+            let state = manager.state(for: account)
+            let usage: String
+            if let remaining = state.remainingPercent {
+                let value = mode == .remaining ? remaining : 100 - remaining
+                usage = "\(Int(value.rounded()))% \(mode.unit)"
+            } else {
+                usage = "—"
+            }
+            return NotchAccountItem(
+                id: account.id,
+                name: account.emoji.map { "\($0) \(account.label)" } ?? account.label,
+                subtitle: hideDetails ? nil : (state.email ?? account.emailHint),
+                usage: usage,
+                usedFraction: state.windows.first?.usedFraction,
+                isCurrent: index == 0,
+                isNext: index == 1
+            )
+        }
+        let title = String(format: NSLocalizedString("%@ accounts", comment: "Account picker title"), provider.title)
+        guard let snapshotID = manager.selectedAccount(for: provider)?.id.uuidString else { return nil }
+        return NotchAccountPicker(provider: provider, snapshotID: snapshotID, title: title, accounts: accounts)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }

@@ -173,6 +173,24 @@ final class AccountManager: ObservableObject {
         try persist(accounts: accounts, selected: selected)
     }
 
+    /// Moves one account directly onto another account's position. This is the
+    /// operation used by the notch's drag-and-drop list.
+    func moveInRotation(accountID: UUID, to targetID: UUID) throws {
+        normalizeRotationOrder()
+        guard let account = accounts.first(where: { $0.id == accountID }),
+              let target = accounts.first(where: { $0.id == targetID }),
+              account.provider == target.provider,
+              var ids = rotationOrder[account.provider],
+              accountID != targetID,
+              ids.contains(accountID), ids.contains(targetID)
+        else { return }
+        ids.removeAll { $0 == accountID }
+        guard let destination = ids.firstIndex(of: targetID) else { return }
+        ids.insert(accountID, at: destination)
+        rotationOrder[account.provider] = ids
+        try persist(accounts: accounts, selected: selected)
+    }
+
     func setNext(_ account: ManagedAccount) throws {
         try select(account)
         notice = "\(account.label) will be used for the next \(account.provider.title) session."

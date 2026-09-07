@@ -35,6 +35,7 @@ final class NotchWindowController {
     var signInItems: [(title: String, action: () -> Void)] = []
     /// Refetch a single provider, asked for by clicking its ring.
     var onRefreshProvider: ((String) -> Void)?
+    var onAccountPicker: ((String) -> NotchAccountPicker?)?
     /// Open the settings window, asked for by clicking the handle.
     var onOpenSettings: (() -> Void)?
 
@@ -104,6 +105,18 @@ final class NotchWindowController {
                 MainActor.assumeIsolated { self?.relocate(cellCount: count) }
             }
             .store(in: &cancellables)
+
+        model.$accountPicker
+            .map { $0?.accounts.count ?? 1 }
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.relocate(cellCount: self.model.layoutCellCount)
+                }
+            }
+            .store(in: &cancellables)
     }
 
     func stop() {
@@ -133,6 +146,8 @@ final class NotchWindowController {
             let hosting = NotchHostingView(rootView: NotchRootView(model: model))
             panel.contextMenuProvider = { [weak self] in self?.contextMenu() }
             panel.onClick = { [weak self] in self?.handleClick() }
+            panel.onLongPress = { [weak self] in self?.presentAccountPickerAtCursor() }
+            panel.onDragEnded = { [weak self] start, end in self?.moveAccount(from: start, to: end) }
 
             // The hosting view goes *inside* a plain container rather than
             // being the content view itself.
@@ -236,7 +251,7 @@ final class NotchWindowController {
         let snapshot = model.snapshots[index]
         let accountSwitch = model.automaticSwitch?.toID.uuidString == snapshot.id
             ? model.automaticSwitch : nil
-        let cardHeight = accountSwitch == nil
+        let cardHeight = (accountSwitch == nil
             ? NotchLayout.cardHeight(
                 windowCount: snapshot.windows.count,
                 sessionCount: model.activity(for: snapshot.id)?.sessions.count ?? 0,
@@ -245,7 +260,7 @@ final class NotchWindowController {
                 blockMessage: snapshot.block?.summary(now: model.now),
                 identitySubtitle: snapshot.accountEmail?.isEmpty == false)
             : NotchLayout.automaticSwitchCardHeight(
-                identitySubtitle: snapshot.accountEmail?.isEmpty == false)
+                identitySubtitle: snapshot.accountEmail?.isEmpty == false))
         // Across the stack the region is the card, its tail, and the gap the
         // pointer has to cross. Along it, the card's own extent.
         let cardAcross = model.edge.isVertical ? NotchLayout.cardWidth : cardHeight
@@ -299,7 +314,9 @@ final class NotchWindowController {
 
         let events: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged]
         let handler: (NSEvent) -> Void = { [weak self] _ in
-            MainActor.assumeIsolated { self?.cursorMoved() }
+            MainActor.assumeIsolated {
+                self?.cursorMoved()
+            }
         }
         if let global = NSEvent.addGlobalMonitorForEvents(matching: events, handler: handler) {
             mouseMonitors.append(global)
@@ -312,12 +329,50 @@ final class NotchWindowController {
         }
         let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown]
         if let global = NSEvent.addGlobalMonitorForEvents(matching: clicks, handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.dismissDetailsIfOutside() }
+            MainActor.assumeIsolated {
+                self?.dismissDetailsIfOutside()
+            }
         }) { mouseMonitors.append(global) }
         if let local = NSEvent.addLocalMonitorForEvents(matching: clicks, handler: { [weak self] event in
-            MainActor.assumeIsolated { self?.dismissDetailsIfOutside() }
+            MainActor.assumeIsolated {
+                self?.dismissDetailsIfOutside()
+            }
             return event
         }) { mouseMonitors.append(local) }
+    }
+
+    private func presentAccountPickerAtCursor() {
+        guard let panel, model.isExpanded else { return }
+        let local = localCursor(in: panel.frame)
+        guard notchRect.contains(local),
+              let index = cellIndex(along: placement.along(of: local)),
+              model.snapshots.indices.contains(index)
+        else { return }
+        let snapshotID = model.snapshots[index].id
+        guard let picker = onAccountPicker?(snapshotID), picker.accounts.count > 1 else { return }
+        withAnimation(NotchMotion.unfold) {
+            model.accountPicker = picker
+            model.selectedIndex = nil
+        }
+        if !model.isAlwaysOn { model.isPinned = true }
+        updateInteractiveRects()
+    }
+
+    private func moveAccount(from start: NSPoint, to end: NSPoint) {
+        guard let panel, let picker = model.accountPicker,
+              let expanded = model.snapshots.firstIndex(where: { $0.id == picker.snapshotID })
+        else { return }
+        func visualIndex(_ point: NSPoint) -> Int? {
+            let topLeft = CGPoint(x: point.x, y: panel.frame.height - point.y)
+            guard notchRect.contains(topLeft) else { return nil }
+            return visualCellIndex(along: placement.along(of: topLeft))
+        }
+        guard let sourceIndex = visualIndex(start), let targetIndex = visualIndex(end),
+              sourceIndex >= expanded, sourceIndex < expanded + picker.accounts.count,
+              targetIndex >= expanded, targetIndex < expanded + picker.accounts.count,
+              sourceIndex != targetIndex else { return }
+        model.onMoveAccount?(picker.accounts[sourceIndex - expanded].id,
+                             picker.accounts[targetIndex - expanded].id)
     }
 
     private func localCursor(in frame: CGRect) -> CGPoint {
@@ -382,6 +437,7 @@ final class NotchWindowController {
                 withAnimation(NotchMotion.unfold) {
                     self.model.isExpanded = false
                     self.model.selectedIndex = nil
+                    self.model.accountPicker = nil
                 }
                 self.setPointing(false)
                 self.updateInteractiveRects()
@@ -428,8 +484,15 @@ final class NotchWindowController {
             return
         }
         if notchRect.contains(local),
-           let index = cellIndex(along: placement.along(of: local)),
-           model.snapshots.indices.contains(index) {
+           let visualIndex = visualCellIndex(along: placement.along(of: local)) {
+            if let picker = model.accountPicker,
+               let expanded = model.snapshots.firstIndex(where: { $0.id == picker.snapshotID }),
+               visualIndex >= expanded, visualIndex < expanded + picker.accounts.count {
+                let account = picker.accounts[visualIndex - expanded]
+                if !account.isCurrent { model.onChooseNextAccount?(account.id) }
+                return
+            }
+            guard let index = model.providerIndex(forVisualIndex: visualIndex) else { return }
             toggleDetails(index: index)
             return
         }
@@ -437,6 +500,7 @@ final class NotchWindowController {
             return
         }
         model.selectedIndex = nil
+        model.accountPicker = nil
         updateInteractiveRects()
         togglePinned()
     }
@@ -444,6 +508,7 @@ final class NotchWindowController {
     func toggleDetails(index: Int) {
         guard visibility != .hidden, model.isExpanded,
               model.snapshots.indices.contains(index) else { return }
+        model.accountPicker = nil
         if model.automaticSwitch != nil {
             automaticSwitchWork?.cancel()
             automaticSwitchWork = nil
@@ -508,6 +573,7 @@ final class NotchWindowController {
         let local = localCursor(in: panel.frame)
         guard !liveRect.contains(local), tooltipRect(index: index)?.contains(local) != true else { return }
         model.selectedIndex = nil
+        model.accountPicker = nil
         updateInteractiveRects()
     }
 
@@ -547,6 +613,7 @@ final class NotchWindowController {
         let wasOpen = model.isExpanded
         let modeChange = visibilityChange
         model.selectedIndex = nil
+        model.accountPicker = nil
         setPointing(false)
 
         // Clicking through the picker starts a move before the last one has
@@ -625,12 +692,14 @@ final class NotchWindowController {
             withAnimation(NotchMotion.unfold) {
                 model.isExpanded = false
                 model.selectedIndex = nil
+                model.accountPicker = nil
             }
         case .autoHide, .hidden:
             model.isAlwaysOn = false
             model.isPinned = false
             model.isExpanded = false
             model.selectedIndex = nil
+            model.accountPicker = nil
             // Ordered out rather than made transparent. An invisible panel that
             // still takes the screen edge would keep swallowing the pointer.
             panel?.orderOut(nil)
@@ -642,6 +711,7 @@ final class NotchWindowController {
     private func cancelPendingHover() {
         foldWork?.cancel(); foldWork = nil
         model.selectedIndex = nil
+        model.accountPicker = nil
         model.isHoveringSettings = false
         setPointing(false)
     }
@@ -664,9 +734,15 @@ final class NotchWindowController {
     }
 
     private func cellIndex(along: CGFloat) -> Int? {
+        visualCellIndex(along: along).flatMap(model.providerIndex(forVisualIndex:))
+    }
+
+    private func visualCellIndex(along: CGFloat) -> Int? {
         let pitch = NotchLayout.cellPitch(for: model.edge)
-        for index in model.snapshots.indices {
-            let centre = model.slack + model.ringCenter(index: index)
+        for index in 0..<model.layoutCellCount {
+            let centre = model.slack
+                + NotchLayout.ringCenter(index: index, edge: model.edge, flare: model.flare)
+                + model.endSpread
             if abs(along - centre) <= pitch / 2 { return index }
         }
         return nil

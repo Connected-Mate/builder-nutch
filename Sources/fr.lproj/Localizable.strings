@@ -19,6 +19,8 @@
 "The change applies to the next session. Sessions already open keep their account." = "Le changement s’applique à la prochaine session. Les sessions déjà ouvertes gardent leur compte.";
 "Add at least one Claude Code, Codex, or Kimi Code account to create a loop." = "Ajoutez au moins un compte Claude Code, Codex ou Kimi Code pour créer une boucle.";
 "NEXT" = "PROCHAIN";
+"NOW" = "ACTUEL";
+"Drag to change the account order" = "Glissez pour modifier l’ordre des comptes";
 "NEXT SESSION" = "PROCHAINE SESSION";
 "REMAINING" = "RESTANT";
 "USED" = "UTILISÉ";
@@ -127,3 +129,4 @@
 "Based on Codenotch by" = "Basé sur Codenotch par";
 "On your Mac. In your control." = "Sur votre Mac. Sous votre contrôle.";
 "Switched automatically" = "Changement automatique";
+"%@ accounts" = "Comptes %@";

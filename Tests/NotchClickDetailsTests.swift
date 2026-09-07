@@ -99,7 +99,76 @@ final class NotchClickDetailsTests: XCTestCase {
             modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
             windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
         window.sendEvent(event)
+        let up = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseUp, location: location,
+            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0))
+        window.sendEvent(up)
+
         XCTAssertEqual(controller.model.selectedIndex, 0, "The native responder chain lost the ring click")
+    }
+
+    func testHoldingProviderExpandsItsAccountsInsideTheNotch() throws {
+        var pointer = CGPoint.zero
+        let current = UUID(), next = UUID(), later = UUID()
+        let controller = NotchWindowController(cursorLocation: { pointer })
+        controller.model.snapshots = [ProviderSnapshot(
+            id: current.uuidString, displayName: "Claude", glyph: .claude,
+            fidelity: .official, status: .ok,
+            windows: [LimitWindow(id: "w", label: "Session", usedFraction: 0.4)])]
+        controller.onAccountPicker = { snapshotID in
+            NotchAccountPicker(provider: .claude, snapshotID: snapshotID, title: "Claude accounts", accounts: [
+                NotchAccountItem(id: current, name: "Current", subtitle: nil, usage: "60% left", usedFraction: 0.4, isCurrent: true, isNext: false),
+                NotchAccountItem(id: next, name: "Next", subtitle: nil, usage: "90% left", usedFraction: 0.1, isCurrent: false, isNext: true),
+                NotchAccountItem(id: later, name: "Later", subtitle: nil, usage: "100% left", usedFraction: 0, isCurrent: false, isNext: false)
+            ])
+        }
+        controller.show()
+        controller.apply(.alwaysShow)
+        defer { controller.apply(.hidden); controller.stop() }
+        pointer = try globalPoint(controller, index: 0)
+        controller.pollCursorForTesting()
+        let window = try XCTUnwrap(controller.panelContentViewForTesting?.window)
+        (window as? NotchPanel)?.isLeftButtonPressed = { true }
+        let location = window.convertPoint(fromScreen: pointer)
+        let down = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: location,
+            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        window.sendEvent(down)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.55))
+
+        XCTAssertEqual(controller.model.accountPicker?.accounts.map(\.id), [current, next, later])
+        XCTAssertEqual(controller.model.layoutCellCount, 3)
+        XCTAssertNil(controller.model.selectedIndex, "Inline accounts must replace the detached detail card")
+        XCTAssertTrue(controller.model.staysOpen)
+        let up = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseUp, location: location,
+            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0))
+        window.sendEvent(up)
+
+        var moved: (UUID, UUID)?
+        controller.model.onMoveAccount = { moved = ($0, $1) }
+        let frame = try XCTUnwrap(controller.panelFrameForTesting)
+        let place = NotchPlacement(edge: controller.model.edge, panelSize: frame.size)
+        func dragLocation(_ visualIndex: Int) -> CGPoint {
+            let topLeft = place.point(
+                along: controller.model.slack
+                    + NotchLayout.ringCenter(index: visualIndex, edge: controller.model.edge, flare: controller.model.flare)
+                    + controller.model.endSpread,
+                across: controller.model.contentInset + NotchLayout.bodyDepth(for: controller.model.edge) / 2)
+            return CGPoint(x: topLeft.x, y: frame.height - topLeft.y)
+        }
+        let dragStart = dragLocation(2), dragEnd = dragLocation(1)
+        func event(_ type: NSEvent.EventType, _ point: CGPoint, _ number: Int) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point,
+                modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: number,
+                clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1))
+        }
+        window.sendEvent(try event(.leftMouseDown, dragStart, 3))
+        window.sendEvent(try event(.leftMouseDragged, dragEnd, 4))
+        window.sendEvent(try event(.leftMouseUp, dragEnd, 5))
+        XCTAssertEqual(moved?.0, later)
+        XCTAssertEqual(moved?.1, next)
     }
 
     func testAutomaticAccountSwitchOpensShowsAndRestoresAutoHide() throws {

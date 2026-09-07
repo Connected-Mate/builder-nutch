@@ -5,6 +5,9 @@ import Combine
 final class NotchViewModel: ObservableObject {
     @Published var snapshots: [ProviderSnapshot] = []
     @Published var usageDisplayMode: UsageDisplayMode = .remaining
+    @Published var accountPicker: NotchAccountPicker?
+    var onMoveAccount: ((UUID, UUID) -> Void)?
+    var onChooseNextAccount: ((UUID) -> Void)?
     /// Live agent sessions, keyed by the provider they belong to. They surface
     /// inside that provider's own ring rather than as a cell of their own — one
     /// ring per provider, so nothing in the notch looks like a ring without
@@ -137,7 +140,7 @@ final class NotchViewModel: ObservableObject {
     /// notch appears not to have opened at all. So the floor is the notch plus
     /// a fillet's worth of opening at each side, and a corner's worth beyond
     /// that for the bar's own rounding to live in.
-    var endSpread: CGFloat { endSpread(cellCount: snapshots.count) }
+    var endSpread: CGFloat { endSpread(cellCount: layoutCellCount) }
 
     func endSpread(cellCount: Int) -> CGFloat {
         guard let hardwareNotch else { return 0 }
@@ -241,14 +244,14 @@ final class NotchViewModel: ObservableObject {
     /// The straight part of the shape, flares excluded.
     var bodyLength: CGFloat {
         NotchLayout.bodyLength(
-            cellCount: snapshots.count, edge: edge
+            cellCount: layoutCellCount, edge: edge
         ) + 2 * endSpread
     }
 
     /// Distance along the stack to cell `index`'s ring centre, widening
     /// included so the readings stay in the middle of the bar.
     func ringCenter(index: Int) -> CGFloat {
-        NotchLayout.ringCenter(index: index, edge: edge, flare: flare) + endSpread
+        NotchLayout.ringCenter(index: visualIndex(forProvider: index), edge: edge, flare: flare) + endSpread
     }
 
     /// A provider with no activity source gets none, rather than borrowing
@@ -262,15 +265,37 @@ final class NotchViewModel: ObservableObject {
         return snapshots[selectedIndex]
     }
 
-    var shapeLength: CGFloat { shapeLength(cellCount: snapshots.count) }
+    var layoutCellCount: Int {
+        snapshots.count + max(0, (accountPicker?.accounts.count ?? 1) - 1)
+    }
 
-    var panelSize: CGSize { panelSize(cellCount: snapshots.count) }
+    func visualIndex(forProvider index: Int) -> Int {
+        guard let picker = accountPicker,
+              let expanded = snapshots.firstIndex(where: { $0.id == picker.snapshotID }),
+              index > expanded else { return index }
+        return index + picker.accounts.count - 1
+    }
+
+    func providerIndex(forVisualIndex visualIndex: Int) -> Int? {
+        guard let picker = accountPicker,
+              let expanded = snapshots.firstIndex(where: { $0.id == picker.snapshotID })
+        else { return snapshots.indices.contains(visualIndex) ? visualIndex : nil }
+        let end = expanded + picker.accounts.count
+        if visualIndex < expanded { return visualIndex }
+        if visualIndex < end { return expanded }
+        let providerIndex = visualIndex - picker.accounts.count + 1
+        return snapshots.indices.contains(providerIndex) ? providerIndex : nil
+    }
+
+    var shapeLength: CGFloat { shapeLength(cellCount: layoutCellCount) }
+
+    var panelSize: CGSize { panelSize(cellCount: layoutCellCount) }
 
     /// How stack space maps onto the panel right now.
     var placement: NotchPlacement { NotchPlacement(edge: edge, panelSize: panelSize) }
 
     /// Room at each end of the stack, for this edge.
-    var slack: CGFloat { slack(cellCount: snapshots.count) }
+    var slack: CGFloat { slack(cellCount: layoutCellCount) }
 
     func slack(cellCount: Int) -> CGFloat {
         NotchLayout.slack(for: edge, maxCardHeight: maxCardHeight(cellCount: cellCount))
@@ -278,7 +303,7 @@ final class NotchViewModel: ObservableObject {
 
     /// How many sessions a tooltip may list here before it has to summarise
     /// the rest — as many as this screen has room for.
-    var sessionCap: Int { sessionCap(cellCount: snapshots.count) }
+    var sessionCap: Int { sessionCap(cellCount: layoutCellCount) }
 
     func sessionCap(cellCount: Int) -> Int {
         guard screenSize != .zero else { return NotchLayout.defaultSessionCap }
@@ -368,4 +393,21 @@ final class NotchViewModel: ObservableObject {
                 + NotchLayout.bodyDepth(for: edge)
         )
     }
+}
+
+struct NotchAccountPicker: Equatable {
+    let provider: AccountProvider
+    let snapshotID: String
+    let title: String
+    var accounts: [NotchAccountItem]
+}
+
+struct NotchAccountItem: Identifiable, Equatable {
+    let id: UUID
+    let name: String
+    let subtitle: String?
+    let usage: String
+    let usedFraction: Double?
+    let isCurrent: Bool
+    let isNext: Bool
 }

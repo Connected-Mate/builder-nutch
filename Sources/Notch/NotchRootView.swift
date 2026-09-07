@@ -106,12 +106,25 @@ struct NotchRootView: View {
     @ViewBuilder
     private var cells: some View {
         let stack = ForEach(Array(model.snapshots.enumerated()), id: \.element.id) { index, snapshot in
-            ProviderCell(
-                snapshot: snapshot,
-                activity: model.activity(for: snapshot.id),
-                isRefreshing: model.refreshing.contains(snapshot.id),
-                displayMode: model.usageDisplayMode
-            )
+            Group {
+                if let picker = model.accountPicker, picker.snapshotID == snapshot.id {
+                    InlineAccountRotation(
+                        picker: picker,
+                        snapshot: snapshot,
+                        edge: model.edge,
+                        displayMode: model.usageDisplayMode,
+                        onMove: { model.onMoveAccount?($0, $1) },
+                        onChooseNext: { model.onChooseNextAccount?($0) }
+                    )
+                } else {
+                    ProviderCell(
+                        snapshot: snapshot,
+                        activity: model.activity(for: snapshot.id),
+                        isRefreshing: model.refreshing.contains(snapshot.id),
+                        displayMode: model.usageDisplayMode
+                    )
+                }
+            }
                 // Pinned to what the cell claims along the stack, or the drawn
                 // rings stop lining up with the centres `ringCenter` hands to
                 // the hover bands and the tooltip tails. Across a horizontal
@@ -199,7 +212,7 @@ struct NotchRootView: View {
     ) -> CGPoint {
         let card = model.edge.isVertical
             ? NotchLayout.cardWidth
-            : model.automaticSwitch?.toID.uuidString == snapshot.id
+            : (model.automaticSwitch?.toID.uuidString == snapshot.id
                 ? NotchLayout.automaticSwitchCardHeight(
                     identitySubtitle: snapshot.accountEmail?.isEmpty == false)
                 : NotchLayout.cardHeight(
@@ -208,7 +221,7 @@ struct NotchRootView: View {
                     sessionCap: model.sessionCap,
                     statusMessage: snapshot.statusMessage,
                     blockMessage: snapshot.block?.summary(now: model.now),
-                    identitySubtitle: snapshot.accountEmail?.isEmpty == false)
+                    identitySubtitle: snapshot.accountEmail?.isEmpty == false))
         return place.point(
             along: model.slack + model.ringCenter(index: index),
             across: model.tooltipInset + (NotchLayout.tailLength + card) / 2
