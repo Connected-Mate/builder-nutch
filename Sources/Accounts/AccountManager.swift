@@ -10,6 +10,12 @@ final class AccountManager: ObservableObject {
     @Published private(set) var busyIDs: Set<UUID> = []
     @Published private(set) var loginAccountID: UUID?
     @Published var notice: String?
+    @Published private(set) var discoveryNotice: String?
+    private var ignoredExistingProfiles: Set<String> = []
+    private var discoveryAttempts: [String: Date] = [:]
+    private var externalRetryAfter: [UUID: Date] = [:]
+    private var discovering = false
+    private let automaticDiscovery: Bool
     @Published var automaticSelection = false {
         didSet {
             guard loaded else { return }
@@ -24,6 +30,7 @@ final class AccountManager: ObservableObject {
     private let openTerminal: (URL) -> Bool
     private let openBrowser: (URL, URL, String?) async throws -> String
     private let readKimi: (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState
+    private let readExistingKimi: (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState
     private var browserOpenedIDs: Set<UUID> = []
     private var operations: [UUID: AccountCancellation] = [:]
     private var loaded = false
@@ -38,15 +45,18 @@ final class AccountManager: ObservableObject {
     init(rootURL: URL?, runner: any AccountCommandRunning,
          executable: @escaping (AccountProvider) -> URL?, openTerminal: @escaping (URL) -> Bool = { _ in false },
          openBrowser: @escaping (URL, URL, String?) async throws -> String = AccountBrowser.open,
-         readKimi: @escaping (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState = KimiAccountIntegration.read) {
+         readKimi: @escaping (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState = KimiAccountIntegration.read,
+         readExistingKimi: @escaping (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState = KimiAccountIntegration.readExisting) {
+        self.automaticDiscovery = rootURL == nil
         self.runner = runner; self.resolveExecutable = executable; self.openTerminal = openTerminal
-        self.openBrowser = openBrowser; self.readKimi = readKimi
+        self.openBrowser = openBrowser; self.readKimi = readKimi; self.readExistingKimi = readExistingKimi
         let root = rootURL ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Codenotch Accounts", isDirectory: true)
         do {
             let storage = try AccountStorage(root: root)
             let catalog = try storage.load()
             self.storage = storage
+            ignoredExistingProfiles = catalog.ignoredExistingProfiles ?? []
             accounts = catalog.accounts; selected = catalog.selected; automaticSelection = catalog.automaticSelection
             states = Dictionary(uniqueKeysWithValues: accounts.map {
                 ($0.id, $0.provider.isBrowserProfile ? Self.browserState($0) : ManagedAccountState(message: "Refresh to check this account."))
@@ -64,7 +74,7 @@ final class AccountManager: ObservableObject {
     }
 
     private func persist(accounts: [ManagedAccount], selected: [AccountProvider: UUID]) throws {
-        try usableStorage().save(AccountCatalog(accounts: accounts, selected: selected, automaticSelection: automaticSelection))
+        try usableStorage().save(AccountCatalog(accounts: accounts, selected: selected, automaticSelection: automaticSelection, ignoredExistingProfiles: ignoredExistingProfiles))
     }
 
     @discardableResult
@@ -141,13 +151,17 @@ final class AccountManager: ObservableObject {
         let updated = accounts.filter { $0.id != account.id }
         var selection = selected
         if selection[account.provider] == account.id { selection[account.provider] = updated.first { $0.provider == account.provider }?.id }
-        try persist(accounts: updated, selected: selection)
+        let previousIgnored = ignoredExistingProfiles
+        if let source = account.existingProfile { ignoredExistingProfiles.insert(source.key(provider: account.provider)) }
+        do { try persist(accounts: updated, selected: selection) }
+        catch { ignoredExistingProfiles = previousIgnored; throw error }
         accounts = updated; selected = selection; states.removeValue(forKey: account.id)
         browserOpenedIDs.remove(account.id)
         notice = "Account removed from the list. Its private profile and official app credentials were retained; existing sessions continue."
     }
 
     func configurationDirectory(for account: ManagedAccount) -> URL {
+        if let source = account.existingProfile { return URL(fileURLWithPath: source.directory, isDirectory: true) }
         let base = storage?.root ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Codenotch Accounts")
         return base.appendingPathComponent("profiles/\(account.id.uuidString.lowercased())", isDirectory: true)
     }
@@ -161,6 +175,9 @@ final class AccountManager: ObservableObject {
         guard !account.provider.isBrowserProfile else { throw ManagedAccountError.unavailable }
         guard let executable = resolveExecutable(account.provider) else { throw ManagedAccountError.missingCLI(account.provider) }
         let profile = try usableStorage().profile(account)
+        if let source = account.existingProfile {
+            return (executable, profile, source.environment(provider: account.provider, inherited: ProcessInfo.processInfo.environment))
+        }
         if account.provider == .kimi { try AccountStorage.privateDirectory(profile.appendingPathComponent("home", isDirectory: true)) }
         if account.provider == .claude { try ClaudeAccountStatusLine.configure(profile: profile) }
         else if account.provider == .codex {
@@ -184,6 +201,11 @@ final class AccountManager: ObservableObject {
     }
 
     func connect(_ account: ManagedAccount) async {
+        if account.existingProfile != nil {
+            await refresh(account)
+            notice = "This account belongs to the official app. Reconnect there if needed, then refresh here."
+            return
+        }
         guard loginAccountID == nil, !busyIDs.contains(account.id) else { notice = ManagedAccountError.busy.localizedDescription; return }
         let cancellation = AccountCancellation()
         loginAccountID = account.id; markBusy(account.id, cancellation: cancellation)
@@ -231,10 +253,11 @@ final class AccountManager: ObservableObject {
         }
         let (executable, profile, environment) = try prepare(account)
         if account.provider == .kimi {
+            if account.existingProfile != nil { return try await readExistingKimi(executable, profile, environment, cancellation) }
             return try await readKimi(executable, profile, environment, cancellation)
         }
         let codex = account.provider == .codex
-        let arguments = codex ? ["--config", "cli_auth_credentials_store=\"keyring\"", "app-server"] : ["auth", "status", "--json"]
+        let arguments = codex ? (account.existingProfile == nil ? ["--config", "cli_auth_credentials_store=\"keyring\"", "app-server"] : ["app-server"]) : ["auth", "status", "--json"]
         let data = try await runner.run(AccountCommand(executable: executable, arguments: arguments, environment: environment,
                                                        directory: profile, readsCodexAccount: codex), cancellation: cancellation)
         if cancellation.isCancelled { throw ManagedAccountError.cancelled }
@@ -248,17 +271,76 @@ final class AccountManager: ObservableObject {
         guard !busyIDs.contains(account.id) else { return }
         let cancellation = AccountCancellation(); markBusy(account.id, cancellation: cancellation)
         defer { finish(account.id) }
-        do { states[account.id] = try await read(account, cancellation: cancellation) }
+        do {
+            states[account.id] = try await read(account, cancellation: cancellation)
+            externalRetryAfter.removeValue(forKey: account.id)
+        }
         catch {
             var state = states[account.id] ?? ManagedAccountState()
             state.message = error.localizedDescription
             // Retain the last displayed quotas, but never use a failed refresh for automation.
-            state.refreshedAt = nil; states[account.id] = state
+            state.refreshedAt = nil
+            if account.existingProfile != nil {
+                state.isConnected = false
+                externalRetryAfter[account.id] = Date().addingTimeInterval(900)
+            }
+            states[account.id] = state
         }
     }
 
     func refreshAll() async {
-        await refreshAccounts(accounts)
+        await refreshAccounts(accounts.filter { externalRetryAfter[$0.id].map { $0 > Date() } != true })
+        if automaticDiscovery { await discoverExistingAccounts() }
+    }
+
+    /// Failed probes are quiet and bounded; manual refresh of an existing row can retry immediately.
+    func discoverExistingAccounts(candidates: [ExistingAccountCandidate]? = nil, now: Date = Date()) async {
+        guard !discovering, catalogError == nil else { return }
+        discovering = true
+        defer { discovering = false }
+        var found = 0
+        for candidate in candidates ?? ExistingAccountDiscovery.candidates() {
+            let key = candidate.source.key(provider: candidate.provider)
+            guard !candidate.provider.isBrowserProfile,
+                  !ignoredExistingProfiles.contains(key),
+                  !accounts.contains(where: { configurationDirectory(for: $0).standardizedFileURL.path == candidate.source.directory }),
+                  storage.map({ !candidate.source.directory.hasPrefix($0.root.path + "/") }) ?? false,
+                  !accounts.contains(where: { $0.existingProfile?.key(provider: $0.provider) == key }),
+                  discoveryAttempts[key].map({ now.timeIntervalSince($0) >= 900 }) ?? true,
+                  let executable = resolveExecutable(candidate.provider),
+                  let directory = try? candidate.source.validatedDirectory() else { continue }
+            discoveryAttempts[key] = now
+            let environment = candidate.source.environment(provider: candidate.provider, inherited: ProcessInfo.processInfo.environment)
+            let cancellation = AccountCancellation()
+            do {
+                let state: ManagedAccountState
+                if candidate.provider == .kimi {
+                    state = try await readExistingKimi(executable, directory, environment, cancellation)
+                } else {
+                    let codex = candidate.provider == .codex
+                    let data = try await runner.run(AccountCommand(executable: executable,
+                        arguments: codex ? ["app-server"] : ["auth", "status", "--json"],
+                        environment: environment, directory: directory, readsCodexAccount: codex), cancellation: cancellation)
+                    if !codex {
+                        let status = try AccountQuotas.json(data)
+                        if let method = status["authMethod"] as? String, method != "claude.ai" { continue }
+                    }
+                    state = try codex ? AccountQuotas.codex(data) : AccountQuotas.claude(status: data, quota: nil)
+                }
+                guard !Task.isCancelled, state.isConnected else { continue }
+                // Only verified identities count. User-entered hints never suppress a real account.
+                if let email = state.email?.lowercased(), !email.isEmpty,
+                   accounts.contains(where: { $0.provider == candidate.provider && states[$0.id]?.isConnected == true && states[$0.id]?.email?.lowercased() == email }) { continue }
+                let account = ManagedAccount(id: UUID(), provider: candidate.provider,
+                    label: try AccountStorage.validLabel(candidate.label), createdAt: now, existingProfile: candidate.source)
+                var selection = selected
+                if selection[account.provider] == nil { selection[account.provider] = account.id }
+                try persist(accounts: accounts + [account], selected: selection)
+                accounts.append(account); selected = selection; states[account.id] = state
+                found += 1
+            } catch { continue }
+        }
+        if found > 0 { discoveryNotice = "Found \(found) signed-in account\(found == 1 ? "" : "s") on this Mac. Their original app keeps each sign-in and configuration." }
     }
 
     private func refreshAccounts(_ snapshot: [ManagedAccount]) async {

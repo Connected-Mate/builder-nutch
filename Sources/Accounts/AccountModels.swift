@@ -98,6 +98,8 @@ struct ManagedAccount: Identifiable, Codable, Equatable {
     /// A user confirmation, not a claim that the website session is still authenticated.
     var browserConfirmedAt: Date? = nil
     var browserBundleIdentifier: String? = nil
+    /// Reference only; credentials and vendor configuration stay with the official app.
+    var existingProfile: ExistingAccountProfile? = nil
 }
 
 struct ManagedAccountState {

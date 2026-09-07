@@ -5,6 +5,7 @@ struct AccountCatalog: Codable {
     var accounts: [ManagedAccount] = []
     var selected: [AccountProvider: UUID] = [:]
     var automaticSelection = false
+    var ignoredExistingProfiles: Set<String>? = nil
 }
 
 struct AccountStorage {
@@ -58,6 +59,7 @@ struct AccountStorage {
             let catalog = try JSONDecoder().decode(AccountCatalog.self, from: data)
             guard catalog.version == 1, Set(catalog.accounts.map(\.id)).count == catalog.accounts.count,
                   catalog.accounts.allSatisfy({ account in
+                      if account.existingProfile != nil && account.provider.isBrowserProfile { return false }
                       do { _ = try Self.validLabel(account.label); _ = try Self.validEmail(account.emailHint); _ = try Self.validEmoji(account.emoji); return true }
                       catch { return false }
                   }),
@@ -73,6 +75,7 @@ struct AccountStorage {
     }
 
     func profile(_ account: ManagedAccount) throws -> URL {
+        if let source = account.existingProfile { return try source.validatedDirectory() }
         let profiles = root.appendingPathComponent("profiles", isDirectory: true)
         try Self.privateDirectory(profiles)
         let url = profiles.appendingPathComponent(account.id.uuidString.lowercased(), isDirectory: true)

@@ -32,9 +32,9 @@ enum AccountEnvironment {
     static func quote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 
     static func launchScript(executable: URL, account: ManagedAccount, profile: URL, project: URL, inherited: [String: String] = ProcessInfo.processInfo.environment) -> String {
-        let env = isolated(profile: profile, provider: account.provider, inherited: inherited)
+        let env = account.existingProfile.map { $0.environment(provider: account.provider, inherited: inherited) } ?? isolated(profile: profile, provider: account.provider, inherited: inherited)
         let assignments = env.keys.sorted().map { quote("\($0)=\(env[$0]!)") }.joined(separator: " ")
-        let config = account.provider == .codex ? " --config " + quote("cli_auth_credentials_store=\"keyring\"") : ""
+        let config = account.provider == .codex && account.existingProfile == nil ? " --config " + quote("cli_auth_credentials_store=\"keyring\"") : ""
         // env -i also removes secrets injected by Terminal's own environment.
         return "#!/bin/sh\ncd \(quote(project.path)) || exit 1\nexec /usr/bin/env -i \(assignments) \(quote(executable.path))\(config)\n"
     }

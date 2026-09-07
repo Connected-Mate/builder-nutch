@@ -86,6 +86,21 @@ final class KimiAccountIntegrationTests: XCTestCase {
         XCTAssertTrue(http.requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer \(password)" })
     }
 
+    func testExistingProfileKeepsOriginalHomeAndConfiguration() async throws {
+        let root = try temporary(), runner = KimiFakeRunner(), http = KimiFakeHTTP(auth: auth)
+        let config = root.appendingPathComponent("config.toml"), original = Data("original = true\n".utf8)
+        try original.write(to: config)
+        _ = try await KimiAccountIntegration.read(executable: URL(fileURLWithPath: "/fake/kimi"), profile: root,
+            environment: ["HOME": "/Users/fixture", "KIMI_CODE_HOME": root.path, "KIMI_API_KEY": "discard"],
+            cancellation: AccountCancellation(), runner: runner, http: http, port: { 51238 }, preserveExistingProfile: true)
+        XCTAssertEqual(runner.commands.first?.environment["HOME"], "/Users/fixture")
+        XCTAssertEqual(runner.commands.first?.environment["KIMI_CODE_HOME"], root.path)
+        XCTAssertNil(runner.commands.first?.environment["KIMI_API_KEY"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("home").path))
+        XCTAssertEqual(try Data(contentsOf: config), original)
+        XCTAssertEqual(runner.cleaned, 1)
+    }
+
     func testPlainAPIKeySkipsSubscriptionUsageEndpoint() async throws {
         let runner = KimiFakeRunner(), http = KimiFakeHTTP(auth: ["ready": true, "managed_provider": NSNull()])
         let state = try await KimiAccountIntegration.read(executable: URL(fileURLWithPath: "/fake/kimi"), profile: try temporary(),

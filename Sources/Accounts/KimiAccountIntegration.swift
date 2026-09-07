@@ -31,20 +31,36 @@ enum KimiAccountIntegration {
                        http: KimiLoopbackHTTP(), port: availablePort)
     }
 
+    @MainActor
+    static func readExisting(executable: URL, profile: URL, environment: [String: String],
+                             cancellation: AccountCancellation) async throws -> ManagedAccountState {
+        try await read(executable: executable, profile: profile, environment: environment,
+                       cancellation: cancellation, runner: OfficialAccountProcess(),
+                       http: KimiLoopbackHTTP(), port: availablePort, preserveExistingProfile: true)
+    }
+
     /// Dependencies make lifecycle and HTTP failure tests entirely synthetic.
     @MainActor
     static func read(executable: URL, profile: URL, environment: [String: String],
                      cancellation: AccountCancellation, runner: any AccountCommandRunning,
                      http: any KimiHTTPFetching, port: () throws -> UInt16,
-                     startupTimeout: TimeInterval = 8, pollInterval: TimeInterval = 0.15) async throws -> ManagedAccountState {
-        try AccountStorage.privateDirectory(profile)
-        try AccountStorage.privateDirectory(profile.appendingPathComponent("home", isDirectory: true))
+                     startupTimeout: TimeInterval = 8, pollInterval: TimeInterval = 0.15,
+                     preserveExistingProfile: Bool = false) async throws -> ManagedAccountState {
+        // External profiles keep their original HOME; never create or chmod their files.
+        let managed = !preserveExistingProfile
+        if managed {
+            try AccountStorage.privateDirectory(profile)
+            try AccountStorage.privateDirectory(profile.appendingPathComponent("home", isDirectory: true))
+        } else {
+            _ = try ExistingAccountProfile(directory: profile.path, usesDefaultClaudeHome: false).validatedDirectory()
+        }
         for attempt in 0..<2 {
             try checkCancellation(cancellation)
             let serverCancellation = AccountCancellation()
             let selectedPort = try port()
             let password = UUID().uuidString + UUID().uuidString
-            var isolated = isolatedEnvironment(profile: profile, inherited: environment)
+            var isolated = managed ? isolatedEnvironment(profile: profile, inherited: environment)
+                : ExistingAccountProfile(directory: profile.path, usesDefaultClaudeHome: false).environment(provider: .kimi, inherited: environment)
             isolated["KIMI_CODE_PASSWORD"] = password
             // Redirection discards the startup banner before it reaches any
             // collector: it can contain the CLI's persistent bearer token.
