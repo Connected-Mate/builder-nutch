@@ -199,7 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         let title = String(format: NSLocalizedString("%@ accounts", comment: "Account picker title"), provider.title)
-        guard let snapshotID = manager.selectedAccount(for: provider)?.id.uuidString else { return nil }
+        guard let snapshotID = (currentID ?? selectedID)?.uuidString else { return nil }
         return NotchAccountPicker(provider: provider, snapshotID: snapshotID, title: title, accounts: accounts)
     }
 
