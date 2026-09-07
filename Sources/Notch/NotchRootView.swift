@@ -135,6 +135,14 @@ struct NotchRootView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(snapshot.displayName) usage details")
                 .accessibilityValue("\(snapshot.hasReading ? snapshot.headlineText(for: model.usageDisplayMode) + " " + model.usageDisplayMode.unit : "Usage unavailable"). Details \(model.selectedIndex == index ? "open" : "closed").")
+                .accessibilityHint(NSLocalizedString(
+                    "Click for details. Press and hold to reorder accounts.",
+                    comment: "Provider ring interaction hint"
+                ))
+                .help(Text(NSLocalizedString(
+                    "Press and hold to reorder accounts",
+                    comment: "Provider ring hover help"
+                )))
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAction { model.onToggleDetails?(index) }
                 .accessibilityHidden(!model.isExpanded)

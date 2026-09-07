@@ -210,8 +210,8 @@ struct InlineAccountRotation: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if picker.accounts.count > 1 {
-                currentToNextConnector
+            if picker.accounts.count > 2 {
+                queueDivider
             }
             if edge.isVertical {
                 VStack(spacing: NotchLayout.cellSpacing) { accountCells }
@@ -223,23 +223,25 @@ struct InlineAccountRotation: View {
         .transition(.opacity.combined(with: .scale(scale: 0.96)))
     }
 
-    /// A single quiet rail explains the handoff from NOW to NEXT. Accounts
-    /// later in the queue stay on the notch's black surface.
-    private var currentToNextConnector: some View {
-        let pitch = NotchLayout.cellPitch(for: edge)
+    /// A fixed rule separates the active handoff from the rest of the loop.
+    /// The current account cannot be dragged, so this stays directly below
+    /// NEXT while later accounts move around underneath it.
+    private var queueDivider: some View {
+        let position = 2 * NotchLayout.cellAlong(for: edge)
+            + 1.5 * NotchLayout.cellSpacing
         return Capsule()
-            .fill(Palette.ringTrack.opacity(0.72))
+            .fill(Palette.textSecondary.opacity(0.72))
             .frame(
-                width: edge.isVertical ? NotchLayout.trackStroke : pitch,
-                height: edge.isVertical ? pitch : NotchLayout.trackStroke
+                width: edge.isVertical ? NotchLayout.glyphSize : NotchLayout.hairline,
+                height: edge.isVertical ? NotchLayout.hairline : NotchLayout.glyphSize
             )
             .offset(
                 x: edge.isVertical
-                    ? (NotchLayout.ringDiameter - NotchLayout.trackStroke) / 2
-                    : NotchLayout.ringDiameter / 2,
+                    ? (NotchLayout.ringDiameter - NotchLayout.glyphSize) / 2
+                    : position - NotchLayout.hairline / 2,
                 y: edge.isVertical
-                    ? NotchLayout.ringDiameter / 2
-                    : (NotchLayout.ringDiameter - NotchLayout.trackStroke) / 2
+                    ? position - NotchLayout.hairline / 2
+                    : (NotchLayout.cellExtent - NotchLayout.glyphSize) / 2
             )
     }
 
@@ -270,7 +272,9 @@ struct InlineAccountRotation: View {
                         .offset(y: Design.px(11))
                 }
             }
-            Text(account.usage.components(separatedBy: " ").first ?? account.usage)
+            Text(account.usage == "—"
+                 ? NSLocalizedString("Usage unavailable short", comment: "Compact unavailable usage")
+                 : account.usage.components(separatedBy: " ").first ?? account.usage)
                 .font(Typography.percent)
                 .foregroundStyle(account.isCurrent ? Palette.textPrimary : Palette.textSecondary)
                 .fixedSize(horizontal: true, vertical: false)

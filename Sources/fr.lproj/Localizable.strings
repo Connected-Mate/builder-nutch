@@ -21,6 +21,9 @@
 "NEXT" = "PROCHAIN";
 "NOW" = "ACTUEL";
 "Drag to change the account order" = "Glissez pour modifier l’ordre des comptes";
+"Press and hold to reorder accounts" = "Appui long pour réorganiser les comptes";
+"Click for details. Press and hold to reorder accounts." = "Cliquez pour les détails. Appui long pour réorganiser les comptes.";
+"Usage unavailable short" = "Indispo.";
 "NEXT SESSION" = "PROCHAINE SESSION";
 "REMAINING" = "RESTANT";
 "USED" = "UTILISÉ";

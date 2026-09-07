@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Combine
+import QuartzCore
 
 @MainActor
 final class NotchWindowController {
@@ -118,7 +119,10 @@ final class NotchWindowController {
             .sink { [weak self] count in
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    self.relocate(cellCount: count ?? self.model.snapshots.count)
+                    self.relocate(
+                        cellCount: count ?? self.model.snapshots.count,
+                        animated: true
+                    )
                 }
             }
             .store(in: &cancellables)
@@ -137,7 +141,7 @@ final class NotchWindowController {
 
     // MARK: - Placement
 
-    func relocate(cellCount: Int? = nil) {
+    func relocate(cellCount: Int? = nil, animated: Bool = false) {
         guard let screen = NotchGeometry.preferredScreen(from: NSScreen.screens) else { return }
         model.adopt(screen: screen)
         let size = model.panelSize(cellCount: cellCount ?? model.snapshots.count)
@@ -145,7 +149,16 @@ final class NotchWindowController {
         lastVisibleFrame = screen.visibleFrame
 
         if let panel {
-            panel.setFrame(frame, display: true)
+            if animated, panel.isVisible {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.42
+                    context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    context.allowsImplicitAnimation = true
+                    panel.animator().setFrame(frame, display: true)
+                }
+            } else {
+                panel.setFrame(frame, display: true)
+            }
         } else {
             let panel = NotchPanel(contentRect: frame)
             let hosting = NotchHostingView(rootView: NotchRootView(model: model))
@@ -635,7 +648,7 @@ final class NotchWindowController {
     private func dismissAccountPicker(fold: Bool = false) {
         guard model.accountPicker != nil else { return }
         accountDrag = nil
-        withAnimation(NotchMotion.crossfade) { model.accountPicker = nil }
+        withAnimation(NotchMotion.unfold) { model.accountPicker = nil }
         model.isPinned = false
         updateInteractiveRects()
         if fold { setExpanded(false) }
