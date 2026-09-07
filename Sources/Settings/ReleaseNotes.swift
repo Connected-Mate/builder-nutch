@@ -31,6 +31,14 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.5.2",
+            headline: "Details when you ask for them.",
+            changes: [
+                .init(title: "Click for details", detail: "Provider details open with a click, never on hover. Click again to close, or click another provider to switch."),
+                .init(title: "A precise reveal area", detail: "Hover and auto-hide reveal only at the small handle’s position. The rest of every screen edge stays inactive.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.5.1",
             headline: "Un café pour soutenir Builder Nutch.",
             changes: [

@@ -3,23 +3,6 @@ import XCTest
 @testable import Codenotch
 
 final class NotchRevealGeometryTests: XCTestCase {
-    func testAllPhysicalEdgesOnAnOffsetDisplay() {
-        let screen = CGRect(x: -1600, y: -200, width: 1600, height: 1000)
-        let positions: [(NotchEdge, CGPoint)] = [
-            (.left, CGPoint(x: screen.minX, y: screen.midY)),
-            (.right, CGPoint(x: screen.maxX - 1, y: screen.midY)),
-            (.top, CGPoint(x: screen.midX, y: screen.maxY - 1)),
-            (.bottom, CGPoint(x: screen.midX, y: screen.minY))
-        ]
-        for (edge, point) in positions {
-            XCTAssertTrue(NotchGeometry.isAtRevealEdge(point, screenFrame: screen, edge: edge), "\(edge)")
-            XCTAssertFalse(NotchGeometry.isAtRevealEdge(CGPoint(x: screen.midX, y: screen.midY), screenFrame: screen, edge: edge))
-        }
-        XCTAssertFalse(NotchGeometry.isAtRevealEdge(CGPoint(x: screen.minX - 1, y: screen.midY), screenFrame: screen, edge: .left))
-        XCTAssertFalse(NotchGeometry.isAtRevealEdge(CGPoint(x: screen.minX, y: screen.maxY + 1), screenFrame: screen, edge: .left))
-        XCTAssertFalse(NotchGeometry.isAtRevealEdge(CGPoint(x: screen.minX + 3, y: screen.midY), screenFrame: screen, edge: .left))
-    }
-
     func testStoredValuesRemainCompatibleAndModesAreDistinct() {
         XCTAssertEqual(NotchVisibility(rawValue: "hidden"), .hidden)
         XCTAssertEqual(NotchVisibility(rawValue: "onHover"), .onHover)
@@ -36,46 +19,81 @@ final class NotchAutoHideTests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
     }
 
-    func testInvisiblePanelRevealsAndFoldsOnEveryEdgeWithoutTakingHiddenClicks() throws {
+    private func handlePoint(_ controller: NotchWindowController, alongOffset: CGFloat = 0,
+                             depth: CGFloat? = nil) throws -> CGPoint {
+        let frame = try XCTUnwrap(controller.panelFrameForTesting)
+        let model = controller.model
+        let local = NotchPlacement(edge: model.edge, panelSize: frame.size).point(
+            along: model.slack + model.shapeLength / 2 + alongOffset,
+            across: depth ?? model.restingDepth / 2)
+        return CGPoint(x: frame.minX + local.x, y: frame.maxY - local.y)
+    }
+
+    func testOnlyTheSmallHandleRevealsInBothModesOnEveryEdge() throws {
         let screen = try XCTUnwrap(NotchGeometry.preferredScreen(from: NSScreen.screens))
-        var pointer = CGPoint(x: screen.frame.midX, y: screen.frame.midY)
+        let away = CGPoint(x: screen.frame.midX, y: screen.frame.midY)
+        var pointer = away
         let controller = NotchWindowController(cursorLocation: { pointer })
         controller.apply(.autoHide)
         controller.show()
         defer { controller.apply(.hidden); controller.stop() }
         for edge in NotchEdge.allCases {
-            controller.apply(edge: edge)
-            controller.apply(.autoHide)
-            XCTAssertFalse(controller.panelVisibleForTesting, "A resting pill appeared on \(edge)")
-            XCTAssertTrue(controller.panelIgnoresMouseForTesting)
-            controller.handleClick()
-            XCTAssertFalse(controller.model.isExpanded, "An invisible region accepted a click")
-            switch edge {
-            case .left: pointer = CGPoint(x: screen.frame.minX, y: screen.frame.midY)
-            case .right: pointer = CGPoint(x: screen.frame.maxX - 1, y: screen.frame.midY)
-            case .top: pointer = CGPoint(x: screen.frame.midX, y: screen.frame.maxY - 1)
-            case .bottom: pointer = CGPoint(x: screen.frame.midX, y: screen.frame.minY)
+            for mode in [NotchVisibility.autoHide, .onHover] {
+                pointer = away
+                controller.apply(.autoHide)
+                controller.apply(edge: edge)
+                controller.apply(mode)
+                XCTAssertFalse(controller.model.isExpanded)
+                XCTAssertEqual(controller.panelVisibleForTesting, mode == .onHover)
+                XCTAssertTrue(controller.panelIgnoresMouseForTesting)
+                if mode == .autoHide {
+                    controller.handleClick()
+                    XCTAssertFalse(controller.model.isExpanded, "An invisible region accepted a click")
+                }
+                // One point beyond either end or the inner face must not wake it.
+                for offset in [-1.0, 1.0] {
+                    pointer = try handlePoint(controller, alongOffset: offset * (controller.model.restingLength / 2 + 1))
+                    controller.pollCursorForTesting()
+                    XCTAssertFalse(controller.model.isExpanded, "Outside handle end: \(edge) \(mode)")
+                }
+                pointer = try handlePoint(controller, depth: controller.model.restingDepth + 1)
+                controller.pollCursorForTesting()
+                XCTAssertFalse(controller.model.isExpanded, "Generous old hit region still wakes it")
+                // Unrelated parts of the physical edge stay inactive, including Dock/menu bar edges.
+                for fraction in [0.1, 0.9] {
+                    switch edge {
+                    case .left: pointer = CGPoint(x: screen.frame.minX, y: screen.frame.minY + screen.frame.height * fraction)
+                    case .right: pointer = CGPoint(x: screen.frame.maxX - 1, y: screen.frame.minY + screen.frame.height * fraction)
+                    case .top: pointer = CGPoint(x: screen.frame.minX + screen.frame.width * fraction, y: screen.frame.maxY - 1)
+                    case .bottom: pointer = CGPoint(x: screen.frame.minX + screen.frame.width * fraction, y: screen.frame.minY)
+                    }
+                    controller.pollCursorForTesting()
+                    XCTAssertFalse(controller.model.isExpanded, "Unrelated edge revealed: \(edge) \(mode)")
+                }
+                pointer = try handlePoint(controller)
+                controller.pollCursorForTesting()
+                XCTAssertTrue(controller.model.isExpanded, "Handle failed to reveal: \(edge) \(mode)")
+                XCTAssertTrue(controller.panelVisibleForTesting)
+                XCTAssertNil(controller.model.selectedIndex)
+                pointer = away
+                controller.pollCursorForTesting()
+                pump(0.15)
+                XCTAssertTrue(controller.model.isExpanded, "Folded before the grace elapsed")
+                pump(0.5)
+                XCTAssertFalse(controller.model.isExpanded)
+                XCTAssertEqual(controller.panelVisibleForTesting, mode == .onHover)
+                XCTAssertTrue(controller.panelIgnoresMouseForTesting)
             }
-            controller.pollCursorForTesting()
-            XCTAssertTrue(controller.model.isExpanded, "Did not reveal on \(edge)")
-            XCTAssertTrue(controller.panelVisibleForTesting)
-            pointer = CGPoint(x: screen.frame.midX, y: screen.frame.midY)
-            controller.pollCursorForTesting()
-            pump(0.15)
-            XCTAssertTrue(controller.model.isExpanded, "Folded before the existing grace elapsed")
-            pump(0.5)
-            XCTAssertFalse(controller.model.isExpanded, "Failed to fold on \(edge)")
-            XCTAssertFalse(controller.panelVisibleForTesting)
-            XCTAssertTrue(controller.panelIgnoresMouseForTesting)
         }
     }
 
     func testOffNeverRevealsAndModeChangesCancelStaleFolds() throws {
         let screen = try XCTUnwrap(NotchGeometry.preferredScreen(from: NSScreen.screens))
-        var pointer = CGPoint(x: screen.frame.maxX - 1, y: screen.frame.midY)
+        var pointer = CGPoint(x: screen.frame.midX, y: screen.frame.midY)
         let controller = NotchWindowController(cursorLocation: { pointer })
         controller.show()
         defer { controller.apply(.hidden); controller.stop() }
+        pointer = try handlePoint(controller)
         controller.apply(.hidden)
         controller.pollCursorForTesting()
         XCTAssertFalse(controller.model.isExpanded)
@@ -92,26 +110,25 @@ final class NotchAutoHideTests: XCTestCase {
         XCTAssertTrue(controller.panelVisibleForTesting)
         controller.apply(.onHover)
         XCTAssertFalse(controller.model.isExpanded)
-        XCTAssertTrue(controller.panelVisibleForTesting, "The original visible pill disappeared")
+        XCTAssertTrue(controller.panelVisibleForTesting)
     }
 
-    func testMovingAutoHiddenNotchDoesNotFlashOrReopenFromOldEdge() throws {
-        let screen = try XCTUnwrap(NotchGeometry.preferredScreen(from: NSScreen.screens))
-        var pointer = CGPoint(x: screen.frame.maxX - 1, y: screen.frame.midY)
+    func testMovingAutoHiddenNotchDoesNotFlashOrReopenFromOldHandle() throws {
+        var pointer = CGPoint.zero
         let controller = NotchWindowController(cursorLocation: { pointer })
         controller.show()
         defer { controller.apply(.hidden); controller.stop() }
+        pointer = try handlePoint(controller)
         controller.apply(.autoHide)
         controller.pollCursorForTesting()
         XCTAssertTrue(controller.model.isExpanded)
         controller.apply(edge: .left)
-        XCTAssertEqual(controller.model.edge, .left)
         XCTAssertFalse(controller.model.isExpanded)
         XCTAssertFalse(controller.panelVisibleForTesting)
         controller.pollCursorForTesting()
         pump(0.65)
         XCTAssertFalse(controller.model.isExpanded)
-        pointer = CGPoint(x: screen.frame.minX, y: screen.frame.midY)
+        pointer = try handlePoint(controller)
         controller.pollCursorForTesting()
         XCTAssertTrue(controller.panelVisibleForTesting)
     }

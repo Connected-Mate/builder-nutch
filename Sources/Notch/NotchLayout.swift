@@ -45,8 +45,6 @@ enum NotchLayout {
     // sized to read as a deliberate handle rather than a sliver of chrome.
     static let pillWidth  = Design.px(26)
     static let pillHeight = Design.px(210)
-    /// The pill is small, so the region that wakes it is deliberately larger.
-    static let pillHotZone = Design.px(90)
 
     // A provider cell
     static let ringDiameter  = Design.px(117)   // 44pt, the design spec's anchor

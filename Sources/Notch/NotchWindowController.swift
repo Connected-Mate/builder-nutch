@@ -21,7 +21,6 @@ final class NotchWindowController {
     private let cursorLocation: () -> CGPoint
     private var visibility: NotchVisibility = .onHover
     private var visibilityChange = 0
-    private var lastScreenFrame: CGRect?
 
     init(cursorLocation: @escaping () -> CGPoint = { NSEvent.mouseLocation }) {
         self.cursorLocation = cursorLocation
@@ -40,16 +39,10 @@ final class NotchWindowController {
     private var hostingView: NotchHostingView<NotchRootView>?
     private var cancellables = Set<AnyCancellable>()
     private var mouseMonitors: [Any] = []
-    private var clearHoverWork: DispatchWorkItem?
     private var clockTimer: Timer?
     private var cursorTimer: Timer?
 
-    /// Hover in is quick; hover out waits, because the pointer has to cross the
-    /// gap between the notch and the card without the card vanishing under it.
-    private let hoverGrace: TimeInterval = 0.25
-    /// Longer than the hover grace: folding shut is a bigger movement than
-    /// dismissing a tooltip, and doing it the instant the pointer strays feels
-    /// twitchy rather than responsive.
+    /// Allow the pointer to cross from the notch to an opened detail card.
     private let foldGrace: TimeInterval = 0.45
     private var foldWork: DispatchWorkItem?
     /// Whether we have pushed the pointing hand onto the cursor stack.
@@ -64,6 +57,7 @@ final class NotchWindowController {
     private var lastVisibleFrame: CGRect?
 
     func show() {
+        model.onToggleDetails = { [weak self] index in self?.toggleDetails(index: index) }
         relocate()
         startWatchingCursor()
         startClock()
@@ -76,7 +70,7 @@ final class NotchWindowController {
         }
         .store(in: &cancellables)
 
-        model.$hoveredIndex
+        model.$selectedIndex
             .sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.updateInteractiveRects() }
             }
@@ -84,6 +78,18 @@ final class NotchWindowController {
 
         // The notch is as tall as the provider list, so gaining or losing one
         // has to resize the panel, not just redraw inside it.
+        model.$snapshots
+            .map { $0.map(\.id) }
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.model.selectedIndex = nil
+                    self.updateInteractiveRects()
+                }
+            }
+            .store(in: &cancellables)
+
         model.$snapshots
             .map(\.count)
             .removeDuplicates()
@@ -114,7 +120,6 @@ final class NotchWindowController {
         let size = model.panelSize(cellCount: cellCount ?? model.snapshots.count)
         let frame = NotchGeometry.panelFrame(for: screen, panelSize: size, edge: model.edge)
         lastVisibleFrame = screen.visibleFrame
-        lastScreenFrame = screen.frame
 
         if let panel {
             panel.setFrame(frame, display: true)
@@ -180,19 +185,13 @@ final class NotchWindowController {
         )
     }
 
-    /// What wakes the folded notch. Deliberately larger than the pill it
-    /// surrounds — a 10pt target on a screen edge is a fiddly thing to hit, and
-    /// the cost of being generous is only that it opens a little eagerly.
+    /// Reveal only over the actual resting handle, including in auto-hide mode.
     private var pillRect: CGRect {
-        // Whatever the resting shape is — the pill, or the display's own notch
-        // when it is joining one — the region that wakes it is that plus a
-        // generous band, because both are small targets on a screen edge.
-        let length = max(model.restingLength, NotchLayout.pillHotZone)
-        return placement.rect(
-            along: model.slack + (model.shapeLength - length) / 2,
+        placement.rect(
+            along: model.slack + (model.shapeLength - model.restingLength) / 2,
             across: 0,
-            length: length,
-            depth: model.restingDepth + NotchLayout.pillHotZone
+            length: model.restingLength,
+            depth: model.restingDepth
         )
     }
 
@@ -257,7 +256,7 @@ final class NotchWindowController {
             return
         }
         var rects = [liveRect]
-        if model.isExpanded, let index = model.hoveredIndex, let card = tooltipRect(index: index) {
+        if model.isExpanded, let index = model.selectedIndex, let card = tooltipRect(index: index) {
             rects.append(card)
         }
         hostingView?.interactiveRects = rects
@@ -301,6 +300,14 @@ final class NotchWindowController {
         }) {
             mouseMonitors.append(local)
         }
+        let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown]
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: clicks, handler: { [weak self] _ in
+            MainActor.assumeIsolated { self?.dismissDetailsIfOutside() }
+        }) { mouseMonitors.append(global) }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: clicks, handler: { [weak self] event in
+            MainActor.assumeIsolated { self?.dismissDetailsIfOutside() }
+            return event
+        }) { mouseMonitors.append(local) }
     }
 
     private func localCursor(in frame: CGRect) -> CGPoint {
@@ -320,25 +327,14 @@ final class NotchWindowController {
         guard let panel else { return }
         guard visibility != .hidden else { return }
         let local = localCursor(in: panel.frame)
-        let overTooltip = model.hoveredIndex
+        let overTooltip = model.selectedIndex
             .flatMap(tooltipRect(index:))
             .map { model.isExpanded && $0.contains(local) } ?? false
-        let atEdge = visibility == .autoHide && lastScreenFrame.map {
-            NotchGeometry.isAtRevealEdge(cursorLocation(), screenFrame: $0, edge: model.edge)
-        } == true
-        // Invisible mode cannot wake from the old, deliberately generous pill
-        // rectangle. Only touching the physical edge is a reveal gesture.
-        let overNotch = visibility == .autoHide && !model.isExpanded ? false : liveRect.contains(local)
-        setExpanded(atEdge || overNotch || overTooltip)
+        let overNotch = liveRect.contains(local)
+        setExpanded(overNotch || overTooltip)
 
-        var target: Int?
-        if model.isExpanded, notchRect.contains(local) {
-            target = cellIndex(along: placement.along(of: local))
-        } else if model.isExpanded, let current = model.hoveredIndex,
-                  let card = tooltipRect(index: current),
-                  card.contains(local) {
-            target = current
-        }
+        let target = model.isExpanded && notchRect.contains(local)
+            ? cellIndex(along: placement.along(of: local)) : nil
 
         let overHandle = model.isExpanded && isOverHandle(local)
         if model.isHoveringSettings != overHandle {
@@ -347,26 +343,6 @@ final class NotchWindowController {
         setPointing(
             Self.wantsPointingHand(isExpanded: model.isExpanded, cellIndex: target) || overHandle
         )
-
-        if let target {
-            clearHoverWork?.cancel()
-            clearHoverWork = nil
-            if model.hoveredIndex != target {
-                withAnimation(.spring(response: 0.18, dampingFraction: 0.85)) {
-                    model.hoveredIndex = target
-                }
-            }
-        } else if model.hoveredIndex != nil, clearHoverWork == nil {
-            let work = DispatchWorkItem { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.clearHoverWork = nil
-                    withAnimation(.easeOut(duration: 0.18)) { self.model.hoveredIndex = nil }
-                }
-            }
-            clearHoverWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + hoverGrace, execute: work)
-        }
 
         updateInteractiveRects()
     }
@@ -395,7 +371,7 @@ final class NotchWindowController {
                 guard !self.model.staysOpen else { return }
                 withAnimation(NotchMotion.unfold) {
                     self.model.isExpanded = false
-                    self.model.hoveredIndex = nil
+                    self.model.selectedIndex = nil
                 }
                 self.setPointing(false)
                 self.updateInteractiveRects()
@@ -424,19 +400,11 @@ final class NotchWindowController {
         }
     }
 
-    /// A click on a ring refetches that provider; a click anywhere else on the
-    /// open notch pins it. The ring is the more specific target, so it wins.
+    /// A ring click toggles its details. Background clicks retain the pin gesture.
     func handleClick() {
         guard visibility != .hidden, visibility != .autoHide || model.isExpanded else { return }
         guard let panel, model.isExpanded else {
-            // Opens it, the same as the pointer arriving would — it must not
-            // also pin it. The pill's hot zone is deliberately generous, since
-            // it is a small target on a screen edge, so a click aimed at
-            // something else nearby can land here without the notch ever
-            // having been seen open. Pinning is what a click on a notch that
-            // is *already* open does; folding it back in later is exactly
-            // the ordinary hover behaviour, which a plain `setExpanded` leaves
-            // intact.
+            // Clicking the resting handle opens it without pinning it.
             setExpanded(true)
             return
         }
@@ -452,10 +420,34 @@ final class NotchWindowController {
         if notchRect.contains(local),
            let index = cellIndex(along: placement.along(of: local)),
            model.snapshots.indices.contains(index) {
-            onRefreshProvider?(model.snapshots[index].id)
+            toggleDetails(index: index)
             return
         }
+        if let index = model.selectedIndex, tooltipRect(index: index)?.contains(local) == true {
+            return
+        }
+        model.selectedIndex = nil
+        updateInteractiveRects()
         togglePinned()
+    }
+
+    func toggleDetails(index: Int) {
+        guard visibility != .hidden, model.isExpanded,
+              model.snapshots.indices.contains(index) else { return }
+        withAnimation(.spring(response: 0.18, dampingFraction: 0.85)) {
+            model.selectedIndex = model.selectedIndex == index ? nil : index
+        }
+        updateInteractiveRects()
+        if model.selectedIndex != nil { onRefreshProvider?(model.snapshots[index].id) }
+    }
+
+    /// Dismiss without consuming the click intended for another application.
+    func dismissDetailsIfOutside() {
+        guard let panel, let index = model.selectedIndex else { return }
+        let local = localCursor(in: panel.frame)
+        guard !liveRect.contains(local), tooltipRect(index: index)?.contains(local) != true else { return }
+        model.selectedIndex = nil
+        updateInteractiveRects()
     }
 
     /// Move the notch to another screen edge.
@@ -493,7 +485,7 @@ final class NotchWindowController {
 
         let wasOpen = model.isExpanded
         let modeChange = visibilityChange
-        model.hoveredIndex = nil
+        model.selectedIndex = nil
         setPointing(false)
 
         // Clicking through the picker starts a move before the last one has
@@ -568,13 +560,13 @@ final class NotchWindowController {
             // close it and "on hover" would look exactly like "always show".
             withAnimation(NotchMotion.unfold) {
                 model.isExpanded = false
-                model.hoveredIndex = nil
+                model.selectedIndex = nil
             }
         case .autoHide, .hidden:
             model.isAlwaysOn = false
             model.isPinned = false
             model.isExpanded = false
-            model.hoveredIndex = nil
+            model.selectedIndex = nil
             // Ordered out rather than made transparent. An invisible panel that
             // still takes the screen edge would keep swallowing the pointer.
             panel?.orderOut(nil)
@@ -585,8 +577,7 @@ final class NotchWindowController {
 
     private func cancelPendingHover() {
         foldWork?.cancel(); foldWork = nil
-        clearHoverWork?.cancel(); clearHoverWork = nil
-        model.hoveredIndex = nil
+        model.selectedIndex = nil
         model.isHoveringSettings = false
         setPointing(false)
     }

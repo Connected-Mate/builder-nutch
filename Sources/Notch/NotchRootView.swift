@@ -36,7 +36,7 @@ struct NotchRootView: View {
                         .animation(motion(orbMotion), value: model.isExpanded)
                 }
 
-                if let snapshot = model.hoveredSnapshot, let index = model.hoveredIndex,
+                if let snapshot = model.selectedSnapshot, let index = model.selectedIndex,
                    model.isExpanded {
                     TooltipCard(
                         snapshot: snapshot,
@@ -59,7 +59,7 @@ struct NotchRootView: View {
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
             // Swapping cards is a movement like any other here.
-            .animation(motion(NotchMotion.glide), value: model.hoveredIndex)
+            .animation(motion(NotchMotion.glide), value: model.selectedIndex)
         }
         .animation(motion(NotchMotion.unfold), value: model.isExpanded)
         .environment(\.colorScheme, .dark)
@@ -114,6 +114,12 @@ struct NotchRootView: View {
                 // edge that is the ring alone — the label sits below it, in the
                 // notch's depth, and claims nothing here.
                 .frame(width: model.edge.isVertical ? nil : NotchLayout.cellAlong(for: model.edge))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(snapshot.displayName) usage details")
+                .accessibilityValue("\(snapshot.hasReading ? snapshot.headlineText + " used" : "Usage unavailable"). Details \(model.selectedIndex == index ? "open" : "closed").")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { model.onToggleDetails?(index) }
+                .accessibilityHidden(!model.isExpanded)
                 .opacity(model.isExpanded ? 1 : 0)
                 // A short slide toward the edge, no scaling: the clip is
                 // already doing the concealing, and scaling on top of it
