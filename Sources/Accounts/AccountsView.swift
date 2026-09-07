@@ -175,7 +175,7 @@ struct AccountsView: View {
             .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(WorkspaceQuietButtonStyle())
-        .accessibilityLabel("\(provider.workspaceTitle), \(count) accounts")
+        .accessibilityLabel("\(provider.workspaceTitle), \(count) account\(count == 1 ? "" : "s")")
         .accessibilityAddTraits(active ? .isSelected : [])
     }
 
@@ -468,7 +468,7 @@ private struct AssistantRow: View {
                 .popover(isPresented: $showingUsage) { usageDetails }
             selectionControl.frame(width: 110)
         }
-        .frame(minHeight: 76).padding(.vertical, 4)
+        .padding(.vertical, 8).frame(minHeight: 76)
         .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(account.label), \(account.provider.workspaceTitle), \(statusDescription)")
@@ -534,8 +534,10 @@ private struct AssistantRow: View {
             return message
         }
         if !state.windows.isEmpty && !state.isFresh() { return "Last known usage · refresh to update" }
-        if let reset = state.windows.compactMap(\.resetsAt).min() {
-            return "Resets \(reset.formatted(.relative(presentation: .named)))"
+        if let limit = state.windows.filter({ $0.usedFraction != nil }).max(by: {
+            ($0.usedFraction ?? 0) < ($1.usedFraction ?? 0)
+        }), let reset = limit.resetsAt {
+            return "\(limit.label) · Resets \(reset.formatted(.relative(presentation: .named)))"
         }
         return "Connected"
     }
