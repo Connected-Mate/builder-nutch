@@ -217,6 +217,11 @@ struct InlineAccountRotation: View {
                 HStack(spacing: NotchLayout.cellSpacing) { accountCells }
             }
         }
+        .padding(edge.isVertical ? .horizontal : .vertical, Design.px(12))
+        .background(
+            Palette.ringTrack.opacity(0.72),
+            in: RoundedRectangle(cornerRadius: Design.px(24), style: .continuous)
+        )
         .transition(.opacity.combined(with: .scale(scale: 0.96)))
     }
 

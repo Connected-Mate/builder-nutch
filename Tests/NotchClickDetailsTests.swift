@@ -114,7 +114,9 @@ final class NotchClickDetailsTests: XCTestCase {
         controller.model.snapshots = [ProviderSnapshot(
             id: current.uuidString, displayName: "Claude", glyph: .claude,
             fidelity: .official, status: .ok,
-            windows: [LimitWindow(id: "w", label: "Session", usedFraction: 0.4)])]
+            windows: [LimitWindow(id: "w", label: "Session", usedFraction: 0.4)]),
+            ProviderSnapshot(id: "codex", displayName: "Codex", glyph: .openai,
+                             fidelity: .official, status: .ok, windows: [])]
         controller.onAccountPicker = { snapshotID in
             NotchAccountPicker(provider: .claude, snapshotID: snapshotID, title: "Claude accounts", accounts: [
                 NotchAccountItem(id: current, name: "Current", subtitle: nil, usage: "60% left", usedFraction: 0.4, isCurrent: true, isNext: false),
@@ -140,6 +142,7 @@ final class NotchClickDetailsTests: XCTestCase {
         XCTAssertEqual(controller.model.layoutCellCount, 3)
         XCTAssertNil(controller.model.selectedIndex, "Inline accounts must replace the detached detail card")
         XCTAssertTrue(controller.model.staysOpen)
+        XCTAssertFalse(controller.model.isPinned)
         let up = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseUp, location: location,
             modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
             windowNumber: window.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0))
@@ -169,6 +172,50 @@ final class NotchClickDetailsTests: XCTestCase {
         window.sendEvent(try event(.leftMouseUp, dragEnd, 5))
         XCTAssertEqual(moved?.0, later)
         XCTAssertEqual(moved?.1, next)
+        XCTAssertNil(controller.model.accountPicker, "A completed reorder should restore the provider list")
+    }
+
+    func testOutsideClickDismissesInlineAccountsAndFoldsTheNotch() throws {
+        var pointer = CGPoint.zero
+        let current = UUID(), next = UUID()
+        let controller = NotchWindowController(cursorLocation: { pointer })
+        controller.model.snapshots = [ProviderSnapshot(
+            id: current.uuidString, displayName: "Claude", glyph: .claude,
+            fidelity: .official, status: .ok, windows: [])]
+        controller.onAccountPicker = { _ in
+            NotchAccountPicker(provider: .claude, snapshotID: current.uuidString,
+                title: "Claude accounts", accounts: [
+                    NotchAccountItem(id: current, name: "Current", subtitle: nil,
+                                     usage: "10% left", usedFraction: 0.9,
+                                     isCurrent: true, isNext: false),
+                    NotchAccountItem(id: next, name: "Next", subtitle: nil,
+                                     usage: "100% left", usedFraction: 0,
+                                     isCurrent: false, isNext: true)
+                ])
+        }
+        controller.show()
+        controller.apply(.onHover)
+        defer { controller.apply(.hidden); controller.stop() }
+        controller.handleClick()
+        pointer = try globalPoint(controller, index: 0)
+        controller.pollCursorForTesting()
+        let window = try XCTUnwrap(controller.panelContentViewForTesting?.window)
+        (window as? NotchPanel)?.isLeftButtonPressed = { true }
+        let location = window.convertPoint(fromScreen: pointer)
+        let down = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: location,
+            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 1,
+            clickCount: 1, pressure: 1))
+        window.sendEvent(down)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.55))
+        XCTAssertNotNil(controller.model.accountPicker)
+
+        pointer = CGPoint(x: -100000, y: -100000)
+        controller.dismissDetailsIfOutside()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.55))
+        XCTAssertNil(controller.model.accountPicker)
+        XCTAssertFalse(controller.model.isPinned)
+        XCTAssertFalse(controller.model.isExpanded)
     }
 
     func testAutomaticAccountSwitchOpensShowsAndRestoresAutoHide() throws {

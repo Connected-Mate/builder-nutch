@@ -8,6 +8,7 @@ final class NotchViewModel: ObservableObject {
     @Published var accountPicker: NotchAccountPicker?
     var onMoveAccount: ((UUID, UUID) -> Void)?
     var onChooseNextAccount: ((UUID) -> Void)?
+    var onDismissAccountPicker: (() -> Void)?
     /// Live agent sessions, keyed by the provider they belong to. They surface
     /// inside that provider's own ring rather than as a cell of their own — one
     /// ring per provider, so nothing in the notch looks like a ring without
@@ -37,7 +38,9 @@ final class NotchViewModel: ObservableObject {
     @Published var isAlwaysOn = false
 
     /// Held open, by either route. What the folding logic actually asks.
-    var staysOpen: Bool { isPinned || isAlwaysOn || automaticSwitch != nil }
+    var staysOpen: Bool {
+        isPinned || isAlwaysOn || automaticSwitch != nil || accountPicker != nil
+    }
     /// Providers with a fetch in flight, driven by the store.
     @Published var refreshing: Set<String> = []
     /// The settings handle is under the cursor.
@@ -266,7 +269,7 @@ final class NotchViewModel: ObservableObject {
     }
 
     var layoutCellCount: Int {
-        snapshots.count + max(0, (accountPicker?.accounts.count ?? 1) - 1)
+        accountPicker?.accounts.count ?? snapshots.count
     }
 
     func visualIndex(forProvider index: Int) -> Int {

@@ -105,26 +105,31 @@ struct NotchRootView: View {
     /// pulled toward the edge, so the whole thing reads as one movement.
     @ViewBuilder
     private var cells: some View {
-        let stack = ForEach(Array(model.snapshots.enumerated()), id: \.element.id) { index, snapshot in
-            Group {
-                if let picker = model.accountPicker, picker.snapshotID == snapshot.id {
-                    InlineAccountRotation(
-                        picker: picker,
-                        snapshot: snapshot,
-                        edge: model.edge,
-                        displayMode: model.usageDisplayMode,
-                        onMove: { model.onMoveAccount?($0, $1) },
-                        onChooseNext: { model.onChooseNextAccount?($0) }
-                    )
-                } else {
+        let stack = Group {
+            if let picker = model.accountPicker,
+               let snapshot = model.snapshots.first(where: { $0.id == picker.snapshotID }) {
+                InlineAccountRotation(
+                    picker: picker,
+                    snapshot: snapshot,
+                    edge: model.edge,
+                    displayMode: model.usageDisplayMode,
+                    onMove: {
+                        model.onMoveAccount?($0, $1)
+                        model.onDismissAccountPicker?()
+                    },
+                    onChooseNext: {
+                        model.onChooseNextAccount?($0)
+                        model.onDismissAccountPicker?()
+                    }
+                )
+            } else {
+                ForEach(Array(model.snapshots.enumerated()), id: \.element.id) { index, snapshot in
                     ProviderCell(
                         snapshot: snapshot,
                         activity: model.activity(for: snapshot.id),
                         isRefreshing: model.refreshing.contains(snapshot.id),
                         displayMode: model.usageDisplayMode
                     )
-                }
-            }
                 // Pinned to what the cell claims along the stack, or the drawn
                 // rings stop lining up with the centres `ringCenter` hands to
                 // the hover bands and the tooltip tails. Across a horizontal
@@ -146,6 +151,8 @@ struct NotchRootView: View {
                     y: model.isExpanded ? 0 : model.edge.outward.y * Design.px(28)
                 )
                 .animation(motion(NotchMotion.stagger(index: index)), value: model.isExpanded)
+                }
+            }
         }
 
         Group {
