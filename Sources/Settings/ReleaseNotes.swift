@@ -31,6 +31,13 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.5.1",
+            headline: "Un café pour soutenir Builder Nutch.",
+            changes: [
+                .init(title: "Offrez-moi un café", detail: "Un lien discret dans la barre latérale et les réglages ouvre la page Revolut du créateur pour une contribution libre.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.5.0",
             headline: "Already connected. Ready to build.",
             changes: [

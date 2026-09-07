@@ -182,18 +182,21 @@ struct SettingsView: View {
     private var credit: some View {
         VStack(spacing: 0) {
             Rectangle().fill(AppTheme.line).frame(height: 1).accessibilityHidden(true)
-            HStack(spacing: 4) {
-                Text(managedAccounts ? "Based on Codenotch by" : "App designed and developed by")
-                // Only the handle is the link, so the line reads as a sentence
-                // rather than as a button with a sentence attached.
-                Link("@hivinz_", destination: SettingsView.authorURL)
-                    // A link that does not change the pointer reads as text.
-                    .onHover { inside in
-                        if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-                    }
+            HStack(spacing: 16) {
+                SupportLink()
+                    .buttonStyle(AppButtonStyle(compact: true))
+                Spacer(minLength: 8)
+                HStack(spacing: 4) {
+                    Text(managedAccounts ? "Based on Codenotch by" : "App designed and developed by")
+                    Link("@hivinz_", destination: SettingsView.authorURL)
+                        .onHover { inside in
+                            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                        }
+                }
+                .font(AppTheme.font(.caption))
+                .foregroundStyle(AppTheme.muted)
             }
-            .font(AppTheme.font(.caption))
-            .foregroundStyle(AppTheme.muted)
+            .padding(.horizontal, 24)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
         }

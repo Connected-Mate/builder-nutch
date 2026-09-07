@@ -154,6 +154,9 @@ struct AccountsView: View {
                     .buttonStyle(WorkspaceQuietButtonStyle())
                     .keyboardShortcut(",", modifiers: .command)
                 }
+                SupportLink()
+                    .buttonStyle(WorkspaceQuietButtonStyle())
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
                 Label("On your Mac. In your control.", systemImage: "checkmark.shield")
                     .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
                     .padding(.top, 20).padding(.bottom, 20)
