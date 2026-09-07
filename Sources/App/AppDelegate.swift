@@ -27,6 +27,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         AppTheme.registerFonts()
+        // Launch Services can keep an older Dock tile after an in-place update.
+        // Setting the bundled icon explicitly makes the current release visible immediately.
+        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: iconURL) {
+            NSApp.applicationIconImage = icon
+        }
         guard !isRunningTests else { return }
         let preferences = Preferences()
         let manager = AccountManager()

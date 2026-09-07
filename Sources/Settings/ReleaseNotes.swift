@@ -31,6 +31,13 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.6.1",
+            headline: "The new icon, immediately.",
+            changes: [
+                .init(title: "Dock icon refreshed", detail: "Builder Nutch now applies its new B and N icon when it starts, even when macOS kept the previous icon after an update.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.6.0",
             headline: "Your accounts, in your order.",
             changes: [
