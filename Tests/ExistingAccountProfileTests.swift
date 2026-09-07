@@ -95,6 +95,38 @@ final class ExistingAccountProfileTests: XCTestCase {
         let legacy = try JSONDecoder().decode(AccountCatalog.self, from: Data(#"{"version":1,"accounts":[],"selected":[],"automaticSelection":false}"#.utf8))
         XCTAssertNil(legacy.ignoredExistingProfiles)
     }
+
+    func testLoggedOutKimiProfileIsNotDiscovered() throws {
+        let home = try temporary()
+        let credentials = home.appendingPathComponent(".kimi-code/credentials", isDirectory: true)
+        try AccountStorage.privateDirectory(credentials)
+        let file = credentials.appendingPathComponent("kimi-code.json")
+        try Data(#"{"access_token":"","refresh_token":""}"#.utf8).write(to: file)
+        XCTAssertFalse(ExistingAccountDiscovery.candidates(home: home, environment: [:]).contains { $0.provider == .kimi })
+
+        try Data(#"{"access_token":"connected","refresh_token":""}"#.utf8).write(to: file)
+        XCTAssertTrue(ExistingAccountDiscovery.candidates(home: home, environment: [:]).contains { $0.provider == .kimi })
+    }
+
+    @MainActor
+    func testPreviouslySavedLoggedOutKimiProfileIsPruned() async throws {
+        let root = try temporary(), external = try temporary(), runner = ExistingProfileRunner()
+        let credentials = external.appendingPathComponent("credentials", isDirectory: true)
+        try AccountStorage.privateDirectory(credentials)
+        let file = credentials.appendingPathComponent("kimi-code.json")
+        try Data(#"{"access_token":"connected","refresh_token":""}"#.utf8).write(to: file)
+        let manager = AccountManager(rootURL: root, runner: runner,
+            executable: { _ in URL(fileURLWithPath: "/fake/cli") },
+            readExistingKimi: { _, _, _, _ in ManagedAccountState(isConnected: true) })
+        _ = try manager.add(provider: .kimi, label: "Kimi", emailHint: nil)
+        await manager.discoverExistingAccounts(candidates: [candidate(external, provider: .kimi)])
+        XCTAssertEqual(manager.accounts.filter { $0.provider == .kimi }.count, 2)
+
+        try Data(#"{"access_token":"","refresh_token":""}"#.utf8).write(to: file)
+        await manager.discoverExistingAccounts(candidates: [])
+        XCTAssertEqual(manager.accounts.filter { $0.provider == .kimi }.count, 1)
+        XCTAssertNil(manager.accounts.first { $0.provider == .kimi }?.existingProfile)
+    }
 }
 
 private final class ExistingProfileRunner: AccountCommandRunning {

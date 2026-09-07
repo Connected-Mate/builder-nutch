@@ -376,6 +376,7 @@ final class AccountManager: ObservableObject {
         guard !discovering, catalogError == nil else { return }
         discovering = true
         defer { discovering = false }
+        pruneSignedOutKimiProfiles()
         var found = 0
         for candidate in candidates ?? ExistingAccountDiscovery.candidates() {
             let key = candidate.source.key(provider: candidate.provider)
@@ -420,6 +421,32 @@ final class AccountManager: ObservableObject {
             } catch { continue }
         }
         if found > 0 { discoveryNotice = "Found \(found) signed-in account\(found == 1 ? "" : "s") on this Mac. Their original app keeps each sign-in and configuration." }
+    }
+
+    /// Older builds could save Kimi's logged-out default profile as an account.
+    /// Remove that stale row without ignoring the path, so a later real login is
+    /// discovered normally.
+    private func pruneSignedOutKimiProfiles() {
+        let stale = Set(accounts.compactMap { account -> UUID? in
+            guard account.provider == .kimi, let source = account.existingProfile,
+                  source.kimiAuthenticationStatus() == .signedOut else { return nil }
+            return account.id
+        })
+        guard !stale.isEmpty else { return }
+        let updatedAccounts = accounts.filter { !stale.contains($0.id) }
+        var updatedSelected = selected
+        if let id = selected[.kimi], stale.contains(id) {
+            updatedSelected[.kimi] = updatedAccounts.first { $0.provider == .kimi }?.id
+        }
+        let previousOrder = rotationOrder
+        var updatedOrder = rotationOrder
+        updatedOrder[.kimi] = (updatedOrder[.kimi] ?? []).filter { !stale.contains($0) }
+        rotationOrder = updatedOrder
+        do { try persist(accounts: updatedAccounts, selected: updatedSelected) }
+        catch { rotationOrder = previousOrder; notice = error.localizedDescription; return }
+        accounts = updatedAccounts
+        selected = updatedSelected
+        for id in stale { states.removeValue(forKey: id); externalRetryAfter.removeValue(forKey: id) }
     }
 
     private func refreshAccounts(_ snapshot: [ManagedAccount]) async {
