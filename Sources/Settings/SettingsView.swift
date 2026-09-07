@@ -23,14 +23,10 @@ struct SettingsView: View {
     var managedAccounts = false
 
     var body: some View {
-        // One page of grouped sections rather than tabs. Tabs hid three
-        // quarters of the settings behind a click, for an app with about a
-        // screenful of them in total — the grouping was the thing that was
-        // missing, not the separation. A grouped `Form` is what macOS itself
-        // uses for this: each section is a titled, rounded group, so the
-        // structure is visible all at once instead of navigated to.
-        Form {
-            if !managedAccounts { Section("Integrations") {
+        ScrollView {
+          VStack(alignment: .leading, spacing: 24) {
+            introduction
+            if !managedAccounts { settingsSection("Integrations") {
                 if needsSetup { setupNote }
                 ForEach(accounts) {
                     AccountRow(provider: $0, preferences: preferences,
@@ -45,8 +41,8 @@ struct SettingsView: View {
                      + "you signed in to that tool. macOS asks once per tool the "
                      + "first time, and again whenever you sign in to a different "
                      + "account; Always Allow keeps it quiet.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .font(AppTheme.font(.caption))
+                    .foregroundStyle(AppTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             } }
 
@@ -54,49 +50,43 @@ struct SettingsView: View {
             // looks like and where it turns up. Split across three headers it
             // read as three unrelated settings, and "Where Codenotch appears"
             // was a header long enough to look like a warning.
-            Section("Appearance") {
-                Picker("Show", selection: $preferences.notchVisibility) {
-                    ForEach(NotchVisibility.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
+            settingsSection("Appearance") {
+                SettingsChoices(label: "Show", choices: NotchVisibility.allCases,
+                                selection: $preferences.notchVisibility, title: { $0.title })
 
                 Text(preferences.notchVisibility.explanation)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(AppTheme.font(.caption))
+                    .foregroundStyle(AppTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Picker("Edge", selection: $preferences.notchEdge) {
-                    ForEach(NotchEdge.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
+                SettingsChoices(label: "Edge", choices: NotchEdge.allCases,
+                                selection: $preferences.notchEdge, title: { $0.title })
 
                 Text(preferences.notchEdge.explanation)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(AppTheme.font(.caption))
+                    .foregroundStyle(AppTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
 
                 // "App icon", not "Icon": the two rows above it are about the
                 // notch, and on its own the word would read as another of them.
-                Picker("App icon", selection: $preferences.appPresence) {
-                    ForEach(AppPresence.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
+                SettingsChoices(label: "App icon", choices: AppPresence.allCases,
+                                selection: $preferences.appPresence, title: { $0.title })
 
                 Text(preferences.appPresence.explanation)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(AppTheme.font(.caption))
+                    .foregroundStyle(AppTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             // Startup and updates together: both are about what Codenotch does
             // without being asked, and one switch under its own header looked
             // like an oversight rather than a section.
-            Section("General") {
+            settingsSection("General") {
                 Toggle("Open Builder Nutch at login", isOn: $preferences.launchAtLogin)
                 if let problem = preferences.launchAtLoginProblem {
                     Text(problem)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(AppTheme.font(.caption))
+                        .foregroundStyle(AppTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -115,8 +105,8 @@ struct SettingsView: View {
                     // hiding.
                     Text("Version \(updater.currentVersion). Updates install in the "
                          + "background and apply next time Builder Nutch starts.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(AppTheme.font(.caption))
+                        .foregroundStyle(AppTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
                     Button("Check now") { updater.checkNow() }
@@ -129,10 +119,8 @@ struct SettingsView: View {
                 // names no cause and offers nothing to do about it.
                 if let message = updater.outcome.message {
                     Text(message)
-                        .font(.caption)
-                        .foregroundStyle(
-                            updater.outcome == .unreachable ? .orange : .secondary
-                        )
+                        .font(AppTheme.font(.caption))
+                        .foregroundStyle(AppTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 } else {
@@ -142,30 +130,58 @@ struct SettingsView: View {
                         Link("Releases", destination: URL(string: "https://github.com/Connected-Mate/builder-nutch/releases")!)
                     }
                     Text("This community build checks no external update feed. Install new releases from the project page.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(AppTheme.font(.caption)).foregroundStyle(AppTheme.muted)
                 }
             }
+          }
+          .padding(32)
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
+        .scrollBounceBehavior(.basedOnSize)
         // Outside the form, so it stays put at the foot of the window rather
         // than scrolling away below the last section — a credit that has to be
         // hunted for is not really a credit.
         .safeAreaInset(edge: .bottom, spacing: 0) { credit }
         .frame(width: SettingsView.width, height: SettingsView.height)
-        .background(Palette.notch)
-        .foregroundStyle(Palette.textPrimary)
-        .tint(Palette.ample)
-        .preferredColorScheme(.dark)
+        .background(AppTheme.paper)
+        .foregroundStyle(AppTheme.ink)
+        .font(AppTheme.font(.body))
+        .buttonStyle(AppButtonStyle(compact: true))
+        .toggleStyle(.switch)
+        .tint(AppTheme.ink)
+        .preferredColorScheme(.light)
         .onAppear { accounts = providers() }
         .onReceive(NotificationCenter.default.publisher(
             for: NSWindow.didBecomeKeyNotification
         )) { _ in accounts = providers() }
     }
 
+    private var introduction: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Make room for your work.")
+                .font(AppTheme.font(size: 28, weight: .semibold))
+                .accessibilityAddTraits(.isHeader)
+            Text("Choose where Builder Nutch lives, and when it appears.")
+                .font(AppTheme.font(.callout))
+                .foregroundStyle(AppTheme.muted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 8)
+    }
+
+    private func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Rectangle().fill(AppTheme.line).frame(height: 1).accessibilityHidden(true)
+            Text(title)
+                .font(AppTheme.font(.title3, weight: .semibold))
+                .accessibilityAddTraits(.isHeader)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var credit: some View {
         VStack(spacing: 0) {
-            Divider()
+            Rectangle().fill(AppTheme.line).frame(height: 1).accessibilityHidden(true)
             HStack(spacing: 4) {
                 Text(managedAccounts ? "Based on Codenotch by" : "App designed and developed by")
                 // Only the handle is the link, so the line reads as a sentence
@@ -176,22 +192,20 @@ struct SettingsView: View {
                         if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                     }
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .font(AppTheme.font(.caption))
+            .foregroundStyle(AppTheme.muted)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
         }
-        .background(Palette.card)
+        .background(AppTheme.surface)
     }
 
     static let authorURL = URL(string: "https://x.com/hivinz_")!
 
-    /// Narrower than the tabbed version needed: without a row of tab titles to
-    /// fit, the width is set by the account rows alone.
-    static let width: CGFloat = 500
-    /// Tall enough that Startup and Updates are visible without scrolling —
-    /// four account rows push everything below them a long way down.
-    static let height: CGFloat = 560
+    /// Room for all four visibility choices without shrinking their labels.
+    static let width: CGFloat = 640
+    /// The page scrolls while credits remain visible at the foot of the window.
+    static let height: CGFloat = 680
 
     /// Nothing to read from anywhere. On a first launch that is the normal
     /// state, and it is the only moment the sheet has something to explain.
@@ -222,28 +236,56 @@ struct SettingsView: View {
     private var setupNote: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "sparkles")
-                .foregroundStyle(.orange)
+                .foregroundStyle(AppTheme.ink)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Connect an assistant to get started")
-                    .font(.callout.weight(.medium))
+                    .font(AppTheme.font(.callout, weight: .medium))
                 Text(SettingsView.setupCopy)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(AppTheme.font(.caption))
+                    .foregroundStyle(AppTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Text(SettingsView.keychainCopy)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(AppTheme.font(.caption))
+                    .foregroundStyle(AppTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 2)
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
+        .background(AppTheme.soft, in: RoundedRectangle(cornerRadius: 10))
     }
 
 
+}
+
+/// Native buttons retain keyboard activation and VoiceOver selection while
+/// making the selected option use the product's charcoal instead of blue.
+private struct SettingsChoices<Value: Hashable>: View {
+    let label: String
+    let choices: [Value]
+    @Binding var selection: Value
+    let title: (Value) -> String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label).font(AppTheme.font(.callout, weight: .medium))
+            HStack(spacing: 8) {
+                ForEach(choices, id: \.self) { value in
+                    Button { selection = value } label: {
+                        Text(title(value))
+                            .font(AppTheme.font(.caption, weight: .medium))
+                            .frame(maxWidth: .infinity, minHeight: 24)
+                    }
+                    .buttonStyle(AppButtonStyle(primary: selection == value, compact: true))
+                    .accessibilityLabel("\(label): \(title(value))")
+                    .accessibilityAddTraits(selection == value ? [.isSelected] : [])
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
 }
 
 /// One provider: whether Codenotch reads it, whose account that is, and where
@@ -267,10 +309,10 @@ private struct AccountRow: View {
             // the mark, the name, the button and the switch sit on one axis.
             HStack(alignment: .center, spacing: 10) {
                 ProviderGlyphView(glyph: provider.glyph, size: 16)
-                    .foregroundStyle(isConnected ? .primary : .tertiary)
+                    .foregroundStyle(isConnected ? AppTheme.ink : AppTheme.muted)
 
                 Text(provider.name)
-                    .foregroundStyle(isConnected ? .primary : .secondary)
+                    .foregroundStyle(isConnected ? AppTheme.ink : AppTheme.muted)
 
                 Spacer(minLength: 8)
 
@@ -308,6 +350,7 @@ private struct AccountRow: View {
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .labelsHidden()
+                    .accessibilityLabel("Read \(provider.name) usage")
                     .help(isConnected
                           ? "Switch off to stop reading \(provider.name) and forget its "
                             + "readings. " + provider.signIn.signOutCaveat
@@ -315,7 +358,7 @@ private struct AccountRow: View {
             }
 
             detail
-                .font(.caption)
+                .font(AppTheme.font(.caption))
                 .padding(.leading, 26)
         }
     }
@@ -324,23 +367,23 @@ private struct AccountRow: View {
     private var detail: some View {
         if !isConnected {
             Text("Signed out — nothing is read, and no readings are kept.")
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(AppTheme.muted)
         } else if let account = provider.account {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
                     Text(account.summary)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.muted)
                         .textSelection(.enabled)
                     if canOpenSignIn {
                         Button("Switch…") { _ = switchAccount(provider.id) }
-                            .buttonStyle(.link)
+                            .buttonStyle(AppButtonStyle(compact: true))
                             .help(provider.signIn.switchHint)
                     }
                 }
                 // Says where the account actually lives, which is the whole
                 // answer to "how do I change it" — not here.
                 Text(provider.signIn.switchHint)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(AppTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
         } else if provider.wasRefusedAccess {
@@ -349,12 +392,12 @@ private struct AccountRow: View {
             // remedy is the button on this same row.
             Text("macOS is not letting Builder Nutch read \(provider.name)'s saved "
                  + "login. Choose Allow access… above, then Always Allow.")
-                .foregroundStyle(.orange)
+                .foregroundStyle(AppTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
         } else {
             HStack(spacing: 8) {
                 Text(provider.signIn.explanation)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(AppTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 if let title = provider.signIn.actionTitle, canOpenSignIn {
                     Button(title) { _ = signIn(provider.id) }
