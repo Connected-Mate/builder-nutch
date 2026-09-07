@@ -21,6 +21,7 @@ struct SettingsView: View {
     let retry: (String) -> Void
     @ObservedObject var updater: Updater
     var managedAccounts = false
+    @AppStorage("app.language") private var appLanguage = AppLanguage.system.rawValue
 
     var body: some View {
         ScrollView {
@@ -54,7 +55,7 @@ struct SettingsView: View {
                 SettingsChoices(label: "Show", choices: NotchVisibility.allCases,
                                 selection: $preferences.notchVisibility, title: { $0.title })
 
-                Text(preferences.notchVisibility.explanation)
+                Text(LocalizedStringKey(preferences.notchVisibility.explanation))
                     .font(AppTheme.font(.caption))
                     .foregroundStyle(AppTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -62,7 +63,7 @@ struct SettingsView: View {
                 SettingsChoices(label: "Edge", choices: NotchEdge.allCases,
                                 selection: $preferences.notchEdge, title: { $0.title })
 
-                Text(preferences.notchEdge.explanation)
+                Text(LocalizedStringKey(preferences.notchEdge.explanation))
                     .font(AppTheme.font(.caption))
                     .foregroundStyle(AppTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -72,7 +73,7 @@ struct SettingsView: View {
                 SettingsChoices(label: "App icon", choices: AppPresence.allCases,
                                 selection: $preferences.appPresence, title: { $0.title })
 
-                Text(preferences.appPresence.explanation)
+                Text(LocalizedStringKey(preferences.appPresence.explanation))
                     .font(AppTheme.font(.caption))
                     .foregroundStyle(AppTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -82,6 +83,11 @@ struct SettingsView: View {
             // without being asked, and one switch under its own header looked
             // like an oversight rather than a section.
             settingsSection("General") {
+                SettingsChoices(label: "Language", choices: AppLanguage.allCases,
+                                selection: Binding(
+                                    get: { AppLanguage(rawValue: appLanguage) ?? .system },
+                                    set: { appLanguage = $0.rawValue }
+                                ), title: { $0.title })
                 Toggle("Open Builder Nutch at login", isOn: $preferences.launchAtLogin)
                 if let problem = preferences.launchAtLoginProblem {
                     Text(problem)
@@ -149,6 +155,7 @@ struct SettingsView: View {
         .toggleStyle(.switch)
         .tint(AppTheme.ink)
         .preferredColorScheme(.light)
+        .environment(\.locale, (AppLanguage(rawValue: appLanguage) ?? .system).locale)
         .onAppear { accounts = providers() }
         .onReceive(NotificationCenter.default.publisher(
             for: NSWindow.didBecomeKeyNotification
@@ -171,7 +178,7 @@ struct SettingsView: View {
     private func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Rectangle().fill(AppTheme.line).frame(height: 1).accessibilityHidden(true)
-            Text(title)
+            Text(LocalizedStringKey(title))
                 .font(AppTheme.font(.title3, weight: .semibold))
                 .accessibilityAddTraits(.isHeader)
             content()
@@ -273,16 +280,16 @@ private struct SettingsChoices<Value: Hashable>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(label).font(AppTheme.font(.callout, weight: .medium))
+            Text(LocalizedStringKey(label)).font(AppTheme.font(.callout, weight: .medium))
             HStack(spacing: 8) {
                 ForEach(choices, id: \.self) { value in
                     Button { selection = value } label: {
-                        Text(title(value))
+                        Text(LocalizedStringKey(title(value)))
                             .font(AppTheme.font(.caption, weight: .medium))
                             .frame(maxWidth: .infinity, minHeight: 24)
                     }
                     .buttonStyle(AppButtonStyle(primary: selection == value, compact: true))
-                    .accessibilityLabel("\(label): \(title(value))")
+                    .accessibilityLabel(Text(LocalizedStringKey("\(label): \(title(value))")))
                     .accessibilityAddTraits(selection == value ? [.isSelected] : [])
                 }
             }

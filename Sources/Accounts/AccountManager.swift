@@ -19,10 +19,13 @@ final class AccountManager: ObservableObject {
     @Published var automaticSelection = false {
         didSet {
             guard loaded else { return }
+            if automaticSelection { reconcileAutomaticSelection() }
             do { try persist(accounts: accounts, selected: selected) }
             catch { notice = error.localizedDescription }
         }
     }
+    @Published private(set) var rotationOrder: [AccountProvider: [UUID]] = [:]
+    @Published private(set) var switchThresholdPercent: Double = 15
 
     private let storage: AccountStorage?
     private let runner: any AccountCommandRunning
@@ -58,6 +61,9 @@ final class AccountManager: ObservableObject {
             self.storage = storage
             ignoredExistingProfiles = catalog.ignoredExistingProfiles ?? []
             accounts = catalog.accounts; selected = catalog.selected; automaticSelection = catalog.automaticSelection
+            rotationOrder = catalog.rotationOrder ?? [:]
+            switchThresholdPercent = catalog.switchThresholdPercent ?? 15
+            normalizeRotationOrder()
             states = Dictionary(uniqueKeysWithValues: accounts.map {
                 ($0.id, $0.provider.isBrowserProfile ? Self.browserState($0) : ManagedAccountState(message: "Refresh to check this account."))
             })
@@ -74,7 +80,9 @@ final class AccountManager: ObservableObject {
     }
 
     private func persist(accounts: [ManagedAccount], selected: [AccountProvider: UUID]) throws {
-        try usableStorage().save(AccountCatalog(accounts: accounts, selected: selected, automaticSelection: automaticSelection, ignoredExistingProfiles: ignoredExistingProfiles))
+        try usableStorage().save(AccountCatalog(accounts: accounts, selected: selected,
+            automaticSelection: automaticSelection, ignoredExistingProfiles: ignoredExistingProfiles,
+            rotationOrder: rotationOrder, switchThresholdPercent: switchThresholdPercent))
     }
 
     @discardableResult
@@ -86,6 +94,8 @@ final class AccountManager: ObservableObject {
         if selection[provider] == nil { selection[provider] = account.id }
         try persist(accounts: accounts + [account], selected: selection)
         accounts.append(account); selected = selection; states[account.id] = ManagedAccountState()
+        normalizeRotationOrder()
+        try persist(accounts: accounts, selected: selected)
         return account
     }
 
@@ -146,6 +156,33 @@ final class AccountManager: ObservableObject {
         notice = account.provider.isBrowserProfile ? "\(account.label) is selected. Open it to use its separate browser profile." : "\(account.label) is selected for future sessions. Existing sessions keep their account."
     }
 
+    func rotationAccounts(for provider: AccountProvider) -> [ManagedAccount] {
+        let ids = rotationOrder[provider] ?? []
+        let byID = Dictionary(uniqueKeysWithValues: accounts.filter { $0.provider == provider }.map { ($0.id, $0) })
+        return ids.compactMap { byID[$0] } + byID.values.filter { !ids.contains($0.id) }.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    func moveInRotation(_ account: ManagedAccount, offset: Int) throws {
+        normalizeRotationOrder()
+        guard var ids = rotationOrder[account.provider], let index = ids.firstIndex(of: account.id) else { return }
+        let destination = min(max(index + offset, 0), ids.count - 1)
+        guard destination != index else { return }
+        ids.remove(at: index); ids.insert(account.id, at: destination)
+        rotationOrder[account.provider] = ids
+        try persist(accounts: accounts, selected: selected)
+    }
+
+    func setNext(_ account: ManagedAccount) throws {
+        try select(account)
+        notice = "\(account.label) will be used for the next \(account.provider.title) session."
+    }
+
+    func setSwitchThreshold(_ percent: Double) throws {
+        switchThresholdPercent = min(max(percent.rounded(), 0), 100)
+        reconcileAutomaticSelection()
+        try persist(accounts: accounts, selected: selected)
+    }
+
     func remove(_ account: ManagedAccount) throws {
         guard !busyIDs.contains(account.id) else { throw ManagedAccountError.busy }
         let updated = accounts.filter { $0.id != account.id }
@@ -156,6 +193,8 @@ final class AccountManager: ObservableObject {
         do { try persist(accounts: updated, selected: selection) }
         catch { ignoredExistingProfiles = previousIgnored; throw error }
         accounts = updated; selected = selection; states.removeValue(forKey: account.id)
+        normalizeRotationOrder()
+        try persist(accounts: accounts, selected: selected)
         browserOpenedIDs.remove(account.id)
         notice = "Account removed from the list. Its private profile and official app credentials were retained; existing sessions continue."
     }
@@ -310,6 +349,7 @@ final class AccountManager: ObservableObject {
     func refreshAll() async {
         await refreshAccounts(accounts.filter { externalRetryAfter[$0.id].map { $0 > Date() } != true })
         if automaticDiscovery { await discoverExistingAccounts() }
+        reconcileAutomaticSelection()
     }
 
     /// Failed probes are quiet and bounded; manual refresh of an existing row can retry immediately.
@@ -384,7 +424,8 @@ final class AccountManager: ObservableObject {
             var chosen = account
             if automaticSelection {
                 await refreshAccounts(accounts.filter { $0.provider == account.provider })
-                guard let candidate = AccountSelection.best(provider: account.provider, accounts: accounts, states: states) else { throw ManagedAccountError.unavailable }
+                reconcileAutomaticSelection(provider: account.provider)
+                guard let candidate = selectedAccount(for: account.provider) else { throw ManagedAccountError.unavailable }
                 chosen = candidate
             } else { await refresh(chosen) }
             guard !busyIDs.contains(chosen.id), state(for: chosen).isConnected else { throw ManagedAccountError.notConnected }
@@ -417,5 +458,27 @@ final class AccountManager: ObservableObject {
                                     headlineID: provider == .claude ? "five_hour" : "primary",
                                     block: exhausted.map { UsageBlock(reason: "\($0.label) reached", resetsAt: $0.resetsAt) })
         }
+    }
+
+    private func normalizeRotationOrder() {
+        for provider in AccountProvider.allCases where provider.supportsAutomaticSelection {
+            let valid = accounts.filter { $0.provider == provider }.map(\.id)
+            let retained = (rotationOrder[provider] ?? []).filter { valid.contains($0) }
+            rotationOrder[provider] = retained + valid.filter { !retained.contains($0) }
+        }
+    }
+
+    func reconcileAutomaticSelection(provider: AccountProvider? = nil) {
+        guard automaticSelection else { return }
+        normalizeRotationOrder()
+        let providers = provider.map { [$0] } ?? AccountProvider.allCases.filter(\.supportsAutomaticSelection)
+        var changed = false
+        for provider in providers {
+            guard let candidate = AccountSelection.rotating(provider: provider, accounts: accounts, states: states,
+                order: rotationOrder[provider] ?? [], currentID: selected[provider],
+                thresholdPercent: switchThresholdPercent) else { continue }
+            if selected[provider] != candidate.id { selected[provider] = candidate.id; changed = true }
+        }
+        if changed, loaded { try? persist(accounts: accounts, selected: selected) }
     }
 }

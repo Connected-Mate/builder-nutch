@@ -6,6 +6,9 @@ struct AccountCatalog: Codable {
     var selected: [AccountProvider: UUID] = [:]
     var automaticSelection = false
     var ignoredExistingProfiles: Set<String>? = nil
+    /// Optional so catalogs written by older releases decode without migration.
+    var rotationOrder: [AccountProvider: [UUID]]? = nil
+    var switchThresholdPercent: Double? = nil
 }
 
 struct AccountStorage {

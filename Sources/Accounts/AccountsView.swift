@@ -19,11 +19,13 @@ struct AccountsView: View {
     @State private var showingAdd = false
     @State private var connecting: ManagedAccount?
     @State private var personalizing: ManagedAccount?
+    @State private var showingRotation = false
     @State private var removing: ManagedAccount?
     @State private var localError: String?
     @State private var projectURL: URL
     @AppStorage("accounts.hidePersonalDetails") private var hidePersonalDetails = false
     @AppStorage("accounts.projectFolder") private var savedProjectPath = ""
+    @AppStorage("app.language") private var appLanguage = AppLanguage.system.rawValue
 
     init(manager: AccountManager, onOpenSettings: (() -> Void)? = nil, projectFolder: URL? = nil) {
         self.manager = manager
@@ -64,6 +66,7 @@ struct AccountsView: View {
         .frame(minWidth: 980, minHeight: 560)
         .background(AppTheme.surface).foregroundStyle(AppTheme.ink).tint(AppTheme.ink)
         .preferredColorScheme(.light)
+        .environment(\.locale, (AppLanguage(rawValue: appLanguage) ?? .system).locale)
         .sheet(item: $connecting) { account in
             AddAssistantFlow(manager: manager, initialAccount: account) { localError = $0 }
                 .preferredColorScheme(.light)
@@ -71,6 +74,11 @@ struct AccountsView: View {
         .sheet(item: $personalizing) { account in
             PersonalizeAssistantView(account: account, manager: manager) { localError = $0 }
                 .preferredColorScheme(.light)
+        }
+        .sheet(isPresented: $showingRotation) {
+            RotationSettingsView(manager: manager, provider: filter) { localError = $0 }
+                .preferredColorScheme(.light)
+                .environment(\.locale, (AppLanguage(rawValue: appLanguage) ?? .system).locale)
         }
         .confirmationDialog(
             "Remove \(removing.map { displayName(for: $0) } ?? "assistant")?",
@@ -318,15 +326,22 @@ struct AccountsView: View {
         HStack(spacing: 12) {
             Image(systemName: "slider.horizontal.3").font(.system(size: 16))
             VStack(alignment: .leading, spacing: 4) {
-                Text("Put available quota to work.").font(AppTheme.font(size: 11, weightValue: 550))
-                Text("Choose the account with the most room for the next session.")
-                    .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
+                Text("Automatic rotation").font(AppTheme.font(size: 11, weightValue: 550))
+                HStack(spacing: 3) {
+                    Text("Switch at")
+                    Text("\(Int(manager.switchThresholdPercent))%").monospacedDigit()
+                    Text("remaining.")
+                }
+                .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
             }
             Spacer(minLength: 12)
             Toggle("Auto-select", isOn: $manager.automaticSelection)
                 .font(AppTheme.font(size: 11)).toggleStyle(.switch).controlSize(.small)
                 .disabled(!manager.accounts.contains { $0.provider.supportsAutomaticSelection })
                 .help("New coding sessions use fresh, verified quota. Browser profiles are excluded.")
+            Button("Order & threshold…") { showingRotation = true }
+                .buttonStyle(WorkspaceSelectionStyle())
+                .disabled(filter?.supportsAutomaticSelection != true)
         }
         .padding(.vertical, 18).padding(.horizontal, 30)
     }
@@ -335,19 +350,27 @@ struct AccountsView: View {
         HStack(spacing: 6) {
             Circle().fill(AppTheme.ink).frame(width: 4, height: 4).accessibilityHidden(true)
             if let selectedAccount {
-                Text(selectedAccount.provider.isBrowserProfile ? "Selected profile:" :
-                        "Next \(selectedAccount.provider.workspaceTitle) session:")
+                if selectedAccount.provider.isBrowserProfile {
+                    Text("Selected profile:")
+                } else {
+                    Text("Next \(selectedAccount.provider.workspaceTitle) session:")
+                }
                 Text(displayName(for: selectedAccount)).font(AppTheme.font(size: 10, weightValue: 600)).lineLimit(1)
                 if manager.automaticSelection && selectedAccount.provider.supportsAutomaticSelection {
-                    Text("· Auto-select on").foregroundStyle(AppTheme.muted)
-                        .help("At launch, a different eligible account may be chosen using fresh verified quota.")
+                    Text("· next in rotation").foregroundStyle(AppTheme.muted)
                 }
                 Spacer(minLength: 8)
-                Button(selectedAccount.provider.isBrowserProfile ? "Open profile" : "Launch session") {
-                    Task { await manager.launch(selectedAccount, project: projectURL) }
+                if selectedAccount.provider.isBrowserProfile {
+                    Button("Open profile") { Task { await manager.launch(selectedAccount, project: projectURL) } }
+                        .buttonStyle(WorkspaceSelectionStyle(primary: true))
+                        .disabled(!manager.state(for: selectedAccount).isConnected || manager.state(for: selectedAccount).isBusy)
+                } else {
+                    Button { Task { await manager.launch(selectedAccount, project: projectURL) } } label: {
+                        Text("Open \(selectedAccount.provider.workspaceTitle)")
+                    }
+                    .buttonStyle(WorkspaceSelectionStyle(primary: true))
+                    .disabled(!manager.state(for: selectedAccount).isConnected || manager.state(for: selectedAccount).isBusy)
                 }
-                .buttonStyle(WorkspaceSelectionStyle(primary: true))
-                .disabled(!manager.state(for: selectedAccount).isConnected || manager.state(for: selectedAccount).isBusy)
             } else {
                 Text("Choose an assistant to prepare your next session.")
                 Spacer()
@@ -461,27 +484,33 @@ private struct AssistantRow: View {
                 }
                 .frame(width: 32, height: 34).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(displayLabel).font(AppTheme.font(size: 13, weightValue: 550)).lineLimit(1)
-                        .help(displayLabel)
+                    Button(action: personalize) {
+                        HStack(spacing: 5) {
+                            Text(displayLabel).font(AppTheme.font(size: 13, weightValue: 550)).lineLimit(1)
+                            if !hidePersonalDetails { Image(systemName: "pencil").font(.system(size: 9)) }
+                        }
+                    }
+                    .buttonStyle(.plain).help("Rename \(displayLabel)")
+                    .disabled(state.isBusy || isLoginPending || hidePersonalDetails)
                     if let email = state.email ?? account.emailHint, !email.isEmpty {
                         Text(hidePersonalDetails ? "Personal details hidden" : email).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
                             .lineLimit(1).truncationMode(.middle).help(hidePersonalDetails ? "Personal details hidden" : email)
                     }
-                    Text(statusDescription).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                    Text(LocalizedStringKey(statusDescription)).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
                         .lineLimit(1).help(statusDescription)
                 }
                 Spacer(minLength: 8)
                 Menu {
                     Button("Usage details") { showingUsage = true }
                     if state.isConnected {
-                        Button(account.provider.isBrowserProfile ? "Open profile" : "Launch session") {
+                        Button(account.provider.isBrowserProfile ? "Open profile" : "Open with this account") {
                             Task { await manager.launch(account, project: projectURL) }
                         }.disabled(state.isBusy)
                     }
                     if !account.provider.isBrowserProfile {
                         Button("Refresh usage") { Task { await manager.refresh(account) } }.disabled(state.isBusy)
                     }
-                    Button(hidePersonalDetails ? "Show personal details to edit nickname…" : "Nickname & emoji…", action: personalize)
+                    Button(hidePersonalDetails ? "Show personal details to rename…" : "Rename & emoji…", action: personalize)
                         .disabled(state.isBusy || isLoginPending || hidePersonalDetails)
                     Divider()
                     Button("Remove…", role: .destructive, action: remove).disabled(state.isBusy || isLoginPending)
@@ -536,18 +565,22 @@ private struct AssistantRow: View {
                 .buttonStyle(WorkspaceSelectionStyle()).disabled(state.isBusy || loginInProgress)
         } else {
             Button {
-                do { try manager.select(account) } catch { reportError(error.localizedDescription) }
+                do { try manager.setNext(account) } catch { reportError(error.localizedDescription) }
             } label: {
                 HStack(spacing: 5) {
                     if isSelected { Image(systemName: "checkmark") }
-                    Text(isSelected ? "Selected" : "Use account")
-                    if !isSelected { Image(systemName: "arrow.right") }
+                    if isSelected {
+                        Text("Next")
+                    } else {
+                        Text("Set next")
+                        Image(systemName: "arrow.right")
+                    }
                 }
                 .frame(width: 86)
             }
             .buttonStyle(WorkspaceSelectionStyle(primary: isSelected))
             .disabled(state.isBusy || isLoginPending)
-            .accessibilityLabel("\(isSelected ? "Selected" : "Select") \(displayLabel) for \(account.provider.workspaceTitle)")
+            .accessibilityLabel("\(isSelected ? "Next" : "Set next") \(displayLabel) for \(account.provider.workspaceTitle)")
             .accessibilityAddTraits(isSelected ? .isSelected : [])
         }
     }
@@ -579,7 +612,7 @@ private struct AssistantRow: View {
             if account.provider.isBrowserProfile {
                 Text("Usage stays on \(account.provider.title)’s website.")
             } else if state.windows.isEmpty {
-                Text(statusDescription)
+                Text(LocalizedStringKey(statusDescription))
             } else {
                 ForEach(state.windows) { window in
                     VStack(alignment: .leading, spacing: 5) {
@@ -600,6 +633,109 @@ private struct AssistantRow: View {
         }
         .font(AppTheme.font(size: 12)).padding(24).frame(width: 340, alignment: .leading)
         .background(AppTheme.surface).foregroundStyle(AppTheme.ink).preferredColorScheme(.light)
+    }
+}
+
+private struct RotationSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var manager: AccountManager
+    let provider: AccountProvider?
+    let reportError: (String) -> Void
+
+    private var activeProvider: AccountProvider? {
+        if let provider, provider.supportsAutomaticSelection { return provider }
+        return AccountProvider.allCases.first { candidate in
+            candidate.supportsAutomaticSelection && manager.accounts.contains { $0.provider == candidate }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Automatic rotation")
+                    .font(AppTheme.font(size: 20, weightValue: 650))
+                Text("The current account stays active until it reaches your threshold. Builder Nutch then picks the next available account in this loop.")
+                    .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Switch when remaining quota reaches")
+                    Spacer()
+                    Text("\(Int(manager.switchThresholdPercent))%")
+                        .font(AppTheme.font(size: 12, weightValue: 650)).monospacedDigit()
+                }
+                Slider(value: Binding(
+                    get: { manager.switchThresholdPercent },
+                    set: { value in
+                        do { try manager.setSwitchThreshold(value) }
+                        catch { reportError(error.localizedDescription) }
+                    }
+                ), in: 0...100, step: 5)
+                Text("The change applies to the next session. Sessions already open keep their account.")
+                    .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
+            }
+            .padding(16).background(AppTheme.soft, in: RoundedRectangle(cornerRadius: 8))
+
+            if let activeProvider {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        Text("\(activeProvider.workspaceTitle) loop")
+                            .font(AppTheme.font(size: 12, weightValue: 600))
+                        Spacer()
+                        Text("NEXT").font(AppTheme.font(size: 9, weightValue: 550))
+                            .tracking(0.7).foregroundStyle(AppTheme.muted)
+                    }
+                    .padding(.bottom, 10)
+                    ForEach(Array(manager.rotationAccounts(for: activeProvider).enumerated()), id: \.element.id) { index, account in
+                        HStack(spacing: 12) {
+                            Text("\(index + 1)").font(AppTheme.font(size: 11, weightValue: 600))
+                                .foregroundStyle(AppTheme.muted).frame(width: 20)
+                            Text(account.emoji ?? String(account.label.prefix(1)).uppercased()).frame(width: 22)
+                            Text(account.label).font(AppTheme.font(size: 12, weightValue: 550)).lineLimit(1)
+                            Spacer()
+                            if manager.isSelected(account) {
+                                Label("Next", systemImage: "arrow.right.circle.fill")
+                                    .font(AppTheme.font(size: 10, weightValue: 600))
+                            } else {
+                                Button("Set next") {
+                                    do { try manager.setNext(account) }
+                                    catch { reportError(error.localizedDescription) }
+                                }.buttonStyle(WorkspaceSelectionStyle())
+                            }
+                            Button { move(account, -1) } label: { Image(systemName: "chevron.up") }
+                                .buttonStyle(WorkspaceQuietButtonStyle()).disabled(index == 0)
+                                .accessibilityLabel("Move \(account.label) earlier")
+                            Button { move(account, 1) } label: { Image(systemName: "chevron.down") }
+                                .buttonStyle(WorkspaceQuietButtonStyle())
+                                .disabled(index == manager.rotationAccounts(for: activeProvider).count - 1)
+                                .accessibilityLabel("Move \(account.label) later")
+                        }
+                        .frame(minHeight: 48)
+                        .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
+                    }
+                }
+            } else {
+                Text("Add at least one Claude Code, Codex, or Kimi Code account to create a loop.")
+                    .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
+            }
+
+            Spacer(minLength: 0)
+            HStack {
+                Toggle("Automatic rotation", isOn: $manager.automaticSelection)
+                    .toggleStyle(.switch).controlSize(.small)
+                Spacer()
+                Button("Done") { dismiss() }.buttonStyle(WorkspaceSelectionStyle(primary: true))
+            }
+        }
+        .padding(26).frame(width: 600, height: 560)
+        .background(AppTheme.surface).foregroundStyle(AppTheme.ink).tint(AppTheme.ink)
+    }
+
+    private func move(_ account: ManagedAccount, _ offset: Int) {
+        do { try manager.moveInRotation(account, offset: offset) }
+        catch { reportError(error.localizedDescription) }
     }
 }
 

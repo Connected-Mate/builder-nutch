@@ -163,4 +163,43 @@ enum AccountSelection {
             return $0.id.uuidString < $1.id.uuidString
         }.first
     }
+
+    /// Keep the chosen account while it has room, then advance through the
+    /// user's order. The order wraps, so every available subscription gets a turn.
+    static func rotating(
+        provider: AccountProvider,
+        accounts: [ManagedAccount],
+        states: [UUID: ManagedAccountState],
+        order: [UUID],
+        currentID: UUID?,
+        thresholdPercent: Double,
+        now: Date = Date()
+    ) -> ManagedAccount? {
+        guard provider.supportsAutomaticSelection else { return nil }
+        let eligible = accounts.filter { account in
+            guard account.provider == provider, let state = states[account.id], state.isConnected,
+                  !state.isBusy, state.message == nil, state.isFresh(at: now), !state.windows.isEmpty else { return false }
+            return state.windows.allSatisfy { window in
+                guard let fraction = window.usedFraction, fraction.isFinite, fraction >= 0, fraction < 1 else { return false }
+                return window.resetsAt.map { $0 > now } ?? true
+            }
+        }
+        guard !eligible.isEmpty else { return nil }
+        let byID = Dictionary(uniqueKeysWithValues: eligible.map { ($0.id, $0) })
+        let known = order.compactMap { byID[$0] }
+        let missing = eligible.filter { account in !order.contains(account.id) }
+            .sorted { $0.createdAt < $1.createdAt }
+        let cycle = known + missing
+        let threshold = min(max(thresholdPercent, 0), 100)
+        let clearsThreshold: (ManagedAccount) -> Bool = { account in
+            (states[account.id]?.remainingPercent ?? 0) > threshold + 0.001
+        }
+        if let currentID, let current = byID[currentID], clearsThreshold(current) { return current }
+        let currentIndex = currentID.flatMap { id in cycle.firstIndex { $0.id == id } }
+        let wrapped = (0..<cycle.count).map { offset in
+            cycle[((currentIndex ?? -1) + 1 + offset) % cycle.count]
+        }
+        return wrapped.first(where: clearsThreshold)
+            ?? cycle.max { (states[$0.id]?.remainingPercent ?? 0) < (states[$1.id]?.remainingPercent ?? 0) }
+    }
 }

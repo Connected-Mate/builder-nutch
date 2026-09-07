@@ -31,6 +31,16 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.6.0",
+            headline: "Your accounts, in your order.",
+            changes: [
+                .init(title: "A visible next account", detail: "Choose the next subscription directly, reorder the loop, and see what Builder Nutch will use before opening a session."),
+                .init(title: "Your switching threshold", detail: "Set the remaining quota percentage that advances automatic rotation to the next available account."),
+                .init(title: "English and French", detail: "Choose the app language in Settings. Account names can now be edited directly from their row."),
+                .init(title: "A new Builder Nutch mark", detail: "The app icon is clearer in the Dock and Finder, with a compact B and N monogram.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.5.2",
             headline: "Details when you ask for them.",
             changes: [

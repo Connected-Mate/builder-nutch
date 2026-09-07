@@ -67,7 +67,7 @@ final class SettingsWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = managedAccounts ? "Builder Nutch — Appearance" : "Builder Nutch Settings"
+        window.title = "Builder Nutch"
         window.appearance = NSAppearance(named: .aqua)
         window.backgroundColor = AppTheme.windowBackground
         window.titlebarAppearsTransparent = true

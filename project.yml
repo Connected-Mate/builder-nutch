@@ -13,8 +13,8 @@ settings:
     # Sources/Info.plist reads both from here — hardcoding them there instead
     # silently pins every build to one version, so no customer ever sees an
     # update. Bump CURRENT_PROJECT_VERSION on every release.
-    MARKETING_VERSION: "0.5.2"
-    CURRENT_PROJECT_VERSION: "10"
+    MARKETING_VERSION: "0.6.0"
+    CURRENT_PROJECT_VERSION: "11"
     # Local builds work without a signing identity. Release builds override this
     # with the fork maintainer's own Developer ID; never use upstream's team.
     CODE_SIGN_IDENTITY: "-"
@@ -47,6 +47,8 @@ targets:
         # and no obvious way to reach settings or quit.
         CFBundleName: Builder Nutch
         CFBundleDisplayName: Builder Nutch
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [en, fr]
         LSMinimumSystemVersion: "26.0"
         # Sources/Info.plist is *generated* from this block, so editing that
         # file directly is undone by the next `make gen`. Pointing both at the

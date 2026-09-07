@@ -92,6 +92,46 @@ final class AccountManagerTests: XCTestCase {
         XCTAssertNil(AccountSelection.best(provider: .codex, accounts: accounts, states: states, now: now))
     }
 
+    func testRotationKeepsHealthyCurrentThenAdvancesAndWrapsInOrder() throws {
+        let now = Date()
+        let accounts = (0..<3).map { index in
+            ManagedAccount(id: UUID(), provider: .codex, label: "Account \(index + 1)",
+                           createdAt: now.addingTimeInterval(Double(index)))
+        }
+        func state(remaining: Double) -> ManagedAccountState {
+            ManagedAccountState(isConnected: true,
+                windows: [LimitWindow(id: "primary", label: "5h", usedFraction: 1 - remaining / 100,
+                                     resetsAt: now.addingTimeInterval(3600))], refreshedAt: now)
+        }
+        var states = [accounts[0].id: state(remaining: 40), accounts[1].id: state(remaining: 80), accounts[2].id: state(remaining: 60)]
+        let order = accounts.map(\.id)
+        XCTAssertEqual(AccountSelection.rotating(provider: .codex, accounts: accounts, states: states,
+            order: order, currentID: accounts[0].id, thresholdPercent: 15, now: now)?.id, accounts[0].id)
+        states[accounts[0].id] = state(remaining: 15)
+        XCTAssertEqual(AccountSelection.rotating(provider: .codex, accounts: accounts, states: states,
+            order: order, currentID: accounts[0].id, thresholdPercent: 15, now: now)?.id, accounts[1].id)
+        states[accounts[2].id] = state(remaining: 90)
+        XCTAssertEqual(AccountSelection.rotating(provider: .codex, accounts: accounts, states: states,
+            order: order, currentID: accounts[2].id, thresholdPercent: 95, now: now)?.id, accounts[2].id,
+            "When every account is below the threshold, the freshest quota wins")
+    }
+
+    @MainActor
+    func testRotationOrderThresholdAndManualNextPersist() throws {
+        let root = try temporary()
+        let manager = AccountManager(rootURL: root)
+        let first = try manager.add(provider: .codex, label: "Work", emailHint: nil)
+        let second = try manager.add(provider: .codex, label: "Personal", emailHint: nil)
+        try manager.moveInRotation(second, offset: -1)
+        try manager.setNext(second)
+        try manager.setSwitchThreshold(25)
+
+        let restored = AccountManager(rootURL: root)
+        XCTAssertEqual(restored.rotationAccounts(for: .codex).map(\.id), [second.id, first.id])
+        XCTAssertEqual(restored.selectedAccount(for: .codex)?.id, second.id)
+        XCTAssertEqual(restored.switchThresholdPercent, 25)
+    }
+
     func testQuotaParsingFreshnessAndAllCodexBuckets() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let status = Data(#"{"loggedIn":true,"email":"test@example.test","subscriptionType":"max"}"#.utf8)
