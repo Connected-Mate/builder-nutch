@@ -262,9 +262,28 @@ final class AccountManager: ObservableObject {
                                                        directory: profile, readsCodexAccount: codex), cancellation: cancellation)
         if cancellation.isCancelled { throw ManagedAccountError.cancelled }
         if codex { return try AccountQuotas.codex(data) }
+        return try await readClaudeUsage(status: data, executable: executable, profile: profile, environment: environment, cancellation: cancellation)
+    }
+
+    private func readClaudeUsage(status: Data, executable: URL, profile: URL, environment: [String: String], cancellation: AccountCancellation) async throws -> ManagedAccountState {
         let quotaURL = profile.appendingPathComponent("quota.json")
         try AccountStorage.rejectSymlink(quotaURL)
-        return try AccountQuotas.claude(status: data, quota: try? Data(contentsOf: quotaURL))
+        var fallback = try AccountQuotas.claude(status: status, quota: try? Data(contentsOf: quotaURL))
+        guard fallback.isConnected else { return fallback }
+        if fallback.windows.isEmpty { fallback.message = ClaudeAccountUsage.unavailable }
+        do {
+            let usage = try await runner.run(ClaudeAccountUsage.command(executable: executable, profile: profile, environment: environment), cancellation: cancellation)
+            let live = try ClaudeAccountUsage.state(status: fallback, usage: usage)
+            if !live.windows.isEmpty { return live }
+        } catch {
+            if cancellation.isCancelled || Task.isCancelled { throw ManagedAccountError.cancelled }
+            // Older CLIs may not implement this experimental read-only control.
+            // Keep their last status-line reading visible, but a failed live check
+            // cannot authorize automatic selection.
+        }
+        fallback.refreshedAt = nil
+        fallback.message = ClaudeAccountUsage.unavailable
+        return fallback
     }
 
     func refresh(_ account: ManagedAccount) async {
@@ -325,7 +344,8 @@ final class AccountManager: ObservableObject {
                         let status = try AccountQuotas.json(data)
                         if let method = status["authMethod"] as? String, method != "claude.ai" { continue }
                     }
-                    state = try codex ? AccountQuotas.codex(data) : AccountQuotas.claude(status: data, quota: nil)
+                    if codex { state = try AccountQuotas.codex(data) }
+                    else { state = try await readClaudeUsage(status: data, executable: executable, profile: directory, environment: environment, cancellation: cancellation) }
                 }
                 guard !Task.isCancelled, state.isConnected else { continue }
                 // Only verified identities count. User-entered hints never suppress a real account.

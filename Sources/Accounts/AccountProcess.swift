@@ -9,6 +9,7 @@ struct AccountCommand {
     var directory: URL
     var timeout: TimeInterval = 25
     var readsCodexAccount = false
+    var readsClaudeUsage = false
 }
 
 final class AccountCancellation: @unchecked Sendable {
@@ -77,7 +78,10 @@ struct OfficialAccountProcess: AccountCommandRunning {
             data.append(10)
             try input.fileHandleForWriting.write(contentsOf: data)
         }
-        if command.readsCodexAccount {
+        var claudeProtocol = ClaudeUsageControlProtocol()
+        if command.readsClaudeUsage {
+            try send(claudeProtocol.initialize)
+        } else if command.readsCodexAccount {
             try send(["id": 1, "method": "initialize", "params": ["clientInfo": ["name": "codenotch_accounts", "version": "1.0.0"]]])
         } else { try input.fileHandleForWriting.close() }
 
@@ -89,7 +93,20 @@ struct OfficialAccountProcess: AccountCommandRunning {
             if Date() >= deadline { throw ManagedAccountError.timedOut }
             let (bytes, overflow) = collector.drain()
             guard !overflow, all.count + bytes.count <= 524_288 else { throw ManagedAccountError.invalidResponse }
-            if command.readsCodexAccount {
+            if command.readsClaudeUsage {
+                pending.append(bytes)
+                guard pending.count <= 524_288 else { throw ManagedAccountError.invalidResponse }
+                while let newline = pending.firstIndex(of: 10) {
+                    let line = Data(pending[..<newline])
+                    pending.removeSubrange(...newline)
+                    let event = try claudeProtocol.receive(line)
+                    switch event {
+                    case .none: break
+                    case .send(let request): try send(request)
+                    case .complete(let payload): return try JSONSerialization.data(withJSONObject: payload)
+                    }
+                }
+            } else if command.readsCodexAccount {
                 pending.append(bytes)
                 guard pending.count <= 524_288 else { throw ManagedAccountError.invalidResponse }
                 while let newline = pending.firstIndex(of: 10) {
@@ -122,6 +139,14 @@ struct OfficialAccountProcess: AccountCommandRunning {
                 Thread.sleep(forTimeInterval: 0.02)
                 let (tail, excess) = collector.drain()
                 guard !excess else { throw ManagedAccountError.invalidResponse }
+                if command.readsClaudeUsage {
+                    pending.append(tail)
+                    for line in pending.split(separator: 10) {
+                        if case .complete(let payload) = try claudeProtocol.receive(Data(line)) {
+                            return try JSONSerialization.data(withJSONObject: payload)
+                        }
+                    }
+                }
                 all.append(tail)
                 // Claude auth status intentionally exits 1 when signed out.
                 // Accept only that exact command and its explicit logged-out
@@ -132,7 +157,7 @@ struct OfficialAccountProcess: AccountCommandRunning {
                     && command.arguments == ["auth", "status", "--json"]
                     && loginValue.map { CFGetTypeID($0) == CFBooleanGetTypeID() && !$0.boolValue } == true
                 guard process.terminationStatus == 0 || loggedOut else { throw ManagedAccountError.commandFailed(process.terminationStatus) }
-                if command.readsCodexAccount { throw ManagedAccountError.invalidResponse }
+                if command.readsCodexAccount || command.readsClaudeUsage { throw ManagedAccountError.invalidResponse }
                 return all
             }
             Thread.sleep(forTimeInterval: 0.02)
