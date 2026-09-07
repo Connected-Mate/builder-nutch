@@ -1,6 +1,17 @@
 import AppKit
 import SwiftUI
 
+private extension AccountProvider {
+    var workspaceTitle: String {
+        switch self {
+        case .claude: return "Claude Code"
+        case .kimi: return "Kimi Code"
+        default: return title
+        }
+    }
+}
+
+/// Native translation of the approved website's AccountPreview.
 struct AccountsView: View {
     @ObservedObject var manager: AccountManager
     let onOpenSettings: (() -> Void)?
@@ -13,12 +24,17 @@ struct AccountsView: View {
     @State private var projectURL: URL
     @AppStorage("accounts.projectFolder") private var savedProjectPath = ""
 
-    init(manager: AccountManager, onOpenSettings: (() -> Void)? = nil) {
+    init(manager: AccountManager, onOpenSettings: (() -> Void)? = nil, projectFolder: URL? = nil) {
         self.manager = manager
         self.onOpenSettings = onOpenSettings
-        let saved = UserDefaults.standard.string(forKey: "accounts.projectFolder") ?? ""
-        _projectURL = State(initialValue: URL(fileURLWithPath: saved.isEmpty ? NSHomeDirectory() : saved,
-                                               isDirectory: true))
+        _filter = State(initialValue: manager.accounts.first?.provider)
+        if let projectFolder {
+            _projectURL = State(initialValue: projectFolder)
+        } else {
+            let saved = UserDefaults.standard.string(forKey: "accounts.projectFolder") ?? ""
+            _projectURL = State(initialValue: URL(fileURLWithPath: saved.isEmpty ? NSHomeDirectory() : saved,
+                                                   isDirectory: true))
+        }
     }
 
     var body: some View {
@@ -28,19 +44,19 @@ struct AccountsView: View {
                 header
                 if manager.loginAccountID != nil { loginBanner }
                 if let notice = manager.notice { noticeBanner(notice) }
-                assistantList
-                sessionBar
+                if showingAdd {
+                    providerCatalog
+                } else {
+                    assistantList
+                    if !manager.accounts.isEmpty { automaticSelectionBar }
+                    nextSessionBar
+                }
             }
             .background(AppTheme.surface)
         }
-        .frame(minWidth: 900, minHeight: 560)
-        .background(AppTheme.paper)
-        .foregroundStyle(AppTheme.ink)
-        .tint(AppTheme.ink)
+        .frame(minWidth: 980, minHeight: 560)
+        .background(AppTheme.surface).foregroundStyle(AppTheme.ink).tint(AppTheme.ink)
         .preferredColorScheme(.light)
-        .sheet(isPresented: $showingAdd) {
-            AddAssistantFlow(manager: manager) { localError = $0 }.preferredColorScheme(.light)
-        }
         .sheet(item: $connecting) { account in
             AddAssistantFlow(manager: manager, initialAccount: account) { localError = $0 }
                 .preferredColorScheme(.light)
@@ -67,8 +83,8 @@ struct AccountsView: View {
         )) {
             Button("OK") { localError = nil }
         } message: { Text(localError ?? "") }
-        .onChange(of: providerIDs) { _ in
-            if let filter, !providers.contains(filter) { self.filter = nil }
+        .onChange(of: providerIDs) { _, _ in
+            if let filter, !providers.contains(filter) { self.filter = providers.first }
         }
     }
 
@@ -80,132 +96,145 @@ struct AccountsView: View {
         guard let filter, providers.contains(filter) else { return manager.accounts }
         return manager.accounts.filter { $0.provider == filter }
     }
+    private var selectedAccount: ManagedAccount? {
+        if let filter { return manager.selectedAccount(for: filter) }
+        return nil
+    }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("BUILDER NUTCH").font(AppTheme.font(size: 12, weight: .bold)).tracking(1.4)
-                Text("Your assistants").font(AppTheme.font(.title2, weight: .bold))
+            HStack {
+                Text("Your assistants")
+                Spacer()
+                Text("\(providers.count)")
             }
-            .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 20)
+            .font(AppTheme.font(size: 11, weightValue: 500)).foregroundStyle(AppTheme.muted)
+            .padding(.horizontal, 27).padding(.top, 26).padding(.bottom, 16)
             ScrollView {
                 VStack(spacing: 5) {
-                    filterButton(nil)
                     ForEach(providers) { filterButton($0) }
+                    Button {
+                        showingAdd = true
+                    } label: {
+                        Label("Add assistant", systemImage: "plus")
+                            .font(AppTheme.font(size: 12))
+                            .foregroundStyle(AppTheme.muted)
+                            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+                            .padding(.horizontal, 12)
+                    }
+                    .buttonStyle(WorkspaceQuietButtonStyle()).padding(.top, 7)
+                    .disabled(manager.loginAccountID != nil)
+                    .keyboardShortcut("n", modifiers: .command)
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 15)
             }
             .frame(maxHeight: .infinity)
-            Button {
-                guard manager.loginAccountID == nil else { return }
-                showingAdd = true
-            } label: {
-                Label("Add assistant", systemImage: "plus").frame(maxWidth: .infinity)
+            VStack(alignment: .leading, spacing: 4) {
+                Button(action: chooseProjectFolder) {
+                    Label(projectURL.lastPathComponent.isEmpty ? "Project folder" : projectURL.lastPathComponent,
+                          systemImage: "folder")
+                        .lineLimit(1).truncationMode(.middle)
+                        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                }
+                .buttonStyle(WorkspaceQuietButtonStyle())
+                .help("Project folder: \(projectURL.path(percentEncoded: false))")
+                .accessibilityLabel("Choose project folder")
+                if let onOpenSettings {
+                    Button(action: onOpenSettings) {
+                        Label("Settings", systemImage: "slider.horizontal.3")
+                            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                    }
+                    .buttonStyle(WorkspaceQuietButtonStyle())
+                    .keyboardShortcut(",", modifiers: .command)
+                }
+                Label("On your Mac. In your control.", systemImage: "checkmark.shield")
+                    .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
+                    .padding(.top, 20).padding(.bottom, 20)
             }
-            .buttonStyle(AppButtonStyle(primary: true))
-            .disabled(manager.loginAccountID != nil)
-            .keyboardShortcut("n", modifiers: .command)
-            .padding(.horizontal, 16).padding(.top, 18)
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Private by design", systemImage: "lock")
-                    .font(AppTheme.font(.callout, weight: .semibold))
-                Text("Passwords and tokens stay with each official service.")
-                    .font(AppTheme.font(.callout)).foregroundStyle(AppTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(18)
+            .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+            .padding(.horizontal, 21)
         }
-        .frame(width: 228)
-        .background(AppTheme.paper)
+        .frame(width: 222).background(AppTheme.sidebar)
         .overlay(alignment: .trailing) { Rectangle().fill(AppTheme.line).frame(width: 1) }
     }
 
-    private func filterButton(_ provider: AccountProvider?) -> some View {
-        let active = filter == provider
-        let count = provider.map { candidate in manager.accounts.filter { $0.provider == candidate }.count }
-            ?? manager.accounts.count
-        return Button { filter = provider } label: {
-            HStack(spacing: 10) {
-                if let provider {
-                    ProviderGlyphView(glyph: provider.glyph, size: 17).frame(width: 22, height: 22)
-                } else {
-                    Image(systemName: "square.grid.2x2")
-                        .font(.system(size: 15, weight: .medium)).frame(width: 22, height: 22)
-                }
-                Text(provider?.title ?? "All assistants")
-                    .font(AppTheme.font(.body, weight: active ? .semibold : .regular)).lineLimit(1)
-                Spacer(minLength: 6)
-                Text("\(count)").font(AppTheme.font(.caption, weight: .semibold))
-                    .foregroundStyle(AppTheme.muted)
+    private func filterButton(_ provider: AccountProvider) -> some View {
+        let active = filter == provider && !showingAdd
+        let count = manager.accounts.filter { $0.provider == provider }.count
+        return Button { filter = provider; showingAdd = false } label: {
+            HStack(spacing: 12) {
+                ProviderGlyphView(glyph: provider.glyph, size: 24).frame(width: 24, height: 24)
+                Text(provider.workspaceTitle)
+                    .font(AppTheme.font(size: 13, weightValue: active ? 600 : 400)).lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(count)").font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
             }
-            .foregroundStyle(AppTheme.ink)
-            .padding(.horizontal, 10).frame(height: 38)
-            .background(active ? AppTheme.soft : Color.clear, in: RoundedRectangle(cornerRadius: 9))
-            .contentShape(RoundedRectangle(cornerRadius: 9))
+            .padding(.horizontal, 12).frame(height: 48)
+            .background(active ? AppTheme.selected : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(active ? AppTheme.line : Color.clear))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(provider?.title ?? "All assistants"), \(count) account\(count == 1 ? "" : "s")")
+        .buttonStyle(WorkspaceQuietButtonStyle())
+        .accessibilityLabel("\(provider.workspaceTitle), \(count) accounts")
         .accessibilityAddTraits(active ? .isSelected : [])
     }
 
     private var header: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    if let filter { ProviderGlyphView(glyph: filter.glyph, size: 24).accessibilityHidden(true) }
-                    Text(filter?.title ?? "All assistants").font(AppTheme.font(.largeTitle, weight: .bold))
+                    if !showingAdd, let filter {
+                        ProviderGlyphView(glyph: filter.glyph, size: 25).accessibilityHidden(true)
+                    }
+                    Text(showingAdd ? "Add an assistant" : filter?.workspaceTitle ?? "All accounts")
+                        .font(AppTheme.font(size: 19, weightValue: 650)).tracking(-0.55)
                 }
-                Text(visibleAccounts.isEmpty ? "No accounts here yet." :
-                        "\(visibleAccounts.count) account\(visibleAccounts.count == 1 ? "" : "s") for your next build.")
-                    .font(AppTheme.font(.callout)).foregroundStyle(AppTheme.muted)
+                Text(showingAdd ? "Choose a service. Sign in on its official page." :
+                        visibleAccounts.isEmpty ? "Your next idea starts with an assistant." :
+                        "Your accounts. For your next session.")
+                    .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
             }
-            Spacer(minLength: 24)
-            Button { Task { await manager.refreshAll() } } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
-            }
-            .buttonStyle(AppButtonStyle(compact: true))
-            .disabled(manager.accounts.isEmpty || !manager.busyIDs.isEmpty)
-            .keyboardShortcut("r", modifiers: .command)
-            if let onOpenSettings {
-                Button(action: onOpenSettings) { Image(systemName: "gearshape").frame(width: 18, height: 18) }
-                    .buttonStyle(AppButtonStyle(compact: true))
-                    .help("Appearance and app settings")
-                    .accessibilityLabel("Open Builder Nutch settings")
-                    .keyboardShortcut(",", modifiers: .command)
+            Spacer(minLength: 12)
+            if showingAdd {
+                Button("Back") { showingAdd = false }.buttonStyle(WorkspaceSelectionStyle())
+            } else {
+                Text("\(visibleAccounts.count) account\(visibleAccounts.count == 1 ? "" : "s")")
+                    .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(AppTheme.line))
+                Button { Task { await manager.refreshAll() } } label: {
+                    Image(systemName: "arrow.clockwise").frame(width: 28, height: 32)
+                }
+                .buttonStyle(WorkspaceQuietButtonStyle()).help("Refresh accounts")
+                .accessibilityLabel("Refresh accounts")
+                .disabled(manager.accounts.isEmpty || !manager.busyIDs.isEmpty)
+                .keyboardShortcut("r", modifiers: .command)
             }
         }
-        .padding(.horizontal, 28).padding(.vertical, 21)
-        .background { ZStack { AppTheme.paper; AppDotBackground().opacity(0.55) } }
-        .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
+        .padding(.horizontal, 30).padding(.top, 24).padding(.bottom, 23)
     }
 
     @ViewBuilder private var assistantList: some View {
         if manager.accounts.isEmpty {
-            VStack(alignment: .leading, spacing: 20) {
-                ZStack {
-                    Circle().fill(AppTheme.soft)
-                    Image(systemName: "plus").font(.system(size: 26, weight: .medium))
-                }
-                .frame(width: 58, height: 58)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Put your AI subscriptions to work").font(AppTheme.font(.title2, weight: .bold))
-                    Text("Add an assistant, sign in with its official service, then add a nickname or emoji if you want.")
-                        .font(AppTheme.font(.body)).foregroundStyle(AppTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 540, alignment: .leading)
-                }
-                Button { showingAdd = true } label: { Label("Add your first assistant", systemImage: "plus") }
-                    .buttonStyle(AppButtonStyle(primary: true)).disabled(manager.loginAccountID != nil)
+            VStack(alignment: .leading, spacing: 16) {
+                Text("All your AI. Room to build.")
+                    .font(AppTheme.font(size: 30, weightValue: 550)).tracking(-1)
+                Text("Add your first assistant, then sign in with its official service.")
+                    .font(AppTheme.font(size: 14)).foregroundStyle(AppTheme.muted)
+                Button { showingAdd = true } label: { Label("Add assistant", systemImage: "plus") }
+                    .buttonStyle(AppButtonStyle(primary: true))
+                    .disabled(manager.loginAccountID != nil)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).padding(48)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).padding(30)
         } else {
             VStack(spacing: 0) {
-                HStack {
+                HStack(spacing: 0) {
                     Text("ACCOUNT").frame(maxWidth: .infinity, alignment: .leading)
-                    Text("USAGE").frame(width: 200, alignment: .leading)
-                    Text("ACTIONS").frame(width: 180, alignment: .trailing)
+                    Text("REMAINING").frame(width: 110)
+                    Text("NEXT SESSION").frame(width: 110)
                 }
-                .font(AppTheme.font(size: 11, weight: .bold)).tracking(1.15).foregroundStyle(AppTheme.muted)
-                .padding(.horizontal, 28).frame(height: 38).background(AppTheme.paper)
+                .font(AppTheme.font(size: 9, weightValue: 500)).tracking(0.8).foregroundStyle(AppTheme.muted)
+                .padding(.bottom, 10)
                 .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
                 ScrollView {
                     LazyVStack(spacing: 0) {
@@ -219,66 +248,120 @@ struct AccountsView: View {
                                          personalize: { personalizing = account },
                                          remove: { removing = account },
                                          reportError: { localError = $0 })
-                            if account.id != visibleAccounts.last?.id {
-                                Rectangle().fill(AppTheme.line).frame(height: 1).padding(.leading, 94)
-                            }
                         }
                     }
                 }
-                .background(AppTheme.surface)
+            }
+            .padding(.horizontal, 30)
+        }
+    }
+
+    private var providerCatalog: some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 24), GridItem(.flexible(), spacing: 24)], spacing: 0) {
+                ForEach(AccountProvider.allCases) { provider in
+                    Button { createAndConnect(provider) } label: {
+                        HStack(spacing: 12) {
+                            ProviderGlyphView(glyph: provider.glyph, size: 24).frame(width: 28)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(provider.workspaceTitle).font(AppTheme.font(size: 13, weightValue: 550))
+                                Text(provider.connectionSummary).font(AppTheme.font(size: 11))
+                                    .foregroundStyle(AppTheme.muted).lineLimit(2)
+                            }
+                            Spacer(minLength: 4)
+                            Image(systemName: "arrow.right").font(.system(size: 12))
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+                        .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(WorkspaceQuietButtonStyle()).disabled(manager.loginAccountID != nil)
+                    .accessibilityLabel("Add \(provider.workspaceTitle). \(provider.connectionDetail)")
+                }
+            }
+            Text("Choose your service, complete its official sign-in, then add a nickname or emoji.")
+                .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 24)
+        }
+        .padding(.horizontal, 30)
+    }
+
+    private func createAndConnect(_ provider: AccountProvider) {
+        guard manager.loginAccountID == nil else { return }
+        do {
+            let count = manager.accounts.filter { $0.provider == provider }.count
+            let account = try manager.add(provider: provider,
+                                          label: count == 0 ? provider.title : "\(provider.title) \(count + 1)",
+                                          emailHint: nil)
+            filter = provider; showingAdd = false; connecting = account
+        } catch { localError = error.localizedDescription }
+    }
+
+    private var automaticSelectionBar: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "slider.horizontal.3").font(.system(size: 16))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Put available quota to work.").font(AppTheme.font(size: 11, weightValue: 550))
+                Text("Choose the account with the most room for the next session.")
+                    .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
+            }
+            Spacer(minLength: 12)
+            Toggle("Auto-select", isOn: $manager.automaticSelection)
+                .font(AppTheme.font(size: 11)).toggleStyle(.switch).controlSize(.small)
+                .disabled(!manager.accounts.contains { $0.provider.supportsAutomaticSelection })
+                .help("New coding sessions use fresh, verified quota. Browser profiles are excluded.")
+        }
+        .padding(.vertical, 18).padding(.horizontal, 30)
+    }
+
+    private var nextSessionBar: some View {
+        HStack(spacing: 6) {
+            Circle().fill(AppTheme.ink).frame(width: 4, height: 4).accessibilityHidden(true)
+            if let selectedAccount {
+                Text(selectedAccount.provider.isBrowserProfile ? "Selected profile:" :
+                        "Next \(selectedAccount.provider.workspaceTitle) session:")
+                Text(selectedAccount.label).font(AppTheme.font(size: 10, weightValue: 600)).lineLimit(1)
+                if manager.automaticSelection && selectedAccount.provider.supportsAutomaticSelection {
+                    Text("· Auto-select on").foregroundStyle(AppTheme.muted)
+                        .help("At launch, a different eligible account may be chosen using fresh verified quota.")
+                }
+                Spacer(minLength: 8)
+                Button(selectedAccount.provider.isBrowserProfile ? "Open profile" : "Launch session") {
+                    Task { await manager.launch(selectedAccount, project: projectURL) }
+                }
+                .buttonStyle(WorkspaceSelectionStyle(primary: true))
+                .disabled(!manager.state(for: selectedAccount).isConnected || manager.state(for: selectedAccount).isBusy)
+            } else {
+                Text("Choose an assistant to prepare your next session.")
+                Spacer()
             }
         }
+        .font(AppTheme.font(size: 10))
+        .padding(.horizontal, 30).padding(.vertical, 10).frame(minHeight: 48)
+        .background(AppTheme.sidebar)
+        .overlay(alignment: .top) { Rectangle().fill(AppTheme.line).frame(height: 1) }
     }
 
     private var loginBanner: some View {
         HStack(spacing: 12) {
-            ProgressView().controlSize(.small).tint(AppTheme.ink)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Waiting for official sign-in").font(AppTheme.font(.callout, weight: .semibold))
-                Text("Finish in the browser window. Builder Nutch never asks for your password or token.")
-                    .font(AppTheme.font(.callout)).foregroundStyle(AppTheme.muted)
-            }
+            ProgressView().controlSize(.small)
+            Text("Finish the official sign-in in your browser.").font(AppTheme.font(size: 12))
             Spacer()
-            Button("Cancel") { manager.cancelLogin() }.buttonStyle(AppButtonStyle(compact: true))
+            Button("Cancel") { manager.cancelLogin() }.buttonStyle(WorkspaceSelectionStyle())
         }
-        .padding(.horizontal, 28).padding(.vertical, 12).background(AppTheme.soft)
-        .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
+        .padding(.horizontal, 30).padding(.vertical, 10).background(AppTheme.soft)
     }
 
     private func noticeBanner(_ notice: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 8) {
             Image(systemName: "info.circle")
-            Text(notice).font(AppTheme.font(.callout)).fixedSize(horizontal: false, vertical: true)
+            Text(notice).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
+            Button { manager.notice = nil } label: { Image(systemName: "xmark") }
+                .buttonStyle(.plain).accessibilityLabel("Dismiss notice")
         }
-        .foregroundStyle(AppTheme.muted).padding(.horizontal, 28).padding(.vertical, 10)
-        .background(AppTheme.paper)
-        .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
-    }
-
-    private var sessionBar: some View {
-        HStack(spacing: 20) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("PROJECT FOLDER").font(AppTheme.font(size: 11, weight: .bold)).tracking(1)
-                Text(projectURL.path(percentEncoded: false)).font(AppTheme.font(.callout))
-                    .foregroundStyle(AppTheme.muted).lineLimit(1).truncationMode(.middle)
-                    .help(projectURL.path(percentEncoded: false))
-            }
-            .frame(minWidth: 190, maxWidth: .infinity, alignment: .leading)
-            Button("Choose…", action: chooseProjectFolder).buttonStyle(AppButtonStyle(compact: true))
-            Rectangle().fill(AppTheme.line).frame(width: 1, height: 42)
-            Toggle(isOn: $manager.automaticSelection) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Choose the best account automatically").font(AppTheme.font(.callout, weight: .semibold))
-                    Text("Uses fresh verified limits for future sessions. Web profiles are excluded.")
-                        .font(AppTheme.font(.callout)).foregroundStyle(AppTheme.muted)
-                }
-            }
-            .toggleStyle(.switch).tint(AppTheme.ink).frame(maxWidth: 405, alignment: .leading)
-            .disabled(!manager.accounts.contains { $0.provider.supportsAutomaticSelection })
-        }
-        .padding(.horizontal, 28).padding(.vertical, 15).background(AppTheme.paper)
-        .overlay(alignment: .top) { Rectangle().fill(AppTheme.line).frame(height: 1) }
+        .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+        .padding(.horizontal, 30).padding(.vertical, 10).background(AppTheme.paper)
     }
 
     private func chooseProjectFolder() {
@@ -287,6 +370,35 @@ struct AccountsView: View {
         panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         projectURL = url; savedProjectPath = url.path(percentEncoded: false)
+    }
+}
+
+private struct WorkspaceQuietButtonStyle: ButtonStyle {
+    @State private var hovered = false
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(hovered ? AppTheme.soft : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+            .opacity(enabled ? (configuration.isPressed ? 0.7 : 1) : 0.4)
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .onHover { hovered = $0 }
+    }
+}
+
+private struct WorkspaceSelectionStyle: ButtonStyle {
+    var primary = false
+    @State private var hovered = false
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(AppTheme.font(size: 11, weightValue: 500))
+            .padding(.horizontal, 12).frame(minHeight: 36)
+            .foregroundStyle(primary ? AppTheme.surface : AppTheme.ink)
+            .background(primary ? AppTheme.ink : hovered ? AppTheme.soft : AppTheme.surface,
+                        in: RoundedRectangle(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 5).stroke(primary ? AppTheme.ink : AppTheme.line))
+            .opacity(enabled ? (configuration.isPressed ? 0.75 : 1) : 0.4)
+            .onHover { hovered = $0 }
     }
 }
 
@@ -302,153 +414,159 @@ private struct AssistantRow: View {
     let personalize: () -> Void
     let remove: () -> Void
     let reportError: (String) -> Void
+    @State private var showingUsage = false
 
     var body: some View {
-        HStack(spacing: 18) {
-            identityMark
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 8) {
-                    Text(account.label).font(AppTheme.font(.body, weight: .bold)).lineLimit(1)
-                    if isSelected, state.isConnected, account.provider.supportsAutomaticSelection {
-                        Text("NEXT").font(AppTheme.font(size: 10, weight: .bold)).tracking(0.8)
-                            .foregroundStyle(AppTheme.surface).padding(.horizontal, 7).padding(.vertical, 3)
-                            .background(AppTheme.ink, in: Capsule())
-                            .accessibilityLabel("Selected for the next session")
+        HStack(spacing: 0) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8).fill(AppTheme.soft)
+                    RoundedRectangle(cornerRadius: 8).stroke(AppTheme.line)
+                    if let emoji = account.emoji, !emoji.isEmpty {
+                        Text(emoji).font(.system(size: 17))
+                    } else {
+                        Text(String(account.label.prefix(1)).uppercased())
+                            .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
                     }
                 }
-                HStack(spacing: 6) {
-                    ProviderGlyphView(glyph: account.provider.glyph, size: 13).accessibilityHidden(true)
-                    Text(account.provider.title)
-                    if let email = state.email ?? account.emailHint, !email.isEmpty { Text("·"); Text(email).lineLimit(1) }
+                .frame(width: 32, height: 34).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(account.label).font(AppTheme.font(size: 13, weightValue: 550)).lineLimit(1)
+                        .help(account.label)
+                    if let email = state.email ?? account.emailHint, !email.isEmpty {
+                        Text(email).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                            .lineLimit(1).truncationMode(.middle).help(email)
+                    }
+                    Text(statusDescription).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                        .lineLimit(1).help(statusDescription)
                 }
-                .font(AppTheme.font(.callout)).foregroundStyle(AppTheme.muted)
-                statusLine.font(AppTheme.font(.callout))
+                Spacer(minLength: 8)
+                Menu {
+                    Button("Usage details") { showingUsage = true }
+                    if state.isConnected {
+                        Button(account.provider.isBrowserProfile ? "Open profile" : "Launch session") {
+                            Task { await manager.launch(account, project: projectURL) }
+                        }.disabled(state.isBusy)
+                    }
+                    if !account.provider.isBrowserProfile {
+                        Button("Refresh usage") { Task { await manager.refresh(account) } }.disabled(state.isBusy)
+                    }
+                    Button("Nickname & emoji…", action: personalize).disabled(state.isBusy || isLoginPending)
+                    Divider()
+                    Button("Remove…", role: .destructive, action: remove).disabled(state.isBusy || isLoginPending)
+                } label: {
+                    Image(systemName: "ellipsis").frame(width: 22, height: 30)
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .accessibilityLabel("More actions for \(account.label)")
+                .padding(.trailing, 8)
             }
-            .frame(minWidth: 130, maxWidth: .infinity, alignment: .leading)
-            usageSummary.frame(width: 200, alignment: .leading)
-            actions.frame(width: 180, alignment: .trailing)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button { showingUsage = true } label: { quotaRing }
+                .buttonStyle(.plain).frame(width: 110)
+                .accessibilityLabel("Usage details for \(account.label): \(quotaDescription)")
+                .popover(isPresented: $showingUsage) { usageDetails }
+            selectionControl.frame(width: 110)
         }
-        .padding(.horizontal, 28).padding(.vertical, 16).contentShape(Rectangle())
+        .frame(minHeight: 76).padding(.vertical, 4)
+        .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(account.label), \(account.provider.title), \(statusDescription)")
+        .accessibilityLabel("\(account.label), \(account.provider.workspaceTitle), \(statusDescription)")
     }
 
-    private var identityMark: some View {
+    private var quotaDescription: String {
+        if account.provider.isBrowserProfile { return "Check usage on the official website" }
+        guard let remaining = state.remainingPercent, state.isConnected else { return "Usage unavailable" }
+        return "\(Int(remaining.rounded())) percent remaining\(state.isFresh() ? "" : ", last known; refresh needed")"
+    }
+
+    private var quotaRing: some View {
         ZStack {
-            Circle().stroke(AppTheme.line, lineWidth: 4).background(Circle().fill(AppTheme.surface))
-            if let remaining = state.remainingPercent, !account.provider.isBrowserProfile {
+            Circle().stroke(AppTheme.track, lineWidth: 3)
+            if let remaining = state.remainingPercent, state.isConnected, !account.provider.isBrowserProfile {
                 Circle().trim(from: 0, to: min(max(remaining / 100, 0), 1))
-                    .stroke(AppTheme.ink, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .stroke(AppTheme.ink.opacity(state.isFresh() ? 1 : 0.45),
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round))
                     .rotationEffect(.degrees(-90))
+                HStack(alignment: .firstTextBaseline, spacing: 1) {
+                    Text("\(Int(remaining.rounded()))").font(AppTheme.font(size: 11, weightValue: 600))
+                    Text("%").font(AppTheme.font(size: 8, weightValue: 450))
+                }
+            } else {
+                Text("—").font(AppTheme.font(size: 13)).foregroundStyle(AppTheme.muted)
             }
-            if let emoji = account.emoji, !emoji.isEmpty { Text(emoji).font(.system(size: 23)) }
-            else { ProviderGlyphView(glyph: account.provider.glyph, size: 20)
-                    .foregroundStyle(state.isConnected ? AppTheme.ink : AppTheme.muted) }
         }
-        .frame(width: 48, height: 48).accessibilityHidden(true)
+        .frame(width: 43, height: 43).padding(6).help(quotaDescription)
     }
 
-    private var awaitingFirstUsage: Bool {
-        account.provider == .claude && state.needsFirstUsage
-            && state.message == "Usage appears after the first Claude Code session launched here."
-    }
-
-    @ViewBuilder private var statusLine: some View {
-        if isLoginPending {
-            Label("Sign-in in progress", systemImage: "clock").foregroundStyle(AppTheme.ink)
-        } else if state.isBusy {
-            Label("Checking…", systemImage: "arrow.triangle.2.circlepath").foregroundStyle(AppTheme.muted)
-        } else if !state.isConnected {
-            Label(state.message ?? "Not connected", systemImage: state.message == nil ? "circle" : "exclamationmark.circle")
-                .foregroundStyle(AppTheme.muted).lineLimit(2)
-        } else if awaitingFirstUsage {
-            Label("Usage appears after your first session", systemImage: "info.circle").foregroundStyle(AppTheme.muted)
-        } else if let message = state.message {
-            Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(AppTheme.muted).lineLimit(2)
+    @ViewBuilder private var selectionControl: some View {
+        if !state.isConnected {
+            Button(isLoginPending ? "Signing in…" : "Connect", action: connect)
+                .buttonStyle(WorkspaceSelectionStyle()).disabled(state.isBusy || loginInProgress)
         } else {
-            Label(account.provider.isBrowserProfile ? "Browser ready" : "Connected", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(AppTheme.ink)
+            Button {
+                do { try manager.select(account) } catch { reportError(error.localizedDescription) }
+            } label: {
+                HStack(spacing: 5) {
+                    if isSelected { Image(systemName: "checkmark") }
+                    Text(isSelected ? "Selected" : "Use account")
+                    if !isSelected { Image(systemName: "arrow.right") }
+                }
+                .frame(width: 86)
+            }
+            .buttonStyle(WorkspaceSelectionStyle(primary: isSelected))
+            .disabled(state.isBusy || isLoginPending)
+            .accessibilityLabel("\(isSelected ? "Selected" : "Select") \(account.label) for \(account.provider.workspaceTitle)")
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
         }
     }
 
-    @ViewBuilder private var usageSummary: some View {
-        if account.provider.isBrowserProfile {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Browser profile").font(AppTheme.font(.callout, weight: .semibold))
+    private var statusDescription: String {
+        if isLoginPending { return "Sign-in in progress" }
+        if state.isBusy { return "Checking…" }
+        if !state.isConnected { return state.message ?? "Connect this account." }
+        if account.provider.isBrowserProfile { return "Browser profile ready" }
+        if let message = state.message {
+            if account.provider == .claude && state.needsFirstUsage &&
+                message == "Usage appears after the first Claude Code session launched here." {
+                return "Usage appears after your first session"
+            }
+            return message
+        }
+        if !state.windows.isEmpty && !state.isFresh() { return "Last known usage · refresh to update" }
+        if let reset = state.windows.compactMap(\.resetsAt).min() {
+            return "Resets \(reset.formatted(.relative(presentation: .named)))"
+        }
+        return "Connected"
+    }
+
+    private var usageDetails: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("\(account.label) · Usage").font(AppTheme.font(size: 16, weightValue: 650))
+            if account.provider.isBrowserProfile {
                 Text("Usage stays on \(account.provider.title)’s website.")
-                    .font(AppTheme.font(.callout)).foregroundStyle(AppTheme.muted)
-            }
-        } else if awaitingFirstUsage {
-            Text("No usage yet").font(AppTheme.font(.callout)).foregroundStyle(AppTheme.muted)
-        } else if state.windows.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Usage unavailable").font(AppTheme.font(.callout, weight: .semibold))
-                Text(state.isConnected ? "Refresh to check available limits." : "Connect to read official limits.")
-                    .font(AppTheme.font(.callout)).foregroundStyle(AppTheme.muted)
-            }
-        } else {
-            VStack(alignment: .leading, spacing: 7) {
-                ForEach(state.windows.prefix(2)) { window in
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(window.label).lineLimit(1); Spacer(minLength: 8)
-                            Text(window.summary).monospacedDigit().lineLimit(1)
-                        }
-                        .font(AppTheme.font(.caption))
+            } else if state.windows.isEmpty {
+                Text(statusDescription)
+            } else {
+                ForEach(state.windows) { window in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(window.label).font(AppTheme.font(size: 12, weightValue: 600))
+                        Text(window.summary).monospacedDigit()
                         if let reset = window.resetsAt {
                             Text("Resets \(reset.formatted(date: .abbreviated, time: .shortened))")
-                                .font(AppTheme.font(.caption)).foregroundStyle(AppTheme.muted)
+                                .foregroundStyle(AppTheme.muted)
                         }
                     }
                 }
-                if let refreshedAt = state.refreshedAt {
-                    Text(state.isFresh() ? "Updated \(refreshedAt.formatted(.relative(presentation: .named)))"
-                         : "Stale · Updated \(refreshedAt.formatted(.relative(presentation: .named)))")
-                        .font(AppTheme.font(.caption)).foregroundStyle(AppTheme.muted)
+                if let date = state.refreshedAt {
+                    Text("\(state.isFresh() ? "Updated" : "Last known") \(date.formatted(.relative(presentation: .named)))")
+                        .foregroundStyle(AppTheme.muted)
                 }
+                if let message = state.message { Text(message).foregroundStyle(AppTheme.muted) }
             }
         }
-    }
-
-    private var actions: some View {
-        HStack(spacing: 8) {
-            if !state.isConnected {
-                Button("Connect", action: connect).buttonStyle(AppButtonStyle(primary: true, compact: true))
-                    .disabled(state.isBusy || loginInProgress)
-            } else if account.provider.supportsAutomaticSelection && !isSelected {
-                Button("Use next", action: selectAccount).buttonStyle(AppButtonStyle(compact: true))
-            }
-            if state.isConnected {
-                Button(account.provider.isBrowserProfile ? "Open" : "Launch") {
-                    Task { await manager.launch(account, project: projectURL) }
-                }
-                .buttonStyle(AppButtonStyle(primary: true, compact: true)).disabled(state.isBusy)
-                .help(account.provider.isBrowserProfile ? "Open this separate \(account.provider.title) browser profile"
-                      : "Start a new \(account.provider.title) session in the project folder")
-            }
-            Menu {
-                if !account.provider.isBrowserProfile {
-                    Button("Refresh usage") { Task { await manager.refresh(account) } }.disabled(state.isBusy)
-                }
-                Button("Nickname & emoji…", action: personalize).disabled(state.isBusy || isLoginPending)
-                Divider()
-                Button("Remove…", role: .destructive, action: remove).disabled(state.isBusy || isLoginPending)
-            } label: {
-                Image(systemName: "ellipsis").font(.system(size: 15, weight: .semibold))
-                    .frame(width: 24, height: 24).accessibilityLabel("More actions for \(account.label)")
-            }
-            .menuStyle(.borderlessButton).fixedSize()
-        }
-    }
-
-    private func selectAccount() {
-        do { try manager.select(account) } catch { reportError(error.localizedDescription) }
-    }
-    private var statusDescription: String {
-        if isLoginPending { return "sign-in in progress" }
-        if state.isBusy { return "checking" }
-        if !state.isConnected { return state.message ?? "not connected" }
-        return account.provider.isBrowserProfile ? "browser ready" : "connected"
+        .font(AppTheme.font(size: 12)).padding(24).frame(width: 340, alignment: .leading)
+        .background(AppTheme.surface).foregroundStyle(AppTheme.ink).preferredColorScheme(.light)
     }
 }
 

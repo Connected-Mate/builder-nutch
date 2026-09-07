@@ -21,14 +21,14 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
         }
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1080, height: 720),
+            contentRect: NSRect(x: 0, y: 0, width: 1160, height: 680),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Builder Nutch"
-        window.minSize = NSSize(width: 900, height: 560)
-        window.setFrameAutosaveName("CodenotchAccountsWindow")
+        window.minSize = NSSize(width: 980, height: 588)
+        window.setFrameAutosaveName("BuilderNutchPreviewWindowV1")
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         window.appearance = NSAppearance(named: .aqua)
