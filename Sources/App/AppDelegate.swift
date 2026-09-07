@@ -120,9 +120,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateNotch() {
         guard let manager = accountManager, let controller = notchController else { return }
-        let activeIDs = Set(manager.selected.values.map(\.uuidString))
-        // The full list lives in the manager; each selected assistant has its own ring.
-        controller.model.snapshots = manager.snapshots.filter { activeIDs.contains($0.id) }
+        // A running Claude session is what NOW means. The selected account can
+        // differ because it is already prepared as NEXT after a quota handoff.
+        controller.model.snapshots = AccountProvider.allCases.compactMap { provider in
+            guard let selected = manager.selectedAccount(for: provider) else { return nil }
+            let displayed: ManagedAccount
+            if provider == .claude,
+               let id = AccountActivitySelection.currentID(
+                    accounts: manager.accounts.filter { $0.provider == provider },
+                    selectedID: selected.id,
+                    sessions: controller.model.sessions),
+               let active = manager.accounts.first(where: { $0.id == id }) {
+                displayed = active
+            } else {
+                displayed = selected
+            }
+            return manager.snapshot(for: displayed)
+        }
         controller.model.refreshing = Set(manager.busyIDs.map(\.uuidString))
         controller.model.now = Date()
         let claudeAccounts = manager.accounts.filter { $0.provider == .claude }
@@ -136,9 +150,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let id = account.id.uuidString
             let directory = manager.configurationDirectory(for: account).appendingPathComponent("sessions")
             let monitor = ClaudeSessionMonitor(directory: directory)
-            monitorSubscriptions[id] = monitor.sessionsPublisher.receive(on: RunLoop.main).sink { [weak controller] sessions in
-                controller?.model.sessions[id] = sessions
-                controller?.model.now = Date()
+            monitorSubscriptions[id] = monitor.sessionsPublisher.receive(on: RunLoop.main).sink { [weak self] sessions in
+                self?.notchController?.model.sessions[id] = sessions
+                self?.notchController?.model.now = Date()
+                self?.updateNotch()
             }
             monitors[id] = monitor
             monitor.start()
@@ -157,8 +172,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hideDetails = UserDefaults.standard.bool(forKey: "accounts.hidePersonalDetails")
         let mode = preferences?.usageDisplayMode ?? .remaining
         let ordered = manager.rotationAccounts(for: provider)
-        let currentIndex = ordered.firstIndex(where: manager.isSelected) ?? 0
-        let displayed = Array(ordered[currentIndex...] + ordered[..<currentIndex])
+        let selectedID = manager.selectedAccount(for: provider)?.id
+        let currentID = provider == .claude
+            ? AccountActivitySelection.currentID(accounts: ordered, selectedID: selectedID,
+                sessions: notchController?.model.sessions ?? [:])
+            : selectedID
+        let displayed = AccountActivitySelection.queue(accounts: ordered,
+            currentID: currentID, selectedID: selectedID)
         let accounts = displayed.enumerated().map { index, account in
             let state = manager.state(for: account)
             let usage: String
@@ -194,5 +214,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshTimer?.invalidate()
         monitors.values.forEach { $0.stop() }
         notchController?.stop()
+    }
+}
+
+enum AccountActivitySelection {
+    /// Most recently changing live session wins when several profiles are open.
+    /// Without a live session, the prepared account remains the visible current.
+    static func currentID(accounts: [ManagedAccount], selectedID: UUID?,
+                          sessions: [String: [AgentSession]]) -> UUID? {
+        accounts.compactMap { account -> (UUID, Date)? in
+            guard let latest = sessions[account.id.uuidString]?.map(\.since).max() else { return nil }
+            return (account.id, latest)
+        }.max { $0.1 < $1.1 }?.0 ?? selectedID
+    }
+
+    /// NOW is first. When automatic rotation already chose another account,
+    /// that prepared account is NEXT; otherwise NEXT follows the user's order.
+    static func queue(accounts: [ManagedAccount], currentID: UUID?, selectedID: UUID?) -> [ManagedAccount] {
+        guard !accounts.isEmpty else { return [] }
+        let current = accounts.first { $0.id == currentID } ?? accounts[0]
+        let next: ManagedAccount?
+        if selectedID != current.id {
+            next = accounts.first { $0.id == selectedID }
+        } else if let index = accounts.firstIndex(where: { $0.id == current.id }), accounts.count > 1 {
+            next = accounts[(index + 1) % accounts.count]
+        } else {
+            next = nil
+        }
+        let leading = [current] + (next.map { [$0] } ?? [])
+        let leadingIDs = Set(leading.map(\.id))
+        return leading + accounts.filter { !leadingIDs.contains($0.id) }
     }
 }

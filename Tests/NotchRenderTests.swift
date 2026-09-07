@@ -114,8 +114,8 @@ final class NotchRenderTests: XCTestCase {
         }
         let firstGap = NotchLayout.cellExtent + NotchLayout.cellSpacing / 2
         let secondGap = 2 * NotchLayout.cellExtent + 1.5 * NotchLayout.cellSpacing
-        XCTAssertLessThan(alpha(atTopY: firstGap), 0.1,
-                          "the area between NOW and NEXT should stay clean")
+        XCTAssertGreaterThan(alpha(atTopY: firstGap), 0.5,
+                             "the handoff path should connect NOW to NEXT")
         XCTAssertGreaterThan(alpha(atTopY: secondGap), 0.5,
                              "the fixed divider should sit directly below NEXT")
     }

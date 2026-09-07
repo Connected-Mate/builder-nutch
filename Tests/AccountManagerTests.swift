@@ -132,6 +132,24 @@ final class AccountManagerTests: XCTestCase {
         XCTAssertEqual(restored.switchThresholdPercent, 25)
     }
 
+    func testLiveClaudeAccountBecomesNowWhilePreparedAccountStaysNext() throws {
+        let now = Date()
+        let first = ManagedAccount(id: UUID(), provider: .claude, label: "Running", createdAt: now)
+        let second = ManagedAccount(id: UUID(), provider: .claude, label: "Prepared", createdAt: now)
+        let third = ManagedAccount(id: UUID(), provider: .claude, label: "Later", createdAt: now)
+        let live = AgentSession(id: "live", name: "Build", detail: "Terminal",
+                                state: .busy, waitingFor: nil, since: now)
+
+        let current = AccountActivitySelection.currentID(
+            accounts: [first, second, third], selectedID: second.id,
+            sessions: [first.id.uuidString: [live]])
+        let queue = AccountActivitySelection.queue(
+            accounts: [first, second, third], currentID: current, selectedID: second.id)
+
+        XCTAssertEqual(current, first.id)
+        XCTAssertEqual(queue.map(\.id), [first.id, second.id, third.id])
+    }
+
     @MainActor
     func testDragReorderMovesDirectlyToTheDropPositionAndPersists() throws {
         let root = try temporary()

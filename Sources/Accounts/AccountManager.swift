@@ -487,25 +487,29 @@ final class AccountManager: ObservableObject {
         } catch { notice = error.localizedDescription }
     }
 
+    func snapshot(for account: ManagedAccount) -> ProviderSnapshot {
+        let provider = account.provider
+        let state = state(for: account)
+        let status: ProviderStatus
+        if !state.isConnected { status = .needsAuth }
+        else if provider.isBrowserProfile { status = .unsupported("Open \(provider.title) to see usage. Browser sign-in is kept by the website.") }
+        else if !state.windows.isEmpty && !state.isFresh() { status = .stale(since: state.refreshedAt ?? .distantPast) }
+        else if let message = state.message { status = .unsupported(message) }
+        else { status = .ok }
+        let exhausted = state.windows.first { ($0.usedFraction ?? 0) >= 1 }
+        let email = UserDefaults.standard.bool(forKey: "accounts.hidePersonalDetails")
+            ? nil : (state.email ?? account.emailHint)
+        return ProviderSnapshot(id: account.id.uuidString, displayName: account.emoji.map { "\($0) \(account.label)" } ?? account.label,
+                                accountEmail: email,
+                                glyph: provider.glyph, fidelity: provider.isBrowserProfile ? .manual : .official,
+                                status: status, windows: state.windows,
+                                headlineID: provider == .claude ? "five_hour" : "primary",
+                                block: exhausted.map { UsageBlock(reason: "\($0.label) reached", resetsAt: $0.resetsAt) })
+    }
+
     var snapshots: [ProviderSnapshot] {
         AccountProvider.allCases.compactMap { provider in
-            guard let account = selectedAccount(for: provider) else { return nil }
-            let state = state(for: account)
-            let status: ProviderStatus
-            if !state.isConnected { status = .needsAuth }
-            else if provider.isBrowserProfile { status = .unsupported("Open \(provider.title) to see usage. Browser sign-in is kept by the website.") }
-            else if !state.windows.isEmpty && !state.isFresh() { status = .stale(since: state.refreshedAt ?? .distantPast) }
-            else if let message = state.message { status = .unsupported(message) }
-            else { status = .ok }
-            let exhausted = state.windows.first { ($0.usedFraction ?? 0) >= 1 }
-            let email = UserDefaults.standard.bool(forKey: "accounts.hidePersonalDetails")
-                ? nil : (state.email ?? account.emailHint)
-            return ProviderSnapshot(id: account.id.uuidString, displayName: account.emoji.map { "\($0) \(account.label)" } ?? account.label,
-                                    accountEmail: email,
-                                    glyph: provider.glyph, fidelity: provider.isBrowserProfile ? .manual : .official,
-                                    status: status, windows: state.windows,
-                                    headlineID: provider == .claude ? "five_hour" : "primary",
-                                    block: exhausted.map { UsageBlock(reason: "\($0.label) reached", resetsAt: $0.resetsAt) })
+            selectedAccount(for: provider).map(snapshot(for:))
         }
     }
 

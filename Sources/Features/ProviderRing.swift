@@ -214,13 +214,25 @@ struct InlineAccountRotation: View {
                 queueDivider
             }
             if edge.isVertical {
-                VStack(spacing: NotchLayout.cellSpacing) { accountCells }
+                VStack(spacing: 0) { verticalAccountCells }
             } else {
-                HStack(spacing: NotchLayout.cellSpacing) { accountCells }
+                HStack(spacing: 0) { horizontalAccountCells }
             }
         }
         .animation(NotchMotion.glide, value: picker.accounts.map(\.id))
         .transition(.opacity.combined(with: .scale(scale: 0.96)))
+    }
+
+    /// The quiet path between NOW and NEXT makes the automatic handoff read as
+    /// one flow while keeping both rings individually draggable.
+    private var handoffConnector: some View {
+        let stroke = Design.px(5)
+        return Capsule()
+            .fill(Palette.textSecondary.opacity(0.72))
+            .frame(
+                width: edge.isVertical ? stroke : nil,
+                height: edge.isVertical ? nil : stroke
+            )
     }
 
     /// A fixed rule separates the active handoff from the rest of the loop.
@@ -245,10 +257,24 @@ struct InlineAccountRotation: View {
             )
     }
 
-    private var accountCells: some View {
-        ForEach(picker.accounts) { account in
+    private var verticalAccountCells: some View {
+        ForEach(Array(picker.accounts.enumerated()), id: \.element.id) { index, account in
             accountCell(account)
-                .frame(width: edge.isVertical ? nil : NotchLayout.cellAlong(for: edge))
+            if index < picker.accounts.count - 1 {
+                ZStack { if index == 0 { handoffConnector } }
+                    .frame(height: NotchLayout.cellSpacing)
+            }
+        }
+    }
+
+    private var horizontalAccountCells: some View {
+        ForEach(Array(picker.accounts.enumerated()), id: \.element.id) { index, account in
+            accountCell(account)
+                .frame(width: NotchLayout.cellAlong(for: edge))
+            if index < picker.accounts.count - 1 {
+                ZStack { if index == 0 { handoffConnector } }
+                    .frame(width: NotchLayout.cellSpacing)
+            }
         }
     }
 
