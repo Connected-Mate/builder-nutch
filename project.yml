@@ -13,8 +13,8 @@ settings:
     # Sources/Info.plist reads both from here — hardcoding them there instead
     # silently pins every build to one version, so no customer ever sees an
     # update. Bump CURRENT_PROJECT_VERSION on every release.
-    MARKETING_VERSION: "0.4.0"
-    CURRENT_PROJECT_VERSION: "6"
+    MARKETING_VERSION: "0.4.1"
+    CURRENT_PROJECT_VERSION: "7"
     # Local builds work without a signing identity. Release builds override this
     # with the fork maintainer's own Developer ID; never use upstream's team.
     CODE_SIGN_IDENTITY: "-"
