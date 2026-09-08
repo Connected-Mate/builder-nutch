@@ -15,7 +15,26 @@ struct AccountCommand {
 final class AccountCancellation: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
-    func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+    private var handlers: [UUID: () -> Void] = [:]
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let callbacks = Array(handlers.values)
+        handlers.removeAll()
+        lock.unlock()
+        callbacks.forEach { $0() }
+    }
+    fileprivate func onCancel(_ handler: @escaping () -> Void) -> UUID? {
+        lock.lock()
+        if cancelled { lock.unlock(); handler(); return nil }
+        let id = UUID(); handlers[id] = handler
+        lock.unlock()
+        return id
+    }
+    fileprivate func removeHandler(_ id: UUID?) {
+        guard let id else { return }
+        lock.lock(); handlers.removeValue(forKey: id); lock.unlock()
+    }
     var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
 }
 
@@ -24,10 +43,16 @@ protocol AccountCommandRunning {
 }
 
 struct OfficialAccountProcess: AccountCommandRunning {
+    private let registry: AccountProcessRegistry
+    init(registry: AccountProcessRegistry = .shared) { self.registry = registry }
+
+    /// Call before application termination. No more children can be spawned afterwards.
+    static func shutdownAll() { AccountProcessRegistry.shared.shutdownAll() }
+
     func run(_ command: AccountCommand, cancellation: AccountCancellation) async throws -> Data {
         try await withTaskCancellationHandler(operation: {
             try await Task.detached(priority: .utility) {
-                try Self.execute(command, cancellation: cancellation)
+                try Self.execute(command, cancellation: cancellation, registry: registry)
             }.value
         }, onCancel: { cancellation.cancel() })
     }
@@ -48,7 +73,7 @@ struct OfficialAccountProcess: AccountCommandRunning {
         }
     }
 
-    private static func execute(_ command: AccountCommand, cancellation: AccountCancellation) throws -> Data {
+    private static func execute(_ command: AccountCommand, cancellation: AccountCancellation, registry: AccountProcessRegistry) throws -> Data {
         if cancellation.isCancelled { throw ManagedAccountError.cancelled }
         let input = Pipe(), output = Pipe(), errors = Pipe()
         // A CLI can exit between two JSONL requests. EPIPE must be a thrown
@@ -59,20 +84,24 @@ struct OfficialAccountProcess: AccountCommandRunning {
         // Drain diagnostics but never store vendor output: it can include browser URLs or tokens.
         errors.fileHandleForReading.readabilityHandler = { _ = $0.availableData }
         let process: AccountChildProcess
-        do { process = try AccountChildProcess(command, input: input, output: output, errors: errors) }
+        do { process = try registry.spawn(command, input: input, output: output, errors: errors) }
         catch {
             output.fileHandleForReading.readabilityHandler = nil
             errors.fileHandleForReading.readabilityHandler = nil
             throw error
         }
+        let cancellationHandler = cancellation.onCancel { process.terminateOwnedGroup() }
         defer {
+            cancellation.removeHandler(cancellationHandler)
             process.terminateOwnedGroup()
+            registry.remove(process)
             output.fileHandleForReading.readabilityHandler = nil
             errors.fileHandleForReading.readabilityHandler = nil
             try? input.fileHandleForWriting.close()
             try? output.fileHandleForReading.close()
             try? errors.fileHandleForReading.close()
         }
+        if cancellation.isCancelled || registry.isShutDown { throw ManagedAccountError.cancelled }
         func send(_ object: [String: Any]) throws {
             var data = try JSONSerialization.data(withJSONObject: object, options: [.withoutEscapingSlashes])
             data.append(10)
@@ -89,7 +118,7 @@ struct OfficialAccountProcess: AccountCommandRunning {
         var pending = Data(), all = Data(), account: [String: Any]?
         var accountRequested = false, limitsRequested = false
         while true {
-            if cancellation.isCancelled { throw ManagedAccountError.cancelled }
+            if cancellation.isCancelled || registry.isShutDown { throw ManagedAccountError.cancelled }
             if Date() >= deadline { throw ManagedAccountError.timedOut }
             let (bytes, overflow) = collector.drain()
             guard !overflow, all.count + bytes.count <= 524_288 else { throw ManagedAccountError.invalidResponse }
@@ -165,9 +194,53 @@ struct OfficialAccountProcess: AccountCommandRunning {
     }
 }
 
+/// Serializes spawn against shutdown. Tests can use an independent registry without
+/// permanently shutting down the application's shared runner.
+final class AccountProcessRegistry: @unchecked Sendable {
+    static let shared = AccountProcessRegistry()
+    private let lock = NSLock()
+    private var stopped = false
+    private var children: [UUID: AccountChildProcess] = [:]
+
+    fileprivate func spawn(_ command: AccountCommand, input: Pipe, output: Pipe, errors: Pipe) throws -> AccountChildProcess {
+        lock.lock(); defer { lock.unlock() }
+        guard !stopped else { throw ManagedAccountError.cancelled }
+        let child = try AccountChildProcess(command, input: input, output: output, errors: errors)
+        children[child.id] = child
+        return child
+    }
+
+    fileprivate func remove(_ child: AccountChildProcess) {
+        lock.lock(); children.removeValue(forKey: child.id); lock.unlock()
+    }
+
+    var isShutDown: Bool { lock.lock(); defer { lock.unlock() }; return stopped }
+
+    func shutdownAll() {
+        lock.lock()
+        stopped = true
+        let owned = Array(children.values)
+        lock.unlock()
+        // One shared grace period, not one delay per child.
+        owned.forEach { $0.requestTermination() }
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.2
+        while owned.contains(where: { $0.isRunning }) && ProcessInfo.processInfo.systemUptime < deadline {
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+        owned.forEach { $0.forceTermination() }
+        lock.lock()
+        owned.forEach { children.removeValue(forKey: $0.id) }
+        lock.unlock()
+    }
+}
+
 /// A dedicated POSIX process group makes cancellation cover the CLI's children
 /// without signalling another Terminal session or the user's default CLI.
-private final class AccountChildProcess {
+private final class AccountChildProcess: @unchecked Sendable {
+    let id = UUID()
+    private let lock = NSLock()
+    private var terminating = false
+    private var disposed = false
     private var pid: pid_t = 0
     private var exited = false
     private var status: Int32 = 0
@@ -188,8 +261,8 @@ private final class AccountChildProcess {
         }
         let changed = command.directory.path.withCString { posix_spawn_file_actions_addchdir_np(&actions, $0) }
         guard changed == 0 else { throw CocoaError(.fileReadNoSuchFile) }
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
-        posix_spawnattr_setpgroup(&attributes, 0)
+        guard posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT)) == 0,
+              posix_spawnattr_setpgroup(&attributes, 0) == 0 else { throw ManagedAccountError.invalidResponse }
         let arguments = ([command.executable.path] + command.arguments).map { strdup($0) }
         let environment = command.environment.keys.sorted().map { strdup("\($0)=\(command.environment[$0]!)") }
         defer { arguments.forEach { free($0) }; environment.forEach { free($0) } }
@@ -208,22 +281,55 @@ private final class AccountChildProcess {
     }
 
     var isRunning: Bool {
+        lock.lock(); defer { lock.unlock() }
+        if disposed { return false }
         if !exited {
-            let result = waitpid(pid, &status, WNOHANG)
-            if result == pid || (result == -1 && errno == ECHILD) { exited = true }
+            // Keep the leader unreaped until group signalling is finished. Its PID
+            // cannot be recycled into an unrelated process/group in that interval.
+            var info = siginfo_t()
+            let result = waitid(P_PID, id_t(pid), &info, WEXITED | WNOHANG | WNOWAIT)
+            if result == 0 && info.si_pid == pid {
+                status = info.si_code == CLD_EXITED ? info.si_status : 128 + info.si_status
+                exited = true
+            } else if result == -1 && errno == ECHILD {
+                // Ownership was lost (e.g. another reaper); never signal this PID again.
+                disposed = true
+                exited = true
+            }
         }
         return !exited
     }
 
-    var terminationStatus: Int32 { (status & 0x7f) == 0 ? ((status >> 8) & 0xff) : 128 + (status & 0x7f) }
+    var terminationStatus: Int32 { lock.lock(); defer { lock.unlock() }; return status }
+
+    func requestTermination() {
+        lock.lock(); defer { lock.unlock() }
+        guard !disposed, !terminating else { return }
+        terminating = true
+        kill(-pid, SIGTERM)
+    }
+
+    func forceTermination() {
+        lock.lock(); defer { lock.unlock() }
+        guard !disposed else { return }
+        kill(-pid, SIGKILL)
+        disposed = true
+        let childPID = pid
+        var ignored: Int32 = 0
+        let result = waitpid(childPID, &ignored, WNOHANG)
+        if result == 0 || (result == -1 && errno == EINTR) {
+            // Reaping may wait on kernel cleanup, but app shutdown must not.
+            DispatchQueue.global(qos: .utility).async {
+                var result: Int32 = 0
+                while waitpid(childPID, &result, 0) == -1 && errno == EINTR {}
+            }
+        }
+    }
 
     func terminateOwnedGroup() {
-        guard pid > 0 else { return }
-        kill(-pid, SIGTERM)
-        let deadline = Date().addingTimeInterval(0.2)
-        while isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
-        // A child may outlive its parent; the group ID still identifies only our spawn.
-        kill(-pid, SIGKILL)
-        if !exited { _ = waitpid(pid, &status, 0); exited = true }
+        requestTermination()
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.2
+        while isRunning && ProcessInfo.processInfo.systemUptime < deadline { Thread.sleep(forTimeInterval: 0.005) }
+        forceTermination()
     }
 }
