@@ -228,6 +228,72 @@ final class AccountManager: ObservableObject {
     func isSelected(_ account: ManagedAccount) -> Bool { selected[account.provider] == account.id }
     func selectedAccount(for provider: AccountProvider) -> ManagedAccount? { accounts.first { $0.id == selected[provider] } }
 
+    /// Identifies the account used by a plain `claude` command on this Mac.
+    /// Only identity metadata from Claude's official status command is read.
+    func defaultClaudeAccount() async -> ManagedAccount? {
+        guard let executable = resolveExecutable(.claude) else { return nil }
+        let home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude", isDirectory: true)
+        let source = ExistingAccountProfile(directory: home.path, usesDefaultClaudeHome: true)
+        guard let directory = try? source.validatedDirectory() else { return nil }
+        let cancellation = AccountCancellation()
+        guard let data = try? await runner.run(AccountCommand(executable: executable,
+            arguments: ["auth", "status", "--json"],
+            environment: source.environment(provider: .claude, inherited: ProcessInfo.processInfo.environment),
+            directory: directory, timeout: 10), cancellation: cancellation),
+              let object = try? AccountQuotas.json(data),
+              object["loggedIn"] as? Bool == true,
+              let email = (object["email"] as? String)?.lowercased()
+        else { return nil }
+        return accounts.first { account in
+            account.provider == .claude && (states[account.id]?.email ?? account.emailHint)?.lowercased() == email
+        }
+    }
+
+    /// Opens the same conversation with another subscription, then lets the
+    /// caller close the exhausted process after the new Terminal has started.
+    func resumeClaudeSession(_ session: AgentSession, from sourceProfile: URL,
+                             on account: ManagedAccount) throws -> Int32 {
+        guard account.provider == .claude,
+              let processID = session.processID,
+              let conversationID = session.conversationID,
+              let workingDirectory = session.workingDirectory
+        else { throw ManagedAccountError.unavailable }
+        let project = URL(fileURLWithPath: workingDirectory, isDirectory: true)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: project.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw CocoaError(.fileReadNoSuchFile)
+        }
+        let (executable, profile, _) = try prepare(account)
+        try ClaudeSessionHandoff.copyConversation(id: conversationID, project: project,
+                                                  from: sourceProfile, to: profile)
+        let scripts = try usableStorage().root.appendingPathComponent("launchers", isDirectory: true)
+        try AccountStorage.privateDirectory(scripts)
+        let script = scripts.appendingPathComponent("\(UUID().uuidString).command")
+        var arguments = ["--resume", conversationID, "--fork-session"]
+        if Self.commandLine(processID).split(whereSeparator: { $0.isWhitespace })
+            .contains(Substring("--dangerously-skip-permissions")) {
+            arguments.append("--dangerously-skip-permissions")
+        }
+        let text = AccountEnvironment.launchScript(executable: executable, account: account,
+            profile: profile, project: project, arguments: arguments)
+        try AccountStorage.write(Data(text.utf8), to: script, mode: 0o700)
+        guard openTerminal(script) else { throw CocoaError(.executableLoad) }
+        notice = "Continuing \(session.name) with \(account.label)."
+        return processID
+    }
+
+    private static func commandLine(_ pid: Int32) -> String {
+        let process = Process(), output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-p", "\(pid)", "-o", "command="]
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do { try process.run(); process.waitUntilExit() } catch { return "" }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        guard data.count <= 65_536 else { return "" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     private func prepare(_ account: ManagedAccount) throws -> (URL, URL, [String: String]) {
         guard accounts.contains(where: { $0.id == account.id && $0.provider == account.provider }) else { throw ManagedAccountError.unavailable }
         guard !account.provider.isBrowserProfile else { throw ManagedAccountError.unavailable }

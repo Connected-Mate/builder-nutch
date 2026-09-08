@@ -22,6 +22,18 @@ final class ClaudeSessionRecordTests: XCTestCase {
         XCTAssertEqual(s.name, "usage-notch-bc")
         XCTAssertEqual(s.state, .busy)
         XCTAssertEqual(s.detail, "Terminal · usage-notch")
+        XCTAssertEqual(s.processID, 2678)
+        XCTAssertEqual(s.conversationID, "c85d4247")
+        XCTAssertEqual(s.workingDirectory, "/Users/vinz/usage-notch")
+    }
+
+    func testSDKProbeCannotBeHandedOff() throws {
+        let s = try XCTUnwrap(session("""
+        { "pid": 42, "sessionId": "c85d4247", "cwd": "/tmp/profile",
+          "entrypoint": "sdk-cli", "status": "idle" }
+        """))
+        XCTAssertNil(s.processID)
+        XCTAssertNil(s.conversationID)
     }
 
     func testWaitingCarriesWhatItIsWaitingFor() throws {

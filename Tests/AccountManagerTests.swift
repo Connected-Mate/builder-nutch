@@ -69,6 +69,28 @@ final class AccountManagerTests: XCTestCase {
         XCTAssertTrue(script.contains("'cli_auth_credentials_store=\"keyring\"'"))
         XCTAssertTrue(script.contains("cd '/tmp/project'\\''s dir'"))
         XCTAssertFalse(script.contains("$(bad)"))
+        let resumed = AccountEnvironment.launchScript(executable: URL(fileURLWithPath: "/tmp/claude"),
+            account: ManagedAccount(id: UUID(), provider: .claude, label: "Claude", createdAt: Date()),
+            profile: profile, project: URL(fileURLWithPath: "/tmp/project"),
+            arguments: ["--resume", "safe-id", "--fork-session"], inherited: ["PATH": "/usr/bin"])
+        XCTAssertTrue(resumed.contains(" '--resume' 'safe-id' '--fork-session'"))
+    }
+
+    func testClaudeConversationHandoffCopiesTranscriptAndCompanion() throws {
+        let source = try temporary(), destination = try temporary()
+        let projectFolder = source.appendingPathComponent("projects/-tmp-work", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectFolder, withIntermediateDirectories: true)
+        let id = UUID().uuidString.lowercased()
+        try Data("conversation".utf8).write(to: projectFolder.appendingPathComponent("\(id).jsonl"))
+        let companion = projectFolder.appendingPathComponent(id, isDirectory: true)
+        try FileManager.default.createDirectory(at: companion, withIntermediateDirectories: true)
+        try Data("agent".utf8).write(to: companion.appendingPathComponent("child.jsonl"))
+
+        try ClaudeSessionHandoff.copyConversation(id: id, project: URL(fileURLWithPath: "/tmp/work"),
+                                                   from: source, to: destination)
+
+        XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("projects/-tmp-work/\(id).jsonl"), encoding: .utf8), "conversation")
+        XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("projects/-tmp-work/\(id)/child.jsonl"), encoding: .utf8), "agent")
     }
 
     func testAutomaticSelectionExcludesUnknownStaleWeeklyExhaustedAndOtherVendor() {

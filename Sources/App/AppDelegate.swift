@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Darwin
 import SwiftUI
 
 /// Codenotch's native notch and placement, backed by explicit managed accounts.
@@ -15,6 +16,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var updater: Updater?
     private var monitors: [String: ClaudeSessionMonitor] = [:]
     private var monitorSubscriptions: [String: AnyCancellable] = [:]
+    private var defaultClaudeMonitor: ClaudeSessionMonitor?
+    private var defaultClaudeSubscription: AnyCancellable?
+    private var defaultClaudeSessions: [AgentSession] = []
+    private var completedHandoffs: Set<String> = []
     private var cancellables = Set<AnyCancellable>()
     private var refreshTimer: Timer?
     private var refreshTask: Task<Void, Never>?
@@ -100,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.refresh() }
             .store(in: &cancellables)
         updateNotch()
+        startDefaultClaudeMonitor()
         controller.show()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
@@ -114,7 +120,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard refreshTask == nil, let manager = accountManager else { return }
         refreshTask = Task { [weak self] in
             await manager.refreshAll()
+            await self?.attemptAutomaticClaudeHandoff()
             self?.refreshTask = nil
+        }
+    }
+
+    private func startDefaultClaudeMonitor() {
+        let directory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/sessions", isDirectory: true)
+        let monitor = ClaudeSessionMonitor(directory: directory)
+        defaultClaudeSubscription = monitor.sessionsPublisher.receive(on: RunLoop.main).sink { [weak self] sessions in
+            self?.defaultClaudeSessions = sessions.filter { $0.conversationID != nil }
+        }
+        defaultClaudeMonitor = monitor
+        monitor.start()
+    }
+
+    /// A plain Terminal launch uses ~/.claude and previously bypassed account
+    /// rotation. When that subscription reaches the configured threshold, copy
+    /// the conversation record, resume it with NEXT, then retire the idle shell.
+    private func attemptAutomaticClaudeHandoff() async {
+        guard let manager = accountManager, manager.automaticSelection,
+              let target = manager.selectedAccount(for: .claude) else { return }
+        var candidates: [(ManagedAccount, URL, AgentSession)] = []
+        if let source = await manager.defaultClaudeAccount(), source.id != target.id {
+            let profile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude", isDirectory: true)
+            candidates += defaultClaudeSessions.map { (source, profile, $0) }
+        }
+        for source in manager.accounts where source.provider == .claude && source.id != target.id {
+            let profile = manager.configurationDirectory(for: source)
+            let sessions = notchController?.model.sessions[source.id.uuidString] ?? []
+            candidates += sessions.compactMap { $0.conversationID == nil ? nil : (source, profile, $0) }
+        }
+        let threshold = manager.switchThresholdPercent + 0.001
+        guard let candidate = candidates
+            .filter({ source, _, session in
+                session.state == .idle && (manager.state(for: source).remainingPercent ?? 100) <= threshold
+            })
+            .max(by: { $0.2.since < $1.2.since }),
+              let conversationID = candidate.2.conversationID
+        else { return }
+        let handoffKey = "\(conversationID):\(target.id.uuidString)"
+        guard !completedHandoffs.contains(handoffKey) else { return }
+        do {
+            let oldPID = try manager.resumeClaudeSession(candidate.2, from: candidate.1, on: target)
+            completedHandoffs.insert(handoffKey)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if ProcessLiveness.isAlive(pid: oldPID, startedAt: nil) { kill(oldPID, SIGTERM) }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            // Claude's interactive UI can consume SIGTERM while idle. The new
+            // fork is already running and the transcript was copied first, so
+            // retire only this exact exhausted process if it did not leave.
+            if ProcessLiveness.isAlive(pid: oldPID, startedAt: nil) { kill(oldPID, SIGKILL) }
+        } catch {
+            manager.notice = "Automatic Claude handoff failed: \(error.localizedDescription)"
         }
     }
 
@@ -213,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshTask?.cancel()
         refreshTimer?.invalidate()
         monitors.values.forEach { $0.stop() }
+        defaultClaudeMonitor?.stop()
         notchController?.stop()
     }
 }
