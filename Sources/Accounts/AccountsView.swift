@@ -278,7 +278,7 @@ struct AccountsView: View {
                             AssistantRow(account: account, state: manager.state(for: account),
                                          isSelected: manager.isSelected(account),
                                          isLoginPending: manager.loginAccountID == account.id,
-                                         loginInProgress: manager.loginAccountID != nil,
+                                         loginInProgress: manager.authenticationInProgress,
                                          displayMode: preferences.usageDisplayMode,
                                          projectURL: projectURL, manager: manager,
                                          connect: { connecting = account },
@@ -312,7 +312,7 @@ struct AccountsView: View {
                         .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(WorkspaceQuietButtonStyle()).disabled(manager.loginAccountID != nil)
+                    .buttonStyle(WorkspaceQuietButtonStyle()).disabled(manager.authenticationInProgress)
                     .accessibilityLabel("Add \(provider.workspaceTitle). \(provider.connectionDetail)")
                 }
             }
@@ -324,7 +324,7 @@ struct AccountsView: View {
     }
 
     private func createAndConnect(_ provider: AccountProvider) {
-        guard manager.loginAccountID == nil else { return }
+        guard !manager.authenticationInProgress else { return }
         do {
             let count = manager.accounts.filter { $0.provider == provider }.count
             let account = try manager.add(provider: provider,
@@ -534,7 +534,7 @@ private struct AssistantRow: View {
                     if state.isConnected {
                         Button(account.provider.isBrowserProfile ? "Open profile" : "Open with this account") {
                             Task { await manager.launch(account, project: projectURL) }
-                        }.disabled(state.isBusy)
+                        }.disabled(state.isBusy || loginInProgress)
                     }
                     if !account.provider.isBrowserProfile {
                         Button("Refresh usage") { Task { await manager.refresh(account) } }.disabled(state.isBusy)
@@ -591,7 +591,12 @@ private struct AssistantRow: View {
     }
 
     @ViewBuilder private var selectionControl: some View {
-        if !state.isConnected {
+        if state.requiresKeychainAccess {
+            Button("Allow access") { Task { await manager.allowClaudeAccess(account) } }
+                .buttonStyle(WorkspaceSelectionStyle())
+                .disabled(state.isBusy || loginInProgress || !manager.busyIDs.isEmpty)
+                .help("Only this click may ask macOS for access. Cancelling leaves the account paused.")
+        } else if !state.isConnected {
             Button(isLoginPending ? "Signing in…" : "Connect", action: connect)
                 .buttonStyle(WorkspaceSelectionStyle()).disabled(state.isBusy || loginInProgress)
         } else {

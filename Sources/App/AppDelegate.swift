@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables = Set<AnyCancellable>()
     private var refreshTimer: Timer?
     private var refreshTask: Task<Void, Never>?
+    private var terminating = false
 
     private var isRunningTests: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
@@ -39,6 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.applicationIconImage = icon
         }
         guard !isRunningTests else { return }
+        // Never let an unattended native Keychain call interrupt the desktop.
+        try? KeychainInteraction.shared.perform {}
         let preferences = Preferences()
         let manager = AccountManager()
         let controller = NotchWindowController()
@@ -117,7 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refresh() {
-        guard refreshTask == nil, let manager = accountManager else { return }
+        guard !terminating, refreshTask == nil, let manager = accountManager else { return }
         refreshTask = Task { [weak self] in
             await manager.refreshAll()
             self?.refreshTask = nil
@@ -233,14 +236,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !isRunningTests else { return .terminateNow }
+        guard !terminating else { return .terminateLater }
+        terminating = true
+        refreshTimer?.invalidate()
+        OfficialAccountProcess.shutdownAll()
+        accountManager?.shutdown()
+        refreshTask?.cancel()
+        Task {
+            await accountManager?.shutdownAndWait()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         accountsWindow?.show()
         return true
     }
     func applicationWillTerminate(_ notification: Notification) {
-        accountManager?.cancelLogin()
+        accountManager?.shutdown()
         refreshTask?.cancel()
         refreshTimer?.invalidate()
+        OfficialAccountProcess.shutdownAll()
         monitors.values.forEach { $0.stop() }
         defaultClaudeMonitor?.stop()
         notchController?.stop()

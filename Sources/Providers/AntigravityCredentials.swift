@@ -35,6 +35,10 @@ struct AntigravityCredentials {
     }
 
     private static func read() throws -> AntigravityCredentials {
+        try KeychainInteraction.shared.perform { try readWithoutPrompt() }
+    }
+
+    private static func readWithoutPrompt() throws -> AntigravityCredentials {
         var item: CFTypeRef?
         let status = SecItemCopyMatching([
             kSecClass: kSecClassGenericPassword,

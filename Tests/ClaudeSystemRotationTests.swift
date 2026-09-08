@@ -5,8 +5,10 @@ final class ClaudeSystemRotationTests: XCTestCase {
     private final class Keychain: ClaudeCredentialKeychain {
         var items: [String: ClaudeCredentialSnapshot] = [:]
         var rejectDefaultWrite = false
+        var defaultWriteAttempts = 0
         func read(service: String, account: String) throws -> ClaudeCredentialSnapshot? { items[service] }
         func replace(service: String, account: String, expected: ClaudeCredentialSnapshot?, data: Data) throws -> ClaudeCredentialSnapshot {
+            if service == ClaudeProfile.defaultKeychainService { defaultWriteAttempts += 1 }
             if rejectDefaultWrite && service == ClaudeProfile.defaultKeychainService { throw ClaudeSystemCredentialError.keychain(-1) }
             guard items[service] == expected else { throw ClaudeSystemCredentialError.changedDuringCopy }
             let written = ClaudeCredentialSnapshot(reference: expected?.reference ?? Data(service.utf8), data: data)
@@ -19,10 +21,18 @@ final class ClaudeSystemRotationTests: XCTestCase {
         }
     }
 
-    private final class Runner: AccountCommandRunning {
+    private final class Runner: AccountCommandRunning, ClaudeAccountReading {
         var used: [String: Double] = ["A": 99, "B": 0]
         var failUsage = false
         var locations: [URL] = []
+        func read(_ location: ClaudeCredentialLocation, cancellation: AccountCancellation) async throws -> ManagedAccountState {
+            locations.append(location.directory)
+            if failUsage { throw ManagedAccountError.timedOut }
+            let config = try JSONSerialization.jsonObject(with: Data(contentsOf: location.configURL)) as! [String: Any]
+            let identity = config["oauthAccount"] as! [String: String]
+            return ManagedAccountState(isConnected: true, email: identity["emailAddress"], plan: "max",
+                windows: [LimitWindow(id: "five_hour", label: "5h limit", usedFraction: used[identity["accountUuid"]!]! / 100)], refreshedAt: Date())
+        }
         func run(_ command: AccountCommand, cancellation: AccountCancellation) async throws -> Data {
             locations.append(command.directory)
             let location = ClaudeCredentialLocation(directory: command.directory, isDefault: command.environment["CLAUDE_CONFIG_DIR"] == nil)
@@ -50,7 +60,7 @@ final class ClaudeSystemRotationTests: XCTestCase {
         var opened = 0
         let manager = AccountManager(rootURL: root.appendingPathComponent("catalog"), runner: runner,
             executable: { _ in URL(fileURLWithPath: "/fake/claude") }, openTerminal: { _ in opened += 1; return true },
-            systemCredentials: credentials, systemClaudeDirectory: location.directory)
+            systemCredentials: credentials, systemClaudeDirectory: location.directory, claudeReader: runner)
         let accounts = try ["A", "B"].map { try manager.add(provider: .claude, label: $0, emailHint: "same-hint@example.test") }
         func seed(_ location: ClaudeCredentialLocation, id: String) throws {
             try AccountStorage.write(JSONSerialization.data(withJSONObject: ["oauthAccount": ["accountUuid": id,
@@ -115,7 +125,11 @@ final class ClaudeSystemRotationTests: XCTestCase {
         XCTAssertEqual(try credentials.identity(at: system)?.accountID, "A")
         XCTAssertEqual(manager.systemClaudeAccountID, accounts[0].id)
         XCTAssertNil(manager.automaticSwitch)
-        XCTAssertTrue(manager.notice?.contains("switch failed") == true)
+        XCTAssertTrue(manager.notice?.contains("paused") == true)
+        let attempts = keychain.defaultWriteAttempts
+        await manager.refreshAll()
+        await manager.refreshAll()
+        XCTAssertEqual(keychain.defaultWriteAttempts, attempts, "An automatic write failure must not repeat")
         XCTAssertEqual(opened(), 0)
     }
 

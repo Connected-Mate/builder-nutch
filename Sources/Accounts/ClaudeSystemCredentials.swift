@@ -30,6 +30,11 @@ enum ClaudeSystemCredentialError: LocalizedError {
     case unsafePath, malformedData, missingLogin, identityMismatch, expiredLogin
     case changedDuringCopy, fallbackCredentials, keychain(OSStatus), rollbackFailed, storageBusy
 
+    var requiresAccess: Bool {
+        guard case .keychain(let status) = self else { return false }
+        return [errSecAuthFailed, errSecUserCanceled, errSecInteractionNotAllowed].contains(status)
+    }
+
     var errorDescription: String? {
         switch self {
         case .unsafePath: return "The Claude settings path is not a safe file owned by your Mac account."
@@ -40,7 +45,9 @@ enum ClaudeSystemCredentialError: LocalizedError {
         case .storageBusy: return "Claude is updating its login. Try the switch again in a moment."
         case .changedDuringCopy: return "Claude changed its login or settings during the switch. Try again."
         case .fallbackCredentials: return "Claude has a separate credentials file. Switching is unavailable until this ambiguous login is resolved."
-        case .keychain(let status): return "macOS could not access the Claude login (OSStatus \(status))."
+        case .keychain(let status): return requiresAccess
+            ? NSLocalizedString("Access is paused. Choose Allow access for this account.", comment: "")
+            : "macOS could not access the Claude login (OSStatus \(status))."
         case .rollbackFailed: return "The switch failed and the previous login could not be restored safely. Check the active Claude account before continuing."
         }
     }
@@ -60,6 +67,17 @@ protocol ClaudeCredentialKeychain {
 
 struct ClaudeNativeCredentialKeychain: ClaudeCredentialKeychain {
     func read(service: String, account: String) throws -> ClaudeCredentialSnapshot? {
+        try KeychainInteraction.shared.perform { try readUnlocked(service: service, account: account) }
+    }
+
+    /// Explicit user action only. The returned secret is discarded, not stored or logged.
+    func authorize(service: String, account: String) throws {
+        try KeychainInteraction.shared.perform(allowPrompt: true) {
+            guard try readUnlocked(service: service, account: account) != nil else { throw ClaudeSystemCredentialError.missingLogin }
+        }
+    }
+
+    private func readUnlocked(service: String, account: String) throws -> ClaudeCredentialSnapshot? {
         // Unlike KeychainItem.newest, preserve query errors: denied access is not absence.
         var result: CFTypeRef?
         let status = SecItemCopyMatching([
@@ -84,6 +102,10 @@ struct ClaudeNativeCredentialKeychain: ClaudeCredentialKeychain {
     }
 
     func replace(service: String, account: String, expected: ClaudeCredentialSnapshot?, data: Data) throws -> ClaudeCredentialSnapshot {
+        try KeychainInteraction.shared.perform { try replaceUnlocked(service: service, account: account, expected: expected, data: data) }
+    }
+
+    private func replaceUnlocked(service: String, account: String, expected: ClaudeCredentialSnapshot?, data: Data) throws -> ClaudeCredentialSnapshot {
         guard try read(service: service, account: account) == expected else { throw ClaudeSystemCredentialError.changedDuringCopy }
         let reference: Data
         if let expected {
@@ -122,6 +144,10 @@ struct ClaudeNativeCredentialKeychain: ClaudeCredentialKeychain {
     }
 
     func restore(service: String, account: String, written: ClaudeCredentialSnapshot, previous: ClaudeCredentialSnapshot?) throws {
+        try KeychainInteraction.shared.perform { try restoreUnlocked(service: service, account: account, written: written, previous: previous) }
+    }
+
+    private func restoreUnlocked(service: String, account: String, written: ClaudeCredentialSnapshot, previous: ClaudeCredentialSnapshot?) throws {
         guard try read(service: service, account: account) == written else { throw ClaudeSystemCredentialError.changedDuringCopy }
         let query = [kSecClass: kSecClassGenericPassword, kSecValuePersistentRef: written.reference] as CFDictionary
         let status: OSStatus
@@ -146,6 +172,15 @@ final class ClaudeSystemCredentials {
     private let writeConfig: (Data, URL, Data?) throws -> Void
     private let invalidateCache: (ClaudeCredentialLocation) throws -> Void
     private let lock = NSLock()
+    private let lifecycleLock = NSLock()
+    private var stopping = false
+
+    func requestStop() { lifecycleLock.lock(); stopping = true; lifecycleLock.unlock() }
+    func waitUntilIdle() { lock.lock(); lock.unlock() }
+    private func checkRunning() throws {
+        lifecycleLock.lock(); defer { lifecycleLock.unlock() }
+        if stopping { throw ManagedAccountError.cancelled }
+    }
 
     init(keychain: any ClaudeCredentialKeychain = ClaudeNativeCredentialKeychain(),
          account: String = ClaudeSystemCredentials.keychainAccount(),
@@ -174,6 +209,33 @@ final class ClaudeSystemCredentials {
         return try Self.identity(in: Self.object(data))
     }
 
+    struct SubscriptionLogin {
+        let identity: ClaudeCredentialIdentity
+        let accessToken: String
+        let plan: String?
+    }
+
+    /// Read-only and noninteractive. The official app owns token refresh.
+    func subscriptionLogin(at location: ClaudeCredentialLocation) throws -> SubscriptionLogin {
+        lock.lock()
+        defer { lock.unlock() }
+        try checkRunning()
+        guard let identity = try identity(at: location),
+              let secret = try keychain.read(service: location.service, account: account),
+              let oauth = try Self.object(secret.data)["claudeAiOauth"] as? [String: Any],
+              let token = oauth["accessToken"] as? String, !token.isEmpty,
+              let expiry = oauth["expiresAt"] as? NSNumber,
+              CFGetTypeID(expiry) != CFBooleanGetTypeID(), expiry.doubleValue.isFinite
+        else { throw ClaudeSystemCredentialError.missingLogin }
+        guard expiry.doubleValue / 1000 > now().timeIntervalSince1970 else { throw ClaudeSystemCredentialError.expiredLogin }
+        return SubscriptionLogin(identity: identity, accessToken: token, plan: oauth["subscriptionType"] as? String)
+    }
+
+    func authorize(at location: ClaudeCredentialLocation) throws {
+        try Self.validateLocation(location)
+        try ClaudeNativeCredentialKeychain().authorize(service: location.service, account: account)
+    }
+
     /// Recover the same login if an older build wrote pretty-printed password
     /// JSON, which Apple's command-line helper returns as hexadecimal text.
     func repairEncoding(at location: ClaudeCredentialLocation) throws {
@@ -197,9 +259,12 @@ final class ClaudeSystemCredentials {
     }
 
     func copyLogin(from source: ClaudeCredentialLocation, to target: ClaudeCredentialLocation,
-                   expectedIdentity: ClaudeCredentialIdentity, allowExpired: Bool = false) throws {
+                   expectedIdentity: ClaudeCredentialIdentity, allowExpired: Bool = false,
+                   completingTransaction: Bool = false) throws {
         lock.lock()
         defer { lock.unlock() }
+        func checkCancellation() throws { if !completingTransaction { try checkRunning() } }
+        try checkCancellation()
         try Self.validateLocation(source)
         try Self.validateLocation(target)
         guard source != target else { return }
@@ -212,13 +277,15 @@ final class ClaudeSystemCredentials {
         var storageLocks: [ClaudeStorageWriteLock] = []
         defer { storageLocks.reversed().forEach { $0.release() } }
         for location in [source, target].sorted(by: { $0.directory.path < $1.directory.path }) {
-            storageLocks.append(try ClaudeStorageWriteLock(directory: location.directory))
+            try checkCancellation()
+            storageLocks.append(try ClaudeStorageWriteLock(directory: location.directory, checkCancellation: checkCancellation))
         }
         // Claude's settings writer has its own proper-lockfile mutex. Hold both
         // configs from their initial read through commit/rollback to preserve
         // concurrent project/settings updates as well as the login identity.
         for location in [source, target].sorted(by: { $0.configURL.path < $1.configURL.path }) {
-            storageLocks.append(try ClaudeStorageWriteLock(lockURL: URL(fileURLWithPath: location.configURL.path + ".lock"), staleAfter: 10))
+            try checkCancellation()
+            storageLocks.append(try ClaudeStorageWriteLock(lockURL: URL(fileURLWithPath: location.configURL.path + ".lock"), staleAfter: 10, checkCancellation: checkCancellation))
         }
         let sourceConfig = try Self.readConfig(source.configURL)
         guard let sourceConfig else { throw ClaudeSystemCredentialError.missingLogin }
@@ -251,6 +318,9 @@ final class ClaudeSystemCredentials {
         }
         try storageLocks.forEach { try $0.check() }
         var configCommitted = false
+        // After the first write, finish commit/rollback under the lock. Shutdown
+        // waits for this transaction, rather than abandoning a half-written login.
+        try checkCancellation()
         let written = try keychain.replace(service: target.service, account: account, expected: oldSecret, data: secretBytes)
         do {
             try Self.validateLocation(source)
@@ -521,14 +591,15 @@ private final class ClaudeStorageWriteLock: @unchecked Sendable {
     private var compromised = false
     private var timer: DispatchSourceTimer?
 
-    convenience init(directory: URL) throws {
-        try self.init(lockURL: directory.appendingPathComponent(".storage-write.lock"), staleAfter: 15)
+    convenience init(directory: URL, checkCancellation: () throws -> Void = {}) throws {
+        try self.init(lockURL: directory.appendingPathComponent(".storage-write.lock"), staleAfter: 15, checkCancellation: checkCancellation)
     }
 
-    init(lockURL: URL, staleAfter: TimeInterval) throws {
+    init(lockURL: URL, staleAfter: TimeInterval, checkCancellation: () throws -> Void = {}) throws {
         url = lockURL
         var acquired = false
         for attempt in 0...10 {
+            try checkCancellation()
             if mkdir(url.path, S_IRWXU) == 0 { acquired = true; break }
             guard errno == EEXIST else { throw ClaudeSystemCredentialError.unsafePath }
             var existing = stat()
@@ -544,7 +615,13 @@ private final class ClaudeStorageWriteLock: @unchecked Sendable {
                     if rmdir(url.path) == 0, mkdir(url.path, S_IRWXU) == 0 { acquired = true; break }
                 }
             }
-            if attempt < 10 { Thread.sleep(forTimeInterval: min(1, 0.1 * pow(2, Double(attempt)))) }
+            if attempt < 10 {
+                let deadline = Date().addingTimeInterval(min(1, 0.1 * pow(2, Double(attempt))))
+                while Date() < deadline {
+                    try checkCancellation()
+                    Thread.sleep(forTimeInterval: 0.02)
+                }
+            }
         }
         guard acquired else { throw ClaudeSystemCredentialError.storageBusy }
         let opened = open(url.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)

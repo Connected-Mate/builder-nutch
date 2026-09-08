@@ -8,6 +8,17 @@
 "Use account" = "Utiliser ce compte";
 "NEXT ACCOUNT" = "PROCHAIN COMPTE";
 "Next account:" = "Prochain compte :";
+"Allow access" = "Autoriser l’accès";
+"Quietly, reliably." = "Discrète et fiable.";
+"No repeated Claude access prompts" = "Fin des demandes Claude répétées";
+"Claude usage refreshes run silently. A blocked account stays paused until you choose Allow access." = "Les quotas Claude s’actualisent silencieusement. Un compte bloqué reste en pause jusqu’à votre clic sur Autoriser l’accès.";
+"Quit means quit" = "Quitter arrête tout";
+"Closing the app stops its background helpers and finishes any account change safely." = "Quitter l’application arrête ses tâches de fond et termine correctement tout changement de compte.";
+"Clear account status" = "Un état clair pour chaque compte";
+"Unavailable usage stays unavailable. A failed account switch pauses instead of retrying in a loop." = "Un quota inconnu reste indiqué comme tel. Un changement de compte qui échoue est mis en pause, sans nouvelle tentative en boucle.";
+"Access is paused. Choose Allow access for this account." = "Accès en pause. Choisissez Autoriser l’accès pour ce compte.";
+"Only this click may ask macOS for access. Cancelling leaves the account paused." = "Seul ce clic peut demander une autorisation macOS. Annuler laisse le compte en pause.";
+"Automatic Claude switching is paused. Use account to retry when ready." = "Le changement automatique Claude est en pause. Choisissez Utiliser ce compte pour réessayer.";
 "Your next idea starts with an assistant." = "Votre prochaine idée commence avec un assistant.";
 "Choose a service. Sign in on its official page." = "Choisissez un service puis connectez-vous sur sa page officielle.";
 "All your AI. Room to build." = "Toutes vos IA. Toute la place pour créer.";

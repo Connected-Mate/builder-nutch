@@ -72,6 +72,34 @@ final class ClaudeSystemCredentialsTests: XCTestCase {
         XCTAssertEqual(keychain.items[source.service + ":tester"], oldSourceSecret)
     }
 
+    func testShutdownCancelsCopyBeforeCommitButAllowsTransactionRecovery() throws {
+        let (source, target, keychain) = try fixture()
+        let manager = ClaudeSystemCredentials(keychain: keychain, account: "tester", now: { self.fixedNow })
+        let oldFile = try Data(contentsOf: target.configURL)
+        manager.requestStop()
+        XCTAssertThrowsError(try manager.copyLogin(from: source, to: target, expectedIdentity: expected))
+        XCTAssertEqual(keychain.writes, 0)
+        XCTAssertEqual(try Data(contentsOf: target.configURL), oldFile)
+        try manager.copyLogin(from: source, to: target, expectedIdentity: expected, completingTransaction: true)
+        XCTAssertEqual(try manager.identity(at: target), expected)
+        manager.waitUntilIdle()
+    }
+
+    func testShutdownCancelsContendedStorageLockPromptly() async throws {
+        let (source, target, keychain) = try fixture()
+        let manager = ClaudeSystemCredentials(keychain: keychain, account: "tester", now: { self.fixedNow })
+        let lock = target.directory.appendingPathComponent(".storage-write.lock")
+        try FileManager.default.createDirectory(at: lock, withIntermediateDirectories: false)
+        let copying = Task.detached { try manager.copyLogin(from: source, to: target, expectedIdentity: self.expected) }
+        try await Task.sleep(nanoseconds: 80_000_000)
+        let start = Date()
+        manager.requestStop()
+        do { try await copying.value; XCTFail("The pending switch must cancel") }
+        catch { XCTAssertEqual(error.localizedDescription, ManagedAccountError.cancelled.localizedDescription) }
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.5)
+        XCTAssertEqual(keychain.writes, 0)
+    }
+
     func testConfigFailureRestoresOldCredential() throws {
         let (source, target, keychain) = try fixture()
         let before = keychain.items

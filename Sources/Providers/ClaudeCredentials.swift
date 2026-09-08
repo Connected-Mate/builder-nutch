@@ -43,6 +43,10 @@ struct ClaudeCredentials {
     /// winner's actual data does, which is why it costs the same single prompt
     /// as before, per profile.
     static func read(service: String) throws -> ClaudeCredentials {
+        try KeychainInteraction.shared.perform { try readWithoutPrompt(service: service) }
+    }
+
+    private static func readWithoutPrompt(service: String) throws -> ClaudeCredentials {
         guard let winner = KeychainItem.newest(service: service) else {
             Log.usage.error("keychain read failed: no item under \(service, privacy: .public)")
             throw UsageProviderError.needsAuth

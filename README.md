@@ -32,7 +32,7 @@ Today’s AI subscriptions give builders an unusual amount of intelligence for t
 
 Coding assistants require their official [Claude Code](https://code.claude.com/docs/en/quickstart), [Codex CLI](https://developers.openai.com/codex/cli/) or [Kimi Code](https://www.kimi.com/code/docs/en/kimi-code-cli/) tool. Web assistants require [Google Chrome](https://www.google.com/chrome/), Brave or Microsoft Edge; they never reuse your default browser's shared account.
 
-Existing coding profiles are checked through the official tools and linked automatically when signed in. Confirmed duplicate identities are skipped. Credentials remain in local vendor Keychain storage. When rotating Claude, the app saves the outgoing login in its account profile, replaces only the shared subscription login and `oauthAccount` identity, and preserves other settings and credentials. New isolated profiles start disconnected. Browser login is performed by you, and each provider remains responsible for its credentials and token refresh.
+Existing coding profiles are detected locally. Claude profiles without Keychain access appear paused with an **Allow access** button; no background authorization is requested. Confirmed duplicate identities are skipped. Credentials remain in local vendor Keychain storage. When rotating Claude, the app saves the outgoing login in its account profile, replaces only the shared subscription login and `oauthAccount` identity, and preserves other settings and credentials. New isolated profiles start disconnected. Browser login is performed by you, and each provider remains responsible for its credentials and token refresh.
 
 ## Updating from Codenotch Accounts
 
@@ -40,9 +40,9 @@ Builder Nutch is the new name for this fork. Install **Builder Nutch.app** and k
 
 ## How account isolation works
 
-Each new isolated profile has a stable UUID directory under `~/Library/Application Support/Codenotch Accounts/profiles/`. Claude sign-in and inactive-account usage checks use that profile's `CLAUDE_CONFIG_DIR`. Active Claude usage is read through the default Mac login so token refresh stays with the active session. Codex runs with its `CODEX_HOME` and its official `keyring` credential storage; Kimi Code runs with its `KIMI_CODE_HOME`. Credential/provider environment overrides are excluded from launched processes so another account or API key cannot silently take precedence.
+Each new isolated profile has a stable UUID directory under `~/Library/Application Support/Codenotch Accounts/profiles/`. Claude sign-in uses that profile’s `CLAUDE_CONFIG_DIR`. Usage is read directly with the profile’s saved login; active Claude usage uses the default Mac login. Token refresh remains with Claude itself. Codex runs with its `CODEX_HOME` and its official `keyring` credential storage; Kimi Code runs with its `KIMI_CODE_HOME`. Credential/provider environment overrides are excluded from launched processes so another account or API key cannot silently take precedence.
 
-Discovered profiles instead keep a reference to their original directory. Before its first switch, a discovered default Claude account is saved into its own private profile; the shared unsuffixed Keychain entry then follows the active subscription. Other discovered Codex preserves its original credential-store configuration; discovered Kimi preserves its original home. Removing a discovered profile records that choice so background discovery does not add it again.
+Discovered profiles instead keep a reference to their original directory. Before its first switch, a discovered default Claude account is saved into its own private profile; the shared unsuffixed Keychain entry then follows the active subscription. Discovered Codex preserves its original credential-store configuration; discovered Kimi preserves its original home. Removing a discovered profile records that choice so background discovery does not add it again.
 
 Browser accounts each get a private `browser/` directory, and the browser chosen on first launch stays pinned to that profile. Browser authentication is confirmed by you, not inferred from cookies. A fixed managed `UserDataDir` policy blocks browser launch rather than sharing a company profile.
 
@@ -51,12 +51,18 @@ The app stores nicknames, emoji, identifiers, browser confirmation dates and sel
 ### Usage accuracy
 
 - **Codex:** read from the official app-server `account/read` and `account/rateLimits/read` methods.
-- **Claude Code:** recent official CLI versions provide the SDK `get_usage` control request, so subscription limits can be read before sending a model prompt. The reader sends only initialize and usage controls, disables user customizations, tools and MCP servers, and requests no session persistence. Five-hour, weekly and model-scoped constraints are included. This [official SDK interface is experimental](https://github.com/anthropics/claude-agent-sdk-typescript/releases/tag/v0.3.169); unsupported or unavailable responses remain unavailable. Older status-line readings may stay visible but a failed live check cannot mark them fresh for automatic selection.
+- **Claude Code:** reads Anthropic’s `/api/oauth/usage` endpoint directly, using a noninteractive native Keychain read. No Claude or `security` subprocess is launched to refresh usage, and no model prompt is sent. Five-hour, weekly and model-specific limits are included. This endpoint is not a public API contract; unavailable or malformed responses remain unavailable. Expired credentials wait for Claude to renew them. Denied access pauses that profile until an explicit **Allow access** or refresh action.
 - **Kimi Code:** subscription status and usage are read from an authenticated, temporary loopback instance of the official local web server. Its credentials remain vendor-owned.
 - **Web profiles:** usage is available on each service’s website. Builder Nutch does not claim to verify browser sign-in or use these profiles for automatic quota selection.
 - Unknown or old readings remain unknown or stale. They are excluded from automatic selection; a weekly or session limit at 100% also makes an account unavailable.
 
 The upstream provider adapters remain in the source history for attribution and reference. Claude account switching uses native Security APIs and never passes tokens through shell arguments or logs. A temporary, secret-free credentials marker makes the running CLI reload its login; it is removed after the cache window. Failed writes restore the previous login when no concurrent change prevents safe rollback.
+
+### Permission and shutdown behavior
+
+Background Claude reads and account changes never enable macOS Keychain interaction. Only clicking **Allow access** permits a serialized authorization read for the chosen account; cancelling leaves it paused. No startup credential-repair pass runs. A failed automatic switch stays paused until an explicit retry or re-enabling rotation.
+
+Quitting blocks new helper processes, terminates the app’s owned process groups, and lets a committing account change finish or roll back before exit. User-launched Claude sessions are never terminated. The current release’s no-prompt behavior was checked with a locked disposable Keychain, using dummy credentials, in addition to automated regression tests.
 
 ## Build and install
 

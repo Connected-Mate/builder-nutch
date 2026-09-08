@@ -9,6 +9,8 @@ final class AccountManager: ObservableObject {
     @Published private(set) var selected: [AccountProvider: UUID] = [:]
     @Published private(set) var busyIDs: Set<UUID> = []
     @Published private(set) var loginAccountID: UUID?
+    @Published private(set) var authorizationAccountID: UUID?
+    var authenticationInProgress: Bool { loginAccountID != nil || authorizationAccountID != nil }
     @Published var notice: String?
     @Published private(set) var discoveryNotice: String?
     @Published private(set) var automaticSwitch: AutomaticAccountSwitch?
@@ -16,6 +18,13 @@ final class AccountManager: ObservableObject {
     @Published private(set) var systemClaudeAccountID: UUID?
     private let systemCredentials: ClaudeSystemCredentials?
     private let systemClaudeLocation: ClaudeCredentialLocation
+    private let claudeReader: (any ClaudeAccountReading)?
+    private var pausedRefreshIDs: Set<UUID> = []
+    private var systemSwitchPaused = false
+    private var isSwitchingClaude = false
+    private var hasShutDown = false
+    private var discoveryCancellation: AccountCancellation?
+    private var markerRecoveryTask: Task<Void, Never>?
     private var ignoredExistingProfiles: Set<String> = []
     private var discoveryAttempts: [String: Date] = [:]
     private var externalRetryAfter: [UUID: Date] = [:]
@@ -25,8 +34,9 @@ final class AccountManager: ObservableObject {
         didSet {
             guard loaded else { return }
             if automaticSelection {
+                systemSwitchPaused = false
                 reconcileAutomaticSelection()
-                reconcileSystemClaudeSelection()
+                Task { await reconcileSystemClaudeSelection() }
             }
             do { try persist(accounts: accounts, selected: selected) }
             catch { notice = error.localizedDescription }
@@ -59,9 +69,11 @@ final class AccountManager: ObservableObject {
          readKimi: @escaping (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState = KimiAccountIntegration.read,
          readExistingKimi: @escaping (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState = KimiAccountIntegration.readExisting,
          systemCredentials: ClaudeSystemCredentials? = nil,
-         systemClaudeDirectory: URL? = nil) {
+         systemClaudeDirectory: URL? = nil,
+         claudeReader: (any ClaudeAccountReading)? = nil) {
         self.automaticDiscovery = rootURL == nil
         self.systemCredentials = systemCredentials ?? (rootURL == nil ? ClaudeSystemCredentials() : nil)
+        self.claudeReader = claudeReader ?? self.systemCredentials.map { ClaudeQuietUsageReader(credentials: $0) }
         self.systemClaudeLocation = ClaudeCredentialLocation(directory: systemClaudeDirectory ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude"), isDefault: true)
         self.runner = runner; self.resolveExecutable = executable; self.openTerminal = openTerminal
         self.openBrowser = openBrowser; self.readKimi = readKimi; self.readExistingKimi = readExistingKimi
@@ -84,20 +96,18 @@ final class AccountManager: ObservableObject {
         }
         loaded = true
         recoverClaudeCacheMarkers()
-        if let credentials = self.systemCredentials {
-            try? credentials.repairEncoding(at: systemClaudeLocation)
-            for account in accounts where account.provider == .claude {
-                try? credentials.repairEncoding(at: credentialLocation(for: account))
-            }
-        }
     }
 
     private func recoverClaudeCacheMarkers() {
-        if self.systemCredentials != nil {
-            try? ClaudeSystemCredentials.cleanupStaleCacheMarker(at: systemClaudeLocation)
-            for account in accounts where account.provider == .claude {
-                try? ClaudeSystemCredentials.cleanupStaleCacheMarker(at: credentialLocation(for: account))
-            }
+        guard systemCredentials != nil, markerRecoveryTask == nil else { return }
+        let locations = [systemClaudeLocation] + accounts.filter { $0.provider == .claude }.map(credentialLocation)
+        markerRecoveryTask = Task { [weak self] in
+            await Task.detached(priority: .utility) {
+                for location in locations {
+                    try? ClaudeSystemCredentials.cleanupStaleCacheMarker(at: location)
+                }
+            }.value
+            self?.markerRecoveryTask = nil
         }
     }
 
@@ -226,7 +236,7 @@ final class AccountManager: ObservableObject {
     func setSwitchThreshold(_ percent: Double) throws {
         switchThresholdPercent = min(max(percent.rounded(), 0), 100)
         reconcileAutomaticSelection()
-        reconcileSystemClaudeSelection()
+        Task { await reconcileSystemClaudeSelection() }
         try persist(accounts: accounts, selected: selected)
     }
 
@@ -275,14 +285,14 @@ final class AccountManager: ObservableObject {
     /// Preserve the outgoing subscription before replacing the shared login.
     /// A discovered default profile becomes a saved profile so its row never
     /// changes identity when the Mac moves to another subscription.
-    private func saveSystemClaudeLogin(_ current: ManagedAccount, identity: ClaudeCredentialIdentity) throws -> ManagedAccount {
-        guard let credentials = systemCredentials else { throw ManagedAccountError.unavailable }
+    private func saveSystemClaudeLogin(_ current: ManagedAccount, identity: ClaudeCredentialIdentity) async throws -> ManagedAccount {
+        guard systemCredentials != nil else { throw ManagedAccountError.unavailable }
         if current.existingProfile?.usesDefaultClaudeHome == true {
             var saved = current
             saved.existingProfile = nil
             let destination = try usableStorage().profile(saved)
-            try credentials.copyLogin(from: systemClaudeLocation,
-                to: ClaudeCredentialLocation(directory: destination, isDefault: false), expectedIdentity: identity, allowExpired: true)
+            try await copyClaudeLogin(from: systemClaudeLocation,
+                to: ClaudeCredentialLocation(directory: destination, isDefault: false), identity: identity, allowExpired: true)
             var updated = accounts
             guard let index = updated.firstIndex(where: { $0.id == current.id }) else { throw ManagedAccountError.unavailable }
             updated[index] = saved
@@ -290,15 +300,15 @@ final class AccountManager: ObservableObject {
             accounts = updated
             return saved
         }
-        try credentials.copyLogin(from: systemClaudeLocation, to: credentialLocation(for: current), expectedIdentity: identity, allowExpired: true)
+        try await copyClaudeLogin(from: systemClaudeLocation, to: credentialLocation(for: current), identity: identity, allowExpired: true)
         return current
     }
 
     /// Switch credentials in place. No process is restarted, no transcript is
     /// copied and no Terminal window is created by an automatic rotation.
-    private func activateSystemClaude(_ target: ManagedAccount, automatic: Bool) throws {
+    private func activateSystemClaude(_ target: ManagedAccount, automatic: Bool) async throws {
         guard let credentials = systemCredentials, target.provider == .claude,
-              !busyIDs.contains(target.id), loginAccountID == nil else { throw ManagedAccountError.busy }
+              !hasShutDown, !isSwitchingClaude, !busyIDs.contains(target.id), !authenticationInProgress else { throw ManagedAccountError.busy }
         updateSystemClaudeIdentity()
         guard let currentID = systemClaudeAccountID,
               let current = accounts.first(where: { $0.id == currentID }),
@@ -307,18 +317,23 @@ final class AccountManager: ObservableObject {
               let targetIdentity = try credentials.identity(at: credentialLocation(for: target))
         else { throw ManagedAccountError.notConnected }
         guard currentID != target.id else { return }
-        let saved = try saveSystemClaudeLogin(current, identity: currentIdentity)
-        try credentials.copyLogin(from: credentialLocation(for: target), to: systemClaudeLocation, expectedIdentity: targetIdentity)
+        isSwitchingClaude = true
+        defer { isSwitchingClaude = false; finish(current.id); finish(target.id) }
+        markBusy(current.id, cancellation: AccountCancellation())
+        markBusy(target.id, cancellation: AccountCancellation())
+        let saved = try await saveSystemClaudeLogin(current, identity: currentIdentity)
+        try await copyClaudeLogin(from: credentialLocation(for: target), to: systemClaudeLocation, identity: targetIdentity)
         var updated = selected
         updated[.claude] = target.id
         do { try persist(accounts: accounts, selected: updated) }
         catch {
             // Restore the previous login if the catalog cannot record the change.
-            try credentials.copyLogin(from: credentialLocation(for: saved), to: systemClaudeLocation, expectedIdentity: currentIdentity, allowExpired: true)
+            try await copyClaudeLogin(from: credentialLocation(for: saved), to: systemClaudeLocation, identity: currentIdentity, allowExpired: true, completingTransaction: true)
             throw error
         }
         selected = updated
         systemClaudeAccountID = target.id
+        guard !hasShutDown else { return }
         ClaudeCredentials.forgetCached()
         notice = "Claude now uses \(target.label) on this Mac. Sessions using the Mac login pick up this account on their next request."
         if automatic {
@@ -327,17 +342,30 @@ final class AccountManager: ObservableObject {
         }
     }
 
-    private func reconcileSystemClaudeSelection() {
-        guard systemCredentials != nil else { return }
+    private func copyClaudeLogin(from source: ClaudeCredentialLocation, to target: ClaudeCredentialLocation,
+                                 identity: ClaudeCredentialIdentity, allowExpired: Bool = false, completingTransaction: Bool = false) async throws {
+        guard !hasShutDown || completingTransaction, let credentials = systemCredentials else { throw ManagedAccountError.cancelled }
+        try await Task.detached(priority: .utility) {
+            try credentials.copyLogin(from: source, to: target, expectedIdentity: identity,
+                allowExpired: allowExpired, completingTransaction: completingTransaction)
+        }.value
+    }
+
+    private func reconcileSystemClaudeSelection() async {
+        guard systemCredentials != nil, !systemSwitchPaused, !isSwitchingClaude, !hasShutDown else { return }
         updateSystemClaudeIdentity()
-        guard automaticSelection, loginAccountID == nil,
+        guard automaticSelection, !authenticationInProgress,
               let currentID = systemClaudeAccountID,
               let candidate = AccountSelection.systemClaude(accounts: accounts, states: states,
                 order: rotationOrder[.claude] ?? [], currentID: currentID,
                 preferredID: selected[.claude], thresholdPercent: switchThresholdPercent),
               !busyIDs.contains(currentID), !busyIDs.contains(candidate.id) else { return }
-        do { try activateSystemClaude(candidate, automatic: true) }
-        catch { notice = "Claude account switch failed: \(error.localizedDescription)" }
+        do { try await activateSystemClaude(candidate, automatic: true) }
+        catch {
+            guard !hasShutDown else { return }
+            systemSwitchPaused = true
+            notice = NSLocalizedString("Automatic Claude switching is paused. Use account to retry when ready.", comment: "") + " " + error.localizedDescription
+        }
     }
 
     private func prepare(_ account: ManagedAccount) throws -> (URL, URL, [String: String]) {
@@ -371,12 +399,13 @@ final class AccountManager: ObservableObject {
     }
 
     func connect(_ account: ManagedAccount) async {
+        guard !hasShutDown else { return }
         if account.existingProfile != nil {
             await refresh(account)
             notice = "This account belongs to the official app. Reconnect there if needed, then refresh here."
             return
         }
-        guard loginAccountID == nil, !busyIDs.contains(account.id) else { notice = ManagedAccountError.busy.localizedDescription; return }
+        guard !authenticationInProgress, !busyIDs.contains(account.id) else { notice = ManagedAccountError.busy.localizedDescription; return }
         let cancellation = AccountCancellation()
         loginAccountID = account.id; markBusy(account.id, cancellation: cancellation)
         states[account.id]?.message = "Complete sign-in in your browser. Only this profile will be connected."
@@ -416,10 +445,50 @@ final class AccountManager: ObservableObject {
         states[id]?.message = "Cancelling connection…"
     }
 
+    /// A single user-requested authorization. No automatic path calls this.
+    func allowClaudeAccess(_ account: ManagedAccount) async {
+        guard !hasShutDown, account.provider == .claude, let credentials = systemCredentials,
+              !authenticationInProgress, !isSwitchingClaude, busyIDs.isEmpty else { return }
+        let location = systemClaudeAccountID == account.id ? systemClaudeLocation : credentialLocation(for: account)
+        authorizationAccountID = account.id
+        defer { authorizationAccountID = nil }
+        do {
+            try await Task.detached(priority: .userInitiated) { try credentials.authorize(at: location) }.value
+            guard !hasShutDown else { return }
+            await refresh(account)
+        } catch {
+            pausedRefreshIDs.insert(account.id)
+            states[account.id]?.requiresKeychainAccess = true
+            states[account.id]?.message = error.localizedDescription
+        }
+    }
+
+    func shutdown() {
+        hasShutDown = true
+        systemCredentials?.requestStop()
+        operations.values.forEach { $0.cancel() }
+        discoveryCancellation?.cancel()
+    }
+
+    func shutdownAndWait() async {
+        shutdown()
+        // Give an already-committing switch time to persist its matching catalog.
+        // The UI run loop remains free while the transaction finishes or cancels.
+        while isSwitchingClaude { try? await Task.sleep(nanoseconds: 10_000_000) }
+        if let credentials = systemCredentials {
+            await Task.detached(priority: .utility) { credentials.waitUntilIdle() }.value
+        }
+    }
+
     private func read(_ account: ManagedAccount, cancellation: AccountCancellation) async throws -> ManagedAccountState {
+        guard !hasShutDown else { throw ManagedAccountError.cancelled }
         if account.provider.isBrowserProfile {
             guard let current = accounts.first(where: { $0.id == account.id }) else { throw ManagedAccountError.unavailable }
             return Self.browserState(current)
+        }
+        if account.provider == .claude, let claudeReader {
+            let location = systemClaudeAccountID == account.id ? systemClaudeLocation : credentialLocation(for: account)
+            return try await claudeReader.read(location, cancellation: cancellation)
         }
         let (executable, profile, environment): (URL, URL, [String: String])
         if account.provider == .claude, systemCredentials != nil, systemClaudeAccountID == account.id {
@@ -465,18 +534,29 @@ final class AccountManager: ObservableObject {
     }
 
     func refresh(_ account: ManagedAccount) async {
-        guard !busyIDs.contains(account.id) else { return }
+        guard !hasShutDown, !busyIDs.contains(account.id),
+              loginAccountID == nil || loginAccountID == account.id,
+              authorizationAccountID == nil || authorizationAccountID == account.id else { return }
         let cancellation = AccountCancellation(); markBusy(account.id, cancellation: cancellation)
         defer { finish(account.id) }
         do {
             states[account.id] = try await read(account, cancellation: cancellation)
-            externalRetryAfter.removeValue(forKey: account.id)
+            guard !hasShutDown, !cancellation.isCancelled else { return }
+            if states[account.id]?.isFresh() == true || account.provider.isBrowserProfile {
+                externalRetryAfter.removeValue(forKey: account.id)
+                pausedRefreshIDs.remove(account.id)
+            } else { pausedRefreshIDs.insert(account.id) }
         }
         catch {
+            guard !hasShutDown, !cancellation.isCancelled else { return }
             var state = states[account.id] ?? ManagedAccountState()
             state.message = error.localizedDescription
             // Retain the last displayed quotas, but never use a failed refresh for automation.
             state.refreshedAt = nil
+            state.requiresKeychainAccess = (error as? ClaudeSystemCredentialError)?.requiresAccess == true
+            if account.provider == .claude, claudeReader != nil, !state.requiresKeychainAccess {
+                externalRetryAfter[account.id] = Date().addingTimeInterval(60)
+            } else { pausedRefreshIDs.insert(account.id) }
             if account.existingProfile != nil {
                 state.isConnected = false
                 externalRetryAfter[account.id] = Date().addingTimeInterval(900)
@@ -486,22 +566,25 @@ final class AccountManager: ObservableObject {
     }
 
     func refreshAll() async {
+        guard !hasShutDown, !authenticationInProgress else { return }
         recoverClaudeCacheMarkers()
         updateSystemClaudeIdentity()
-        await refreshAccounts(accounts.filter { externalRetryAfter[$0.id].map { $0 > Date() } != true })
+        await refreshAccounts(accounts.filter { !pausedRefreshIDs.contains($0.id) && externalRetryAfter[$0.id].map { $0 > Date() } != true })
+        guard !hasShutDown, !Task.isCancelled else { return }
         if automaticDiscovery { await discoverExistingAccounts() }
         reconcileAutomaticSelection()
-        reconcileSystemClaudeSelection()
+        await reconcileSystemClaudeSelection()
     }
 
     /// Failed probes are quiet and bounded; manual refresh of an existing row can retry immediately.
     func discoverExistingAccounts(candidates: [ExistingAccountCandidate]? = nil, now: Date = Date()) async {
-        guard !discovering, catalogError == nil else { return }
+        guard !hasShutDown, !authenticationInProgress, !discovering, catalogError == nil else { return }
         discovering = true
         defer { discovering = false }
         pruneSignedOutKimiProfiles()
         var found = 0
         for candidate in candidates ?? ExistingAccountDiscovery.candidates() {
+            guard !hasShutDown, !Task.isCancelled else { break }
             let key = candidate.source.key(provider: candidate.provider)
             guard !candidate.provider.isBrowserProfile,
                   !ignoredExistingProfiles.contains(key),
@@ -514,9 +597,17 @@ final class AccountManager: ObservableObject {
             discoveryAttempts[key] = now
             let environment = candidate.source.environment(provider: candidate.provider, inherited: ProcessInfo.processInfo.environment)
             let cancellation = AccountCancellation()
+            discoveryCancellation = cancellation
             do {
                 let state: ManagedAccountState
-                if candidate.provider == .kimi {
+                if candidate.provider == .claude, let claudeReader {
+                    let location = ClaudeCredentialLocation(directory: directory, isDefault: candidate.source.usesDefaultClaudeHome)
+                    do { state = try await claudeReader.read(location, cancellation: cancellation) }
+                    catch let error as ClaudeSystemCredentialError where error.requiresAccess {
+                        guard let identity = try systemCredentials?.identity(at: location) else { continue }
+                        state = ManagedAccountState(email: identity.email, message: error.localizedDescription, requiresKeychainAccess: true)
+                    }
+                } else if candidate.provider == .kimi {
                     state = try await readExistingKimi(executable, directory, environment, cancellation)
                 } else {
                     let codex = candidate.provider == .codex
@@ -530,7 +621,8 @@ final class AccountManager: ObservableObject {
                     if codex { state = try AccountQuotas.codex(data) }
                     else { state = try await readClaudeUsage(status: data, executable: executable, profile: directory, environment: environment, cancellation: cancellation) }
                 }
-                guard !Task.isCancelled, state.isConnected else { continue }
+                guard !hasShutDown, !Task.isCancelled, !cancellation.isCancelled,
+                      state.isConnected || state.requiresKeychainAccess else { continue }
                 // Only verified identities count. User-entered hints never suppress a real account.
                 if let email = state.email?.lowercased(), !email.isEmpty,
                    accounts.contains(where: { $0.provider == candidate.provider && states[$0.id]?.isConnected == true && states[$0.id]?.email?.lowercased() == email }) { continue }
@@ -540,6 +632,7 @@ final class AccountManager: ObservableObject {
                 if selection[account.provider] == nil { selection[account.provider] = account.id }
                 try persist(accounts: accounts + [account], selected: selection)
                 accounts.append(account); selected = selection; states[account.id] = state
+                if state.requiresKeychainAccess { pausedRefreshIDs.insert(account.id) }
                 found += 1
             } catch { continue }
         }
@@ -574,6 +667,7 @@ final class AccountManager: ObservableObject {
 
     private func refreshAccounts(_ snapshot: [ManagedAccount]) async {
         for start in stride(from: 0, to: snapshot.count, by: 2) {
+            guard !hasShutDown, !Task.isCancelled else { return }
             async let first: Void = refresh(snapshot[start])
             if start + 1 < snapshot.count { async let second: Void = refresh(snapshot[start + 1]); _ = await (first, second) }
             else { await first }
@@ -581,12 +675,14 @@ final class AccountManager: ObservableObject {
     }
 
     func launch(_ account: ManagedAccount, project: URL) async {
+        guard !hasShutDown, !authenticationInProgress else { return }
         do {
             if account.provider == .claude, systemCredentials != nil {
                 updateSystemClaudeIdentity()
                 await refresh(account)
                 guard state(for: account).isConnected else { throw ManagedAccountError.notConnected }
-                try activateSystemClaude(account, automatic: false)
+                try await activateSystemClaude(account, automatic: false)
+                systemSwitchPaused = false
                 return
             }
             if account.provider.isBrowserProfile {

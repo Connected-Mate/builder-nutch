@@ -121,6 +121,7 @@ struct ManagedAccountState {
     var refreshedAt: Date? = nil
     var message: String? = nil
     var isBusy = false
+    var requiresKeychainAccess = false
     var remainingPercent: Double? {
         let fractions = windows.compactMap(\.usedFraction)
         guard !fractions.isEmpty else { return nil }

@@ -31,6 +31,15 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.9.2",
+            headline: "Quietly, reliably.",
+            changes: [
+                .init(title: "No repeated Claude access prompts", detail: "Claude usage refreshes run silently. A blocked account stays paused until you choose Allow access."),
+                .init(title: "Quit means quit", detail: "Closing the app stops its background helpers and finishes any account change safely."),
+                .init(title: "Clear account status", detail: "Unavailable usage stays unavailable. A failed account switch pauses instead of retrying in a loop.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.9.1",
             headline: "Keep Claude connected.",
             changes: [

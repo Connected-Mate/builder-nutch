@@ -39,6 +39,10 @@ enum KeychainItem {
     /// `kSecAttrModificationDate` is a timestamp, not a version counter — and
     /// where they would, either duplicate is an equally good answer.
     static func newest(service: String, account: String? = nil) -> Match? {
+        try? KeychainInteraction.shared.perform { newestWithoutPrompt(service: service, account: account) }
+    }
+
+    private static func newestWithoutPrompt(service: String, account: String?) -> Match? {
         var query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
