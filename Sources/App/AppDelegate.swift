@@ -1,6 +1,5 @@
 import AppKit
 import Combine
-import Darwin
 import SwiftUI
 
 /// Codenotch's native notch and placement, backed by explicit managed accounts.
@@ -16,10 +15,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var updater: Updater?
     private var monitors: [String: ClaudeSessionMonitor] = [:]
     private var monitorSubscriptions: [String: AnyCancellable] = [:]
+    private var monitorDirectories: [String: URL] = [:]
+    private var profileSessions: [String: [AgentSession]] = [:]
     private var defaultClaudeMonitor: ClaudeSessionMonitor?
     private var defaultClaudeSubscription: AnyCancellable?
     private var defaultClaudeSessions: [AgentSession] = []
-    private var completedHandoffs: Set<String> = []
     private var cancellables = Set<AnyCancellable>()
     private var refreshTimer: Timer?
     private var refreshTask: Task<Void, Never>?
@@ -120,72 +120,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard refreshTask == nil, let manager = accountManager else { return }
         refreshTask = Task { [weak self] in
             await manager.refreshAll()
-            await self?.attemptAutomaticClaudeHandoff()
             self?.refreshTask = nil
-        }
-    }
-
-    private func startDefaultClaudeMonitor() {
-        let directory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/sessions", isDirectory: true)
-        let monitor = ClaudeSessionMonitor(directory: directory)
-        defaultClaudeSubscription = monitor.sessionsPublisher.receive(on: RunLoop.main).sink { [weak self] sessions in
-            self?.defaultClaudeSessions = sessions.filter { $0.conversationID != nil }
-        }
-        defaultClaudeMonitor = monitor
-        monitor.start()
-    }
-
-    /// A plain Terminal launch uses ~/.claude and previously bypassed account
-    /// rotation. When that subscription reaches the configured threshold, copy
-    /// the conversation record, resume it with NEXT, then retire the idle shell.
-    private func attemptAutomaticClaudeHandoff() async {
-        guard let manager = accountManager, manager.automaticSelection,
-              let target = manager.selectedAccount(for: .claude) else { return }
-        var candidates: [(ManagedAccount, URL, AgentSession)] = []
-        if let source = await manager.defaultClaudeAccount(), source.id != target.id {
-            let profile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude", isDirectory: true)
-            candidates += defaultClaudeSessions.map { (source, profile, $0) }
-        }
-        for source in manager.accounts where source.provider == .claude && source.id != target.id {
-            let profile = manager.configurationDirectory(for: source)
-            let sessions = notchController?.model.sessions[source.id.uuidString] ?? []
-            candidates += sessions.compactMap { $0.conversationID == nil ? nil : (source, profile, $0) }
-        }
-        let threshold = manager.switchThresholdPercent + 0.001
-        guard let candidate = candidates
-            .filter({ source, _, session in
-                session.state == .idle && (manager.state(for: source).remainingPercent ?? 100) <= threshold
-            })
-            .max(by: { $0.2.since < $1.2.since }),
-              let conversationID = candidate.2.conversationID
-        else { return }
-        let handoffKey = "\(conversationID):\(target.id.uuidString)"
-        guard !completedHandoffs.contains(handoffKey) else { return }
-        do {
-            let oldPID = try manager.resumeClaudeSession(candidate.2, from: candidate.1, on: target)
-            completedHandoffs.insert(handoffKey)
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            if ProcessLiveness.isAlive(pid: oldPID, startedAt: nil) { kill(oldPID, SIGTERM) }
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            // Claude's interactive UI can consume SIGTERM while idle. The new
-            // fork is already running and the transcript was copied first, so
-            // retire only this exact exhausted process if it did not leave.
-            if ProcessLiveness.isAlive(pid: oldPID, startedAt: nil) { kill(oldPID, SIGKILL) }
-        } catch {
-            manager.notice = "Automatic Claude handoff failed: \(error.localizedDescription)"
         }
     }
 
     private func updateNotch() {
         guard let manager = accountManager, let controller = notchController else { return }
-        // A running Claude session is what NOW means. The selected account can
-        // differ because it is already prepared as NEXT after a quota handoff.
+        controller.model.sessions = profileSessions
+        if let id = manager.systemClaudeAccountID?.uuidString {
+            let merged = (profileSessions[id] ?? []) + defaultClaudeSessions
+            controller.model.sessions[id] = Array(Dictionary(merged.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }).values)
+        }
+        // NOW follows the actual system login; selecting NEXT does not pretend
+        // that an already-running client has switched subscriptions.
         controller.model.snapshots = AccountProvider.allCases.compactMap { provider in
             guard let selected = manager.selectedAccount(for: provider) else { return nil }
             let displayed: ManagedAccount
             if provider == .claude,
-               let id = AccountActivitySelection.currentID(
+               let id = manager.systemClaudeAccountID ?? AccountActivitySelection.currentID(
                     accounts: manager.accounts.filter { $0.provider == provider },
                     selectedID: selected.id,
                     sessions: controller.model.sessions),
@@ -203,20 +155,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for id in Array(monitors.keys) where !expected.contains(id) {
             monitors.removeValue(forKey: id)?.stop()
             monitorSubscriptions.removeValue(forKey: id)?.cancel()
+            monitorDirectories.removeValue(forKey: id)
+            profileSessions.removeValue(forKey: id)
             controller.model.sessions.removeValue(forKey: id)
         }
-        for account in claudeAccounts where monitors[account.id.uuidString] == nil {
+        for account in claudeAccounts {
             let id = account.id.uuidString
             let directory = manager.configurationDirectory(for: account).appendingPathComponent("sessions")
+            guard monitors[id] == nil || monitorDirectories[id] != directory else { continue }
+            monitors.removeValue(forKey: id)?.stop()
+            monitorSubscriptions.removeValue(forKey: id)?.cancel()
+            profileSessions.removeValue(forKey: id)
+            monitorDirectories[id] = directory
             let monitor = ClaudeSessionMonitor(directory: directory)
             monitorSubscriptions[id] = monitor.sessionsPublisher.receive(on: RunLoop.main).sink { [weak self] sessions in
-                self?.notchController?.model.sessions[id] = sessions
+                self?.profileSessions[id] = sessions
                 self?.notchController?.model.now = Date()
                 self?.updateNotch()
             }
             monitors[id] = monitor
             monitor.start()
         }
+    }
+
+    private func startDefaultClaudeMonitor() {
+        let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/sessions")
+        let monitor = ClaudeSessionMonitor(directory: directory)
+        defaultClaudeSubscription = monitor.sessionsPublisher.receive(on: RunLoop.main).sink { [weak self] sessions in
+            self?.defaultClaudeSessions = sessions
+            self?.updateNotch()
+        }
+        defaultClaudeMonitor = monitor
+        monitor.start()
     }
 
     private func accountPicker(for snapshotID: String) -> NotchAccountPicker? {
@@ -233,7 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let ordered = manager.rotationAccounts(for: provider)
         let selectedID = manager.selectedAccount(for: provider)?.id
         let currentID = provider == .claude
-            ? AccountActivitySelection.currentID(accounts: ordered, selectedID: selectedID,
+            ? manager.systemClaudeAccountID ?? AccountActivitySelection.currentID(accounts: ordered, selectedID: selectedID,
                 sessions: notchController?.model.sessions ?? [:])
             : selectedID
         let displayed = AccountActivitySelection.queue(accounts: ordered,

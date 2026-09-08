@@ -44,10 +44,7 @@ struct ClaudeSessionRecord {
             detail: "\(Self.surface(json["entrypoint"] as? String)) · \(folder)",
             state: state,
             waitingFor: (json["waitingFor"] as? String) ?? (json["needs"] as? String),
-            since: millis.map { Date(timeIntervalSince1970: $0 / 1000) } ?? Date(),
-            processID: (json["entrypoint"] as? String) == "cli" ? pid : nil,
-            conversationID: (json["entrypoint"] as? String) == "cli" ? json["sessionId"] as? String : nil,
-            workingDirectory: (json["entrypoint"] as? String) == "cli" ? cwd : nil
+            since: millis.map { Date(timeIntervalSince1970: $0 / 1000) } ?? Date()
         )
     }
 

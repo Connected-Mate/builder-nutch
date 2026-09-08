@@ -3,6 +3,11 @@
 "Add an assistant" = "Ajouter un assistant";
 "All accounts" = "Tous les comptes";
 "Your accounts. For your next session." = "Vos comptes, prêts pour votre prochaine session.";
+"Your subscriptions. One Claude login on this Mac." = "Vos abonnements. Une connexion Claude sur ce Mac.";
+"Claude switches its Mac login at your threshold. Other coding assistants use the next account when opened." = "Claude change de connexion sur le Mac au seuil choisi. Les autres assistants utilisent le prochain compte à leur ouverture.";
+"Use account" = "Utiliser ce compte";
+"NEXT ACCOUNT" = "PROCHAIN COMPTE";
+"Next account:" = "Prochain compte :";
 "Your next idea starts with an assistant." = "Votre prochaine idée commence avec un assistant.";
 "Choose a service. Sign in on its official page." = "Choisissez un service puis connectez-vous sur sa page officielle.";
 "All your AI. Room to build." = "Toutes vos IA. Toute la place pour créer.";

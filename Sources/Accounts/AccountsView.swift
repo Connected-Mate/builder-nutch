@@ -220,7 +220,7 @@ struct AccountsView: View {
                 }
                 Text(showingAdd ? "Choose a service. Sign in on its official page." :
                         visibleAccounts.isEmpty ? "Your next idea starts with an assistant." :
-                        "Your accounts. For your next session.")
+                        filter == .claude ? "Your subscriptions. One Claude login on this Mac." : "Your accounts. For your next session.")
                     .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
             }
             Spacer(minLength: 12)
@@ -267,7 +267,7 @@ struct AccountsView: View {
                 HStack(spacing: 0) {
                     Text("ACCOUNT").frame(maxWidth: .infinity, alignment: .leading)
                     Text(LocalizedStringKey(preferences.usageDisplayMode.columnTitle)).frame(width: 110)
-                    Text("NEXT SESSION").frame(width: 110)
+                    Text(filter == .claude ? "NEXT ACCOUNT" : "NEXT SESSION").frame(width: 110)
                 }
                 .font(AppTheme.font(size: 9, weightValue: 500)).tracking(0.8).foregroundStyle(AppTheme.muted)
                 .padding(.bottom, 10)
@@ -350,7 +350,7 @@ struct AccountsView: View {
             Toggle("Auto-select", isOn: $manager.automaticSelection)
                 .font(AppTheme.font(size: 11)).toggleStyle(.switch).controlSize(.small)
                 .disabled(!manager.accounts.contains { $0.provider.supportsAutomaticSelection })
-                .help("New coding sessions use fresh, verified quota. Browser profiles are excluded.")
+                .help("Claude switches its Mac login at your threshold. Other coding assistants use the next account when opened.")
             Button("Order & threshold…") { showingRotation = true }
                 .buttonStyle(WorkspaceSelectionStyle())
                 .disabled(filter?.supportsAutomaticSelection != true)
@@ -364,6 +364,8 @@ struct AccountsView: View {
             if let selectedAccount {
                 if selectedAccount.provider.isBrowserProfile {
                     Text("Selected profile:")
+                } else if selectedAccount.provider == .claude {
+                    Text("Next account:")
                 } else {
                     Text("Next \(selectedAccount.provider.workspaceTitle) session:")
                 }
@@ -378,7 +380,11 @@ struct AccountsView: View {
                         .disabled(!manager.state(for: selectedAccount).isConnected || manager.state(for: selectedAccount).isBusy)
                 } else {
                     Button { Task { await manager.launch(selectedAccount, project: projectURL) } } label: {
-                        Text("Open \(selectedAccount.provider.workspaceTitle)")
+                        if selectedAccount.provider == .claude {
+                            Text("Use account")
+                        } else {
+                            Text("Open \(selectedAccount.provider.workspaceTitle)")
+                        }
                     }
                     .buttonStyle(WorkspaceSelectionStyle(primary: true))
                     .disabled(!manager.state(for: selectedAccount).isConnected || manager.state(for: selectedAccount).isBusy)

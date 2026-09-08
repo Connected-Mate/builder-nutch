@@ -24,22 +24,4 @@ struct AgentSession: Identifiable, Equatable {
     let waitingFor: String?
     /// When it entered its current state.
     let since: Date
-    /// Claude-only handoff metadata. Other activity sources leave these nil.
-    let processID: Int32?
-    let conversationID: String?
-    let workingDirectory: String?
-
-    init(id: String, name: String, detail: String, state: State,
-         waitingFor: String?, since: Date, processID: Int32? = nil,
-         conversationID: String? = nil, workingDirectory: String? = nil) {
-        self.id = id
-        self.name = name
-        self.detail = detail
-        self.state = state
-        self.waitingFor = waitingFor
-        self.since = since
-        self.processID = processID
-        self.conversationID = conversationID
-        self.workingDirectory = workingDirectory
-    }
 }

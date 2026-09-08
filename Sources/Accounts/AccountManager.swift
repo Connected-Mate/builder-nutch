@@ -12,6 +12,10 @@ final class AccountManager: ObservableObject {
     @Published var notice: String?
     @Published private(set) var discoveryNotice: String?
     @Published private(set) var automaticSwitch: AutomaticAccountSwitch?
+    /// The login actually installed for ordinary Claude Code sessions on this Mac.
+    @Published private(set) var systemClaudeAccountID: UUID?
+    private let systemCredentials: ClaudeSystemCredentials?
+    private let systemClaudeLocation: ClaudeCredentialLocation
     private var ignoredExistingProfiles: Set<String> = []
     private var discoveryAttempts: [String: Date] = [:]
     private var externalRetryAfter: [UUID: Date] = [:]
@@ -20,7 +24,10 @@ final class AccountManager: ObservableObject {
     @Published var automaticSelection = false {
         didSet {
             guard loaded else { return }
-            if automaticSelection { reconcileAutomaticSelection() }
+            if automaticSelection {
+                reconcileAutomaticSelection()
+                reconcileSystemClaudeSelection()
+            }
             do { try persist(accounts: accounts, selected: selected) }
             catch { notice = error.localizedDescription }
         }
@@ -50,8 +57,12 @@ final class AccountManager: ObservableObject {
          executable: @escaping (AccountProvider) -> URL?, openTerminal: @escaping (URL) -> Bool = { _ in false },
          openBrowser: @escaping (URL, URL, String?) async throws -> String = AccountBrowser.open,
          readKimi: @escaping (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState = KimiAccountIntegration.read,
-         readExistingKimi: @escaping (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState = KimiAccountIntegration.readExisting) {
+         readExistingKimi: @escaping (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState = KimiAccountIntegration.readExisting,
+         systemCredentials: ClaudeSystemCredentials? = nil,
+         systemClaudeDirectory: URL? = nil) {
         self.automaticDiscovery = rootURL == nil
+        self.systemCredentials = systemCredentials ?? (rootURL == nil ? ClaudeSystemCredentials() : nil)
+        self.systemClaudeLocation = ClaudeCredentialLocation(directory: systemClaudeDirectory ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude"), isDefault: true)
         self.runner = runner; self.resolveExecutable = executable; self.openTerminal = openTerminal
         self.openBrowser = openBrowser; self.readKimi = readKimi; self.readExistingKimi = readExistingKimi
         let root = rootURL ?? FileManager.default.homeDirectoryForCurrentUser
@@ -72,6 +83,22 @@ final class AccountManager: ObservableObject {
             self.storage = nil; catalogError = error; notice = error.localizedDescription
         }
         loaded = true
+        recoverClaudeCacheMarkers()
+        if let credentials = self.systemCredentials {
+            try? credentials.repairEncoding(at: systemClaudeLocation)
+            for account in accounts where account.provider == .claude {
+                try? credentials.repairEncoding(at: credentialLocation(for: account))
+            }
+        }
+    }
+
+    private func recoverClaudeCacheMarkers() {
+        if self.systemCredentials != nil {
+            try? ClaudeSystemCredentials.cleanupStaleCacheMarker(at: systemClaudeLocation)
+            for account in accounts where account.provider == .claude {
+                try? ClaudeSystemCredentials.cleanupStaleCacheMarker(at: credentialLocation(for: account))
+            }
+        }
     }
 
     private func usableStorage() throws -> AccountStorage {
@@ -199,6 +226,7 @@ final class AccountManager: ObservableObject {
     func setSwitchThreshold(_ percent: Double) throws {
         switchThresholdPercent = min(max(percent.rounded(), 0), 100)
         reconcileAutomaticSelection()
+        reconcileSystemClaudeSelection()
         try persist(accounts: accounts, selected: selected)
     }
 
@@ -228,70 +256,88 @@ final class AccountManager: ObservableObject {
     func isSelected(_ account: ManagedAccount) -> Bool { selected[account.provider] == account.id }
     func selectedAccount(for provider: AccountProvider) -> ManagedAccount? { accounts.first { $0.id == selected[provider] } }
 
-    /// Identifies the account used by a plain `claude` command on this Mac.
-    /// Only identity metadata from Claude's official status command is read.
-    func defaultClaudeAccount() async -> ManagedAccount? {
-        guard let executable = resolveExecutable(.claude) else { return nil }
-        let home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude", isDirectory: true)
-        let source = ExistingAccountProfile(directory: home.path, usesDefaultClaudeHome: true)
-        guard let directory = try? source.validatedDirectory() else { return nil }
-        let cancellation = AccountCancellation()
-        guard let data = try? await runner.run(AccountCommand(executable: executable,
-            arguments: ["auth", "status", "--json"],
-            environment: source.environment(provider: .claude, inherited: ProcessInfo.processInfo.environment),
-            directory: directory, timeout: 10), cancellation: cancellation),
-              let object = try? AccountQuotas.json(data),
-              object["loggedIn"] as? Bool == true,
-              let email = (object["email"] as? String)?.lowercased()
-        else { return nil }
-        return accounts.first { account in
-            account.provider == .claude && (states[account.id]?.email ?? account.emailHint)?.lowercased() == email
+    private func credentialLocation(for account: ManagedAccount) -> ClaudeCredentialLocation {
+        ClaudeCredentialLocation(directory: configurationDirectory(for: account),
+            isDefault: account.existingProfile?.usesDefaultClaudeHome == true)
+    }
+
+    /// Identify by both provider account and organization, never a nickname or email hint.
+    private func updateSystemClaudeIdentity() {
+        guard let credentials = systemCredentials else { return }
+        let identity = try? credentials.identity(at: systemClaudeLocation)
+        systemClaudeAccountID = identity.flatMap { current in
+            accounts.first { account in
+                account.provider == .claude && (try? credentials.identity(at: credentialLocation(for: account))) == current
+            }?.id
         }
     }
 
-    /// Opens the same conversation with another subscription, then lets the
-    /// caller close the exhausted process after the new Terminal has started.
-    func resumeClaudeSession(_ session: AgentSession, from sourceProfile: URL,
-                             on account: ManagedAccount) throws -> Int32 {
-        guard account.provider == .claude,
-              let processID = session.processID,
-              let conversationID = session.conversationID,
-              let workingDirectory = session.workingDirectory
-        else { throw ManagedAccountError.unavailable }
-        let project = URL(fileURLWithPath: workingDirectory, isDirectory: true)
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: project.path, isDirectory: &isDirectory), isDirectory.boolValue else {
-            throw CocoaError(.fileReadNoSuchFile)
+    /// Preserve the outgoing subscription before replacing the shared login.
+    /// A discovered default profile becomes a saved profile so its row never
+    /// changes identity when the Mac moves to another subscription.
+    private func saveSystemClaudeLogin(_ current: ManagedAccount, identity: ClaudeCredentialIdentity) throws -> ManagedAccount {
+        guard let credentials = systemCredentials else { throw ManagedAccountError.unavailable }
+        if current.existingProfile?.usesDefaultClaudeHome == true {
+            var saved = current
+            saved.existingProfile = nil
+            let destination = try usableStorage().profile(saved)
+            try credentials.copyLogin(from: systemClaudeLocation,
+                to: ClaudeCredentialLocation(directory: destination, isDefault: false), expectedIdentity: identity, allowExpired: true)
+            var updated = accounts
+            guard let index = updated.firstIndex(where: { $0.id == current.id }) else { throw ManagedAccountError.unavailable }
+            updated[index] = saved
+            try persist(accounts: updated, selected: selected)
+            accounts = updated
+            return saved
         }
-        let (executable, profile, _) = try prepare(account)
-        try ClaudeSessionHandoff.copyConversation(id: conversationID, project: project,
-                                                  from: sourceProfile, to: profile)
-        let scripts = try usableStorage().root.appendingPathComponent("launchers", isDirectory: true)
-        try AccountStorage.privateDirectory(scripts)
-        let script = scripts.appendingPathComponent("\(UUID().uuidString).command")
-        var arguments = ["--resume", conversationID, "--fork-session"]
-        if Self.commandLine(processID).split(whereSeparator: { $0.isWhitespace })
-            .contains(Substring("--dangerously-skip-permissions")) {
-            arguments.append("--dangerously-skip-permissions")
-        }
-        let text = AccountEnvironment.launchScript(executable: executable, account: account,
-            profile: profile, project: project, arguments: arguments)
-        try AccountStorage.write(Data(text.utf8), to: script, mode: 0o700)
-        guard openTerminal(script) else { throw CocoaError(.executableLoad) }
-        notice = "Continuing \(session.name) with \(account.label)."
-        return processID
+        try credentials.copyLogin(from: systemClaudeLocation, to: credentialLocation(for: current), expectedIdentity: identity, allowExpired: true)
+        return current
     }
 
-    private static func commandLine(_ pid: Int32) -> String {
-        let process = Process(), output = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = ["-p", "\(pid)", "-o", "command="]
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        do { try process.run(); process.waitUntilExit() } catch { return "" }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        guard data.count <= 65_536 else { return "" }
-        return String(decoding: data, as: UTF8.self)
+    /// Switch credentials in place. No process is restarted, no transcript is
+    /// copied and no Terminal window is created by an automatic rotation.
+    private func activateSystemClaude(_ target: ManagedAccount, automatic: Bool) throws {
+        guard let credentials = systemCredentials, target.provider == .claude,
+              !busyIDs.contains(target.id), loginAccountID == nil else { throw ManagedAccountError.busy }
+        updateSystemClaudeIdentity()
+        guard let currentID = systemClaudeAccountID,
+              let current = accounts.first(where: { $0.id == currentID }),
+              !busyIDs.contains(currentID),
+              let currentIdentity = try credentials.identity(at: systemClaudeLocation),
+              let targetIdentity = try credentials.identity(at: credentialLocation(for: target))
+        else { throw ManagedAccountError.notConnected }
+        guard currentID != target.id else { return }
+        let saved = try saveSystemClaudeLogin(current, identity: currentIdentity)
+        try credentials.copyLogin(from: credentialLocation(for: target), to: systemClaudeLocation, expectedIdentity: targetIdentity)
+        var updated = selected
+        updated[.claude] = target.id
+        do { try persist(accounts: accounts, selected: updated) }
+        catch {
+            // Restore the previous login if the catalog cannot record the change.
+            try credentials.copyLogin(from: credentialLocation(for: saved), to: systemClaudeLocation, expectedIdentity: currentIdentity, allowExpired: true)
+            throw error
+        }
+        selected = updated
+        systemClaudeAccountID = target.id
+        ClaudeCredentials.forgetCached()
+        notice = "Claude now uses \(target.label) on this Mac. Sessions using the Mac login pick up this account on their next request."
+        if automatic {
+            automaticSwitch = AutomaticAccountSwitch(provider: .claude, fromID: current.id,
+                fromName: current.label, toID: target.id, toName: target.label)
+        }
+    }
+
+    private func reconcileSystemClaudeSelection() {
+        guard systemCredentials != nil else { return }
+        updateSystemClaudeIdentity()
+        guard automaticSelection, loginAccountID == nil,
+              let currentID = systemClaudeAccountID,
+              let candidate = AccountSelection.systemClaude(accounts: accounts, states: states,
+                order: rotationOrder[.claude] ?? [], currentID: currentID,
+                preferredID: selected[.claude], thresholdPercent: switchThresholdPercent),
+              !busyIDs.contains(currentID), !busyIDs.contains(candidate.id) else { return }
+        do { try activateSystemClaude(candidate, automatic: true) }
+        catch { notice = "Claude account switch failed: \(error.localizedDescription)" }
     }
 
     private func prepare(_ account: ManagedAccount) throws -> (URL, URL, [String: String]) {
@@ -375,7 +421,15 @@ final class AccountManager: ObservableObject {
             guard let current = accounts.first(where: { $0.id == account.id }) else { throw ManagedAccountError.unavailable }
             return Self.browserState(current)
         }
-        let (executable, profile, environment) = try prepare(account)
+        let (executable, profile, environment): (URL, URL, [String: String])
+        if account.provider == .claude, systemCredentials != nil, systemClaudeAccountID == account.id {
+            guard let command = resolveExecutable(.claude) else { throw ManagedAccountError.missingCLI(.claude) }
+            let source = ExistingAccountProfile(directory: systemClaudeLocation.directory.path, usesDefaultClaudeHome: true)
+            executable = command; profile = try source.validatedDirectory()
+            environment = source.environment(provider: .claude, inherited: ProcessInfo.processInfo.environment)
+        } else {
+            (executable, profile, environment) = try prepare(account)
+        }
         if account.provider == .kimi {
             if account.existingProfile != nil { return try await readExistingKimi(executable, profile, environment, cancellation) }
             return try await readKimi(executable, profile, environment, cancellation)
@@ -432,9 +486,12 @@ final class AccountManager: ObservableObject {
     }
 
     func refreshAll() async {
+        recoverClaudeCacheMarkers()
+        updateSystemClaudeIdentity()
         await refreshAccounts(accounts.filter { externalRetryAfter[$0.id].map { $0 > Date() } != true })
         if automaticDiscovery { await discoverExistingAccounts() }
         reconcileAutomaticSelection()
+        reconcileSystemClaudeSelection()
     }
 
     /// Failed probes are quiet and bounded; manual refresh of an existing row can retry immediately.
@@ -525,6 +582,13 @@ final class AccountManager: ObservableObject {
 
     func launch(_ account: ManagedAccount, project: URL) async {
         do {
+            if account.provider == .claude, systemCredentials != nil {
+                updateSystemClaudeIdentity()
+                await refresh(account)
+                guard state(for: account).isConnected else { throw ManagedAccountError.notConnected }
+                try activateSystemClaude(account, automatic: false)
+                return
+            }
             if account.provider.isBrowserProfile {
                 try await showBrowser(account)
                 try select(account)
@@ -594,6 +658,9 @@ final class AccountManager: ObservableObject {
         var changed = false
         var switches: [AutomaticAccountSwitch] = []
         for provider in providers {
+            // Claude's selection only becomes a switch after the system login
+            // was actually updated. Other providers keep their existing flow.
+            if provider == .claude && systemCredentials != nil { continue }
             guard let candidate = AccountSelection.rotating(provider: provider, accounts: accounts, states: states,
                 order: rotationOrder[provider] ?? [], currentID: selected[provider],
                 thresholdPercent: switchThresholdPercent) else { continue }

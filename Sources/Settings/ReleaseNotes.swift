@@ -31,6 +31,15 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.9.1",
+            headline: "Keep Claude connected.",
+            changes: [
+                .init(title: "Switch in the same conversation", detail: "Claude rotation changes the Mac login in place. Your terminal and conversation stay open."),
+                .init(title: "The actual account, clearly shown", detail: "The notch follows the login used on this Mac, with your chosen subscription queued next."),
+                .init(title: "Keep every subscription", detail: "Saved logins are preserved before each switch. Automatic rotation never opens a replacement window or ends a running session.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.9.0",
             headline: "Your account rotation, directly in the notch.",
             changes: [

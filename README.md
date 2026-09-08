@@ -14,12 +14,13 @@ Today’s AI subscriptions give builders an unusual amount of intelligence for t
 - Open separate browser accounts for Grok, ChatGPT, Gemini, Perplexity, DeepSeek, Mistral and the Cursor dashboard. Web profiles use Google Chrome, Brave or Microsoft Edge; the Cursor editor keeps its own login.
 - Add an optional nickname and emoji after sign-in; edit them whenever you like.
 - See connection state, available usage windows and reset times, and choose a project folder.
-- Select an account in one click and launch a new Claude Code, Codex or Kimi Code terminal session with it.
-- Enable automatic selection to choose an available account from fresh readings before a new launch.
+- Switch the Claude Code login used on this Mac, keeping the current terminal and conversation.
+- Enable automatic rotation to move Claude to the next available subscription at your remaining-usage threshold. The queued account and order stay under your control.
+- Launch Codex or Kimi Code with the selected account; their existing sessions retain their login.
 - Keep selected assistants in Codenotch's familiar notch, with the full list in a neutral white-and-gray window.
 - Choose **Auto-hide** for an invisible notch that appears when the pointer reaches the selected screen edge. **Show on hover** keeps a small pill; **Off** disables the notch.
 
-**A selection applies to new sessions launched from this manager. It does not change an already-running process, switch Claude.ai/ChatGPT browser sessions, or sign the separate desktop apps into another account. Running work is never killed to switch an account.** Each subscription keeps its own limits and terms; this app does not create unlimited usage.
+**Claude Code rotation updates the macOS Keychain login and its account identity in place. Ordinary Claude sessions use the new login on their next request, without a new window or process restart.** This behavior is verified with Claude Code 2.1.263. An already-rejected request is not replayed: rotating before exhaustion prevents that interruption. Sessions with an explicit token, API key, cloud provider or separate `CLAUDE_CONFIG_DIR` retain their own authentication. Claude.ai/ChatGPT websites and separate desktop logins are unchanged. Each subscription keeps its own limits; the app does not create unlimited usage.
 
 ## Connect your first account
 
@@ -27,11 +28,11 @@ Today’s AI subscriptions give builders an unusual amount of intelligence for t
 2. Choose the service you want: Claude, Codex, Kimi, Grok, Cursor or another listed assistant.
 3. Complete the official sign-in in the browser. For web profiles, return and choose **I've finished signing in**.
 4. Optionally choose a nickname and emoji, then **Finish**. Repeat for your other accounts.
-5. Use **Launch** for a coding assistant or **Open** for a browser account.
+5. For Claude, use **Use account** to change the Mac login now, or enable automatic rotation. Use **Open** for other assistants.
 
 Coding assistants require their official [Claude Code](https://code.claude.com/docs/en/quickstart), [Codex CLI](https://developers.openai.com/codex/cli/) or [Kimi Code](https://www.kimi.com/code/docs/en/kimi-code-cli/) tool. Web assistants require [Google Chrome](https://www.google.com/chrome/), Brave or Microsoft Edge; they never reuse your default browser's shared account.
 
-Existing coding profiles are checked through the official tools and linked automatically when signed in. Confirmed duplicate identities are skipped. Credentials stay in their original vendor storage, and existing configuration is not rewritten by the manager. New isolated profiles start disconnected. Browser login is performed by you, and each provider remains responsible for its credentials and token refresh.
+Existing coding profiles are checked through the official tools and linked automatically when signed in. Confirmed duplicate identities are skipped. Credentials remain in local vendor Keychain storage. When rotating Claude, the app saves the outgoing login in its account profile, replaces only the shared subscription login and `oauthAccount` identity, and preserves other settings and credentials. New isolated profiles start disconnected. Browser login is performed by you, and each provider remains responsible for its credentials and token refresh.
 
 ## Updating from Codenotch Accounts
 
@@ -39,9 +40,9 @@ Builder Nutch is the new name for this fork. Install **Builder Nutch.app** and k
 
 ## How account isolation works
 
-Each new isolated profile has a stable UUID directory under `~/Library/Application Support/Codenotch Accounts/profiles/`. Claude Code runs with that profile's `CLAUDE_CONFIG_DIR`; Codex runs with its `CODEX_HOME` and its official `keyring` credential storage; Kimi Code runs with its `KIMI_CODE_HOME`. Credential/provider environment overrides are excluded from launched processes so another account or API key cannot silently take precedence.
+Each new isolated profile has a stable UUID directory under `~/Library/Application Support/Codenotch Accounts/profiles/`. Claude sign-in and inactive-account usage checks use that profile's `CLAUDE_CONFIG_DIR`. Active Claude usage is read through the default Mac login so token refresh stays with the active session. Codex runs with its `CODEX_HOME` and its official `keyring` credential storage; Kimi Code runs with its `KIMI_CODE_HOME`. Credential/provider environment overrides are excluded from launched processes so another account or API key cannot silently take precedence.
 
-Discovered profiles instead keep a reference to their original directory. Default Claude preserves its unsuffixed Keychain identity; discovered Codex preserves its original credential-store configuration; discovered Kimi preserves its original home. Removing a discovered profile records that choice so background discovery does not add it again.
+Discovered profiles instead keep a reference to their original directory. Before its first switch, a discovered default Claude account is saved into its own private profile; the shared unsuffixed Keychain entry then follows the active subscription. Other discovered Codex preserves its original credential-store configuration; discovered Kimi preserves its original home. Removing a discovered profile records that choice so background discovery does not add it again.
 
 Browser accounts each get a private `browser/` directory, and the browser chosen on first launch stays pinned to that profile. Browser authentication is confirmed by you, not inferred from cookies. A fixed managed `UserDataDir` policy blocks browser launch rather than sharing a company profile.
 
@@ -55,7 +56,7 @@ The app stores nicknames, emoji, identifiers, browser confirmation dates and sel
 - **Web profiles:** usage is available on each service’s website. Builder Nutch does not claim to verify browser sign-in or use these profiles for automatic quota selection.
 - Unknown or old readings remain unknown or stale. They are excluded from automatic selection; a weekly or session limit at 100% also makes an account unavailable.
 
-The upstream provider adapters remain in the source history for attribution and reference. This fork's composition root does not start those token-reading adapters.
+The upstream provider adapters remain in the source history for attribution and reference. Claude account switching uses native Security APIs and never passes tokens through shell arguments or logs. A temporary, secret-free credentials marker makes the running CLI reload its login; it is removed after the cache window. Failed writes restore the previous login when no concurrent change prevents safe rollback.
 
 ## Build and install
 

@@ -157,6 +157,24 @@ enum ManagedAccountError: LocalizedError {
 }
 
 enum AccountSelection {
+    /// A queued account is not permission to move a healthy running login.
+    /// Only a fresh limit reading from the actual system account triggers rotation.
+    static func systemClaude(accounts: [ManagedAccount], states: [UUID: ManagedAccountState],
+                             order: [UUID], currentID: UUID, preferredID: UUID?,
+                             thresholdPercent: Double, now: Date = Date()) -> ManagedAccount? {
+        guard let current = states[currentID], current.isConnected, !current.isBusy,
+              current.isFresh(at: now), let remaining = current.remainingPercent,
+              remaining <= min(max(thresholdPercent, 0), 100) + 0.001 else { return nil }
+        if let preferredID, preferredID != currentID,
+           let preferred = best(provider: .claude, accounts: accounts.filter { $0.id == preferredID }, states: states, now: now),
+           (states[preferredID]?.remainingPercent ?? 0) > thresholdPercent + 0.001 {
+            return preferred
+        }
+        let candidate = rotating(provider: .claude, accounts: accounts, states: states,
+            order: order, currentID: currentID, thresholdPercent: thresholdPercent, now: now)
+        return candidate?.id == currentID ? nil : candidate
+    }
+
     static func best(provider: AccountProvider, accounts: [ManagedAccount], states: [UUID: ManagedAccountState], now: Date = Date()) -> ManagedAccount? {
         guard provider.supportsAutomaticSelection else { return nil }
         return accounts.filter { account in
@@ -206,9 +224,13 @@ enum AccountSelection {
             (states[account.id]?.remainingPercent ?? 0) > threshold + 0.001
         }
         if let currentID, let current = byID[currentID], clearsThreshold(current) { return current }
-        let currentIndex = currentID.flatMap { id in cycle.firstIndex { $0.id == id } }
-        let wrapped = (0..<cycle.count).map { offset in
-            cycle[((currentIndex ?? -1) + 1 + offset) % cycle.count]
+        // Keep the exhausted account's position in the full order. Removing it
+        // before finding the index incorrectly restarted rotation at the first row.
+        let fullOrder = order + accounts.filter { $0.provider == provider && !order.contains($0.id) }
+            .sorted { $0.createdAt < $1.createdAt }.map(\.id)
+        let currentIndex = currentID.flatMap { fullOrder.firstIndex(of: $0) }
+        let wrapped = (0..<fullOrder.count).compactMap { offset in
+            byID[fullOrder[((currentIndex ?? -1) + 1 + offset) % fullOrder.count]]
         }
         return wrapped.first(where: clearsThreshold)
             ?? cycle.max { (states[$0.id]?.remainingPercent ?? 0) < (states[$1.id]?.remainingPercent ?? 0) }
