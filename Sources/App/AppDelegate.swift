@@ -23,7 +23,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables = Set<AnyCancellable>()
     private var refreshTimer: Timer?
     private var refreshTask: Task<Void, Never>?
+    /// The macOS notification centre, and the two things that use it.
+    private var notifier: SystemNotifier?
+    private var escalator: AttentionEscalator?
+    private var usageThresholds: UsageThresholdNotifier?
     private var terminating = false
+    private var terminationReplied = false
 
     private var isRunningTests: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
@@ -60,9 +65,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.notchController = controller
         self.settings = appearance
         self.updater = updater
+        // The notification centre, and the two things that speak through it.
+        // Both are given the same notifier so a single authorisation covers
+        // them, and both are built here rather than lazily: an escalation that
+        // only exists once something has already gone wrong is an escalation
+        // with nothing to measure the hour from.
+        let notifier = SystemNotifier()
+        let escalator = AttentionEscalator(notifier: notifier)
+        let thresholds = UsageThresholdNotifier(notifier: notifier)
+        thresholds.isEnabled = preferences.usageAlerts
+        // A notification about a broken account is only useful if clicking it
+        // lands on the account.
+        notifier.onActivate = { [weak self] in self?.openAccounts() }
+        self.notifier = notifier
+        self.escalator = escalator
+        self.usageThresholds = thresholds
+
         controller.model.edge = preferences.notchEdge
         controller.model.usageDisplayMode = preferences.usageDisplayMode
-        controller.onOpenSettings = { [weak accounts] in accounts?.show() }
+        controller.onOpenSettings = { [weak self] in self?.openAccounts() }
         controller.onRefresh = { [weak self] in self?.refresh() }
         controller.onRefreshProvider = { [weak manager] id in
             guard let manager, let account = manager.accounts.first(where: { $0.id.uuidString == id }) else { return }
@@ -82,7 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             catch { manager?.notice = error.localizedDescription }
             controller?.model.accountPicker = self?.accountPicker(for: account.provider)
         }
-        let item = StatusItemController { [weak accounts] in accounts?.show() }
+        let item = StatusItemController { [weak self] in self?.openAccounts() }
         self.statusItem = item
         preferences.$appPresence.receive(on: RunLoop.main).sink { presence in
             NSApp.setActivationPolicy(presence.activationPolicy)
@@ -96,6 +117,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }.store(in: &cancellables)
         preferences.$usageDisplayMode.receive(on: RunLoop.main).sink { [weak controller] in
             controller?.model.usageDisplayMode = $0
+        }.store(in: &cancellables)
+        preferences.$usageAlerts.receive(on: RunLoop.main).sink { [weak thresholds] in
+            thresholds?.isEnabled = $0
         }.store(in: &cancellables)
         manager.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
             self?.updateNotch()
@@ -115,8 +139,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         refresh()
         if preferences.isFirstLaunch || manager.accounts.isEmpty || !preferences.hasChosenUsageDisplay {
-            accounts.show()
+            openAccounts()
         }
+    }
+
+    /// Every route into the accounts window goes through here.
+    ///
+    /// Opening that window is what counts as having seen a problem, so a second
+    /// door that did not say so would leave the escalation shouting at somebody
+    /// who had just looked at it. There are four of these doors — the notch, the
+    /// menu bar item, a first launch, and clicking the Dock icon — and the
+    /// bookkeeping belongs to none of them individually.
+    private func openAccounts() {
+        escalator?.accountsWindowOpened()
+        accountsWindow?.show()
     }
 
     private func refresh() {
@@ -153,6 +189,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.model.refreshing = Set(manager.busyIDs.map(\.uuidString))
         controller.model.now = Date()
+
+        // The red edge and the notification an hour later read the same
+        // published value, so they can never disagree about which problem they
+        // are talking about.
+        let alert = manager.attention.map(NotchAlert.init)
+        controller.model.attention = alert
+        escalator?.update(alert)
+        // Thresholds are asked of the snapshots the notch is showing rather
+        // than of the manager directly: the notch shows the account that is
+        // actually in use, and it is that account's limit somebody is spending.
+        usageThresholds?.evaluate(snapshots: controller.model.snapshots, now: controller.model.now)
         let claudeAccounts = manager.accounts.filter { $0.provider == .claude }
         let expected = Set(claudeAccounts.map { $0.id.uuidString })
         for id in Array(monitors.keys) where !expected.contains(id) {
@@ -246,12 +293,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshTask?.cancel()
         Task {
             await accountManager?.shutdownAndWait()
-            sender.reply(toApplicationShouldTerminate: true)
+            self.replyToTermination(sender)
+        }
+        // macOS is owed this reply. While it was owed, `osascript … quit` failed
+        // with "User canceled (-128)". A credential transaction gets a few
+        // seconds; after that the app quits regardless of what is still blocked.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            self?.replyToTermination(sender)
         }
         return .terminateLater
     }
+
+    private func replyToTermination(_ sender: NSApplication) {
+        guard !terminationReplied else { return }
+        terminationReplied = true
+        sender.reply(toApplicationShouldTerminate: true)
+    }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        accountsWindow?.show()
+        openAccounts()
         return true
     }
     func applicationWillTerminate(_ notification: Notification) {
@@ -262,6 +321,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitors.values.forEach { $0.stop() }
         defaultClaudeMonitor?.stop()
         notchController?.stop()
+        escalator?.stop()
+    }
+}
+
+extension NotchAlert {
+    /// The account layer's problem, in the shape the notch draws.
+    ///
+    /// The translation lives here rather than in either of the two layers it
+    /// joins: the notch is drawn entirely from its own view model, and the
+    /// account layer has no business knowing a notch exists. `AppDelegate` is
+    /// already where snapshots are assembled from managed accounts, and this is
+    /// the same journey.
+    init(_ attention: AccountAttention) {
+        self.init(id: attention.id,
+                  title: attention.title,
+                  detail: attention.detail,
+                  raisedAt: attention.raisedAt,
+                  accountID: attention.accountID)
     }
 }
 

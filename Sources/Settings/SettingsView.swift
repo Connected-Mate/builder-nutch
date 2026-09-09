@@ -99,6 +99,16 @@ struct SettingsView: View {
                                     get: { AppLanguage(rawValue: appLanguage) ?? .system },
                                     set: { appLanguage = $0.rawValue }
                                 ), title: { $0.title })
+                Toggle("Tell me when an account is running low", isOn: $preferences.usageAlerts)
+
+                // Wrapped in a key rather than written as a concatenated
+                // literal: `Text` only localises a literal, and a `+` chain
+                // is a `String` by the time it arrives.
+                Text(LocalizedStringKey(SettingsView.usageAlertsCopy))
+                    .font(AppTheme.font(.caption))
+                    .foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Toggle("Open Builder Nutch at login", isOn: $preferences.launchAtLogin)
                 if let problem = preferences.launchAtLoginProblem {
                     Text(problem)
@@ -227,6 +237,14 @@ struct SettingsView: View {
     static let width: CGFloat = 640
     /// The page scrolls while credits remain visible at the foot of the window.
     static let height: CGFloat = 680
+
+    /// Says which three points, and says that the important warning is not the
+    /// one being switched off. Somebody turning usage alerts off should not
+    /// come away thinking they have also silenced a broken account.
+    static let usageAlertsCopy =
+        "A notification at 50%, 75% and 85% of each limit, once per account "
+        + "each time the limit resets. Builder Nutch always tells you when an "
+        + "account needs reconnecting."
 
     /// Nothing to read from anywhere. On a first launch that is the normal
     /// state, and it is the only moment the sheet has something to explain.

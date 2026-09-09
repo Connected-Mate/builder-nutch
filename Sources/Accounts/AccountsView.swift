@@ -23,6 +23,7 @@ struct AccountsView: View {
     @State private var showingRotation = false
     @State private var removing: ManagedAccount?
     @State private var localError: String?
+    @State private var repairing = false
     @State private var projectURL: URL
     @AppStorage("accounts.hidePersonalDetails") private var hidePersonalDetails = false
     @AppStorage("accounts.projectFolder") private var savedProjectPath = ""
@@ -48,6 +49,8 @@ struct AccountsView: View {
             VStack(spacing: 0) {
                 header
                 if manager.loginAccountID != nil { loginBanner }
+                if let attention = manager.attention { attentionBanner(attention) }
+                if !manager.accounts.isEmpty { healthLine }
                 if let notice = manager.notice, !hidePersonalDetails { noticeBanner(notice) }
                 if let discovery = manager.discoveryNotice {
                     Label(discovery, systemImage: "checkmark.circle")
@@ -416,6 +419,67 @@ struct AccountsView: View {
         .padding(.horizontal, 30).padding(.vertical, 10).background(AppTheme.soft)
     }
 
+    /// One problem, one sentence, one button. The colour separates "macOS is
+    /// stopping us" from "you will run out soon"; nothing else on this screen
+    /// uses it, so a coloured band always means something is waiting on you.
+    private func attentionBanner(_ attention: AccountAttention) -> some View {
+        let tint = Self.attentionTint(attention.kind)
+        return HStack(alignment: .top, spacing: 12) {
+            Image(systemName: attention.symbolName)
+                .font(.system(size: 14, weight: .medium)).foregroundStyle(tint)
+                .frame(width: 18).padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(attention.title).font(AppTheme.font(size: 12, weightValue: 600)).foregroundStyle(AppTheme.ink)
+                Text(attention.detail).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 16)
+            Button(attention.actionTitle) { repair(attention) }
+                .buttonStyle(WorkspaceSelectionStyle(primary: true))
+                .disabled(repairing || manager.loginAccountID != nil)
+        }
+        .padding(.leading, 27).padding(.trailing, 30).padding(.vertical, 12)
+        .background(tint.opacity(0.06))
+        .overlay(alignment: .leading) { Rectangle().fill(tint).frame(width: 3) }
+        .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(attention.title). \(attention.detail)")
+    }
+
+    private static func attentionTint(_ kind: AccountAttention.Kind) -> Color {
+        switch kind {
+        case .keychainAccess, .reconnect: return Color(hex: 0xB3261E)
+        case .switchPaused, .queueEmpty: return Color(hex: 0x8A5300)
+        }
+    }
+
+    /// The quiet line under the banner: what is running, what is queued, and
+    /// whether a switch would work if it were needed this minute.
+    private var healthLine: some View {
+        HStack(spacing: 7) {
+            Circle().fill(manager.health.isSwitchReady ? Color(hex: 0x1F7A44) : AppTheme.muted)
+                .frame(width: 6, height: 6)
+            Text(manager.healthSummary).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                .lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 30).padding(.vertical, 8)
+        .background(AppTheme.paper)
+        .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func repair(_ attention: AccountAttention) {
+        guard !repairing else { return }
+        // Nothing the app can do for them: open the flow that can.
+        guard attention.kind != .queueEmpty else { showingAdd = true; return }
+        repairing = true
+        Task {
+            await manager.repairAttention()
+            repairing = false
+        }
+    }
+
     private func noticeBanner(_ notice: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "info.circle")
@@ -768,6 +832,28 @@ private struct RotationSettingsView: View {
             }
             .padding(16).background(AppTheme.soft, in: RoundedRectangle(cornerRadius: 8))
 
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Switch before the cut")
+                    Spacer()
+                    Text("\(Int(manager.switchAheadMinutes)) min")
+                        .font(AppTheme.font(size: 12, weightValue: 650)).monospacedDigit()
+                }
+                Slider(value: Binding(
+                    get: { manager.switchAheadMinutes },
+                    set: { value in
+                        do { try manager.setSwitchAheadMinutes(value) }
+                        catch { reportError(error.localizedDescription) }
+                    }
+                ), in: 5...60, step: 5)
+                .accessibilityLabel(String(format: NSLocalizedString("Switch %d min before the cut", comment: "Switch-ahead control"),
+                                           Int(manager.switchAheadMinutes)))
+                Text("Builder Nutch watches how fast the account is being used and moves on this long before it would stop working.")
+                    .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(16).background(AppTheme.soft, in: RoundedRectangle(cornerRadius: 8))
+
             if let activeProvider {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
@@ -819,7 +905,7 @@ private struct RotationSettingsView: View {
                 Button("Done") { dismiss() }.buttonStyle(WorkspaceSelectionStyle(primary: true))
             }
         }
-        .padding(26).frame(width: 600, height: 560)
+        .padding(26).frame(width: 600, height: 680)
         .background(AppTheme.surface).foregroundStyle(AppTheme.ink).tint(AppTheme.ink)
     }
 

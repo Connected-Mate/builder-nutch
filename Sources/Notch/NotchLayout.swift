@@ -310,6 +310,29 @@ enum NotchLayout {
         return height
     }
 
+    /// The alert card: a header, the detail at whatever it wraps to, and the
+    /// line saying what clicking does.
+    ///
+    /// Worked out here rather than left to SwiftUI for the same reason as
+    /// `cardHeight` — the shell is given its height explicitly so the tail
+    /// stays welded to it while the card is still gliding into place.
+    static func attentionCardHeight(detail: String) -> CGFloat {
+        let header = max(glyphSize, cardTitleLineHeight)
+        return 2 * cardPadding + header
+            + headerToBlock + min(bodyTextHeight(detail), attentionDetailLines * cardBodyLineHeight)
+            + sessionRowGap + cardBodyLineHeight
+    }
+
+    /// How much of the detail the alert card will show.
+    ///
+    /// Capped, unlike the status message on a usage card, because this card has
+    /// a line *after* the detail — the one saying what clicking does. Text is
+    /// measured in the system font and drawn in Bricolage, so a long detail can
+    /// wrap one line further than the budget expected, and what falls off the
+    /// bottom of a clipped card is always the last thing on it. Better a
+    /// truncated sentence than a missing instruction.
+    static let attentionDetailLines: CGFloat = 3
+
     /// The automatic handoff receipt always has a two-line message: the event
     /// label, followed by the old and new account names.
     static func automaticSwitchCardHeight(identitySubtitle: Bool) -> CGFloat {

@@ -24,6 +24,28 @@ final class NotchWindowController {
     private var visibility: NotchVisibility = .onHover
     private var visibilityChange = 0
 
+    /// Whether the notch shows anything at all while folded.
+    ///
+    /// Auto-hide means "not in the way", not "unreachable" — so while something
+    /// needs doing, the resting handle stays out. That is the whole delivery
+    /// mechanism for the red: hidden entirely, the alert skin would be painted
+    /// onto a panel nobody can see, and the first the user heard of the problem
+    /// would be a notification an hour later.
+    ///
+    /// Off is a stronger claim, and an alert does not overrule it. Somebody who
+    /// switched the notch off asked for nothing on screen; they still get the
+    /// escalation, which is the part they did not switch off.
+    private var restingIsVisible: Bool {
+        switch visibility {
+        case .alwaysShow, .onHover: return true
+        case .autoHide:             return model.attention != nil
+        case .hidden:               return false
+        }
+    }
+
+    /// Whether the panel should be on screen right now, folded or not.
+    private var wantsPanelOnScreen: Bool { restingIsVisible || model.isExpanded }
+
     init(cursorLocation: @escaping () -> CGPoint = { NSEvent.mouseLocation },
          automaticSwitchDuration: TimeInterval = 4.5) {
         self.cursorLocation = cursorLocation
@@ -112,6 +134,28 @@ final class NotchWindowController {
             }
             .store(in: &cancellables)
 
+        // Raising or clearing a problem changes whether an auto-hidden notch
+        // is on screen at all, and changes what the pointer can reach. Neither
+        // follows from a redraw, so both are asked for here.
+        model.$attention
+            .map { $0?.id }
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                // A turn later, deliberately. `@Published` notifies in
+                // `willSet`, so reading the model back from inside the sink
+                // still sees the previous alert — and both of the calls below
+                // are decisions *about* the current one.
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        self.applyRestingVisibility()
+                        self.updateInteractiveRects()
+                    }
+                }
+            }
+            .store(in: &cancellables)
+
         model.$accountPicker
             .map { $0?.accounts.count }
             .removeDuplicates()
@@ -191,7 +235,7 @@ final class NotchWindowController {
             container.addSubview(hosting)
             panel.contentView = container
             panel.ignoresMouseEvents = true
-            if visibility != .hidden, visibility != .autoHide || model.isExpanded {
+            if wantsPanelOnScreen {
                 panel.orderFrontRegardless()
             }
             self.panel = panel
@@ -203,8 +247,26 @@ final class NotchWindowController {
             Log.usage.debug("panel \(NSStringFromRect(panel.frame), privacy: .public) on screen \(NSStringFromRect(screen.frame), privacy: .public)")
         }
         updateInteractiveRects()
-        if visibility == .hidden || (visibility == .autoHide && !model.isExpanded) {
-            panel?.orderOut(nil)
+        applyRestingVisibility()
+    }
+
+    /// Put the panel on screen, or take it off, according to what the mode and
+    /// any standing alert between them ask for.
+    ///
+    /// One place rather than the three inline tests it replaces: whether the
+    /// notch is on screen at rest now depends on two things instead of one, and
+    /// three copies of that pair is three chances for the alert to be visible
+    /// in one code path and not in another.
+    private func applyRestingVisibility() {
+        guard let panel else { return }
+        if wantsPanelOnScreen {
+            // Only when it is not already up. Re-asserting the front on every
+            // relocate would raise the panel out from under an edge crossfade
+            // that is still running, and `alphaValue` is not this method's to
+            // touch — `setExpanded` and `apply(_:)` own it.
+            if !panel.isVisible { panel.orderFrontRegardless() }
+        } else {
+            panel.orderOut(nil)
         }
     }
 
@@ -295,14 +357,38 @@ final class NotchWindowController {
         )
     }
 
+    /// The alert card's own region, on the same terms as `tooltipRect` — the
+    /// card, its tail, and the gap the pointer has to cross to reach it.
+    private func attentionRect(index: Int, alert: NotchAlert) -> CGRect? {
+        guard model.snapshots.indices.contains(index) else { return nil }
+        let cardHeight = NotchLayout.attentionCardHeight(detail: alert.detail)
+        let cardAcross = model.edge.isVertical ? NotchLayout.cardWidth : cardHeight
+        let cardAlong = model.edge.isVertical ? cardHeight : NotchLayout.cardWidth
+        let centre = model.slack + model.ringCenter(index: index)
+        return placement.rect(
+            along: centre - cardAlong / 2,
+            across: model.contentInset + NotchLayout.bodyDepth(for: model.edge),
+            length: cardAlong,
+            depth: NotchLayout.tailGap + NotchLayout.tailLength + cardAcross
+        )
+    }
+
     private func updateInteractiveRects() {
-        guard visibility != .hidden, visibility != .autoHide || model.isExpanded else {
+        guard wantsPanelOnScreen else {
             hostingView?.interactiveRects = []
             panel?.ignoresMouseEvents = true
             return
         }
         var rects = [liveRect]
         if model.isExpanded, let index = model.selectedIndex, let card = tooltipRect(index: index) {
+            rects.append(card)
+        }
+        // The alert card is shown without being asked for, so it also has to
+        // be reachable without being asked for: sliding onto it must not fold
+        // the notch out from under the pointer.
+        if model.showsAttentionCard, let alert = model.attention,
+           let index = model.attentionIndex,
+           let card = attentionRect(index: index, alert: alert) {
             rects.append(card)
         }
         hostingView?.interactiveRects = rects
@@ -457,8 +543,20 @@ final class NotchWindowController {
         let overTooltip = model.selectedIndex
             .flatMap(tooltipRect(index:))
             .map { model.isExpanded && $0.contains(local) } ?? false
+        // Only while the card is actually up. Answering for the region it
+        // *would* occupy would make it appear under a pointer that had never
+        // been near the notch — which under Always show is a panel arriving
+        // from nowhere in the middle of the screen.
+        let overAlert: Bool = {
+            guard model.showsAttentionCard, let alert = model.attention,
+                  let index = model.attentionIndex,
+                  let rect = attentionRect(index: index, alert: alert) else { return false }
+            return rect.contains(local)
+        }()
         let overNotch = liveRect.contains(local)
-        setExpanded(overNotch || overTooltip)
+        let hovering = overNotch || overTooltip || overAlert
+        setExpanded(hovering)
+        if model.isHoveringNotch != hovering { model.isHoveringNotch = hovering }
 
         let target = model.isExpanded && notchRect.contains(local)
             ? cellIndex(along: placement.along(of: local)) : nil
@@ -503,7 +601,7 @@ final class NotchWindowController {
                 }
                 self.setPointing(false)
                 self.updateInteractiveRects()
-                if self.visibility == .autoHide { self.panel?.orderOut(nil) }
+                self.applyRestingVisibility()
             }
         }
         foldWork = work
@@ -530,9 +628,12 @@ final class NotchWindowController {
 
     /// A ring click toggles its details. Background clicks retain the pin gesture.
     func handleClick() {
-        guard visibility != .hidden, visibility != .autoHide || model.isExpanded else { return }
+        guard wantsPanelOnScreen else { return }
         guard let panel, model.isExpanded else {
-            // Clicking the resting handle opens it without pinning it.
+            // Clicking the resting handle opens it without pinning it — unless
+            // the handle is red, in which case it is a button to the problem
+            // and unfolding a bar of readings is not what was being reached for.
+            if model.attention != nil { onOpenSettings?(); return }
             setExpanded(true)
             return
         }
@@ -542,6 +643,15 @@ final class NotchWindowController {
         // cells — otherwise the cell band nearest the foot of the stack swallows
         // it and clicking the gear refetches a provider instead.
         if isOverHandle(local) {
+            onOpenSettings?()
+            return
+        }
+        // While something needs doing the whole notch is one button. The point
+        // of going red is that it takes you to the problem; making the user
+        // first work out which of four rings to hit would give that back.
+        // The account picker is left alone — it is an explicit choice already
+        // in progress, and cancelling it out from under a click would be worse.
+        if model.attention != nil, model.accountPicker == nil, notchRect.contains(local) {
             onOpenSettings?()
             return
         }
@@ -570,6 +680,13 @@ final class NotchWindowController {
     func toggleDetails(index: Int) {
         guard visibility != .hidden, model.isExpanded,
               model.snapshots.indices.contains(index) else { return }
+        // Reached by the accessibility action as well as by a click, and the
+        // two must land in the same place: while something needs doing, this
+        // ring is a way to the problem.
+        if model.attention != nil, model.accountPicker == nil {
+            onOpenSettings?()
+            return
+        }
         model.accountPicker = nil
         if model.automaticSwitch != nil {
             automaticSwitchWork?.cancel()
@@ -678,7 +795,7 @@ final class NotchWindowController {
             model.edge = edge
             relocate()
             panel?.alphaValue = 1
-            panel?.orderOut(nil)
+            applyRestingVisibility()
             return
         }
         guard let panel else {   // before there is anything on screen to fade
@@ -715,7 +832,7 @@ final class NotchWindowController {
                 panel.alphaValue = 1
                 guard self.visibility != .hidden,
                       self.visibility != .autoHide else {
-                    panel.orderOut(nil)
+                    self.applyRestingVisibility()
                     return
                 }
 
@@ -779,7 +896,9 @@ final class NotchWindowController {
             model.accountPicker = nil
             // Ordered out rather than made transparent. An invisible panel that
             // still takes the screen edge would keep swallowing the pointer.
-            panel?.orderOut(nil)
+            // Auto-hide with a problem standing is the exception, and
+            // `applyRestingVisibility` is where that exception lives.
+            applyRestingVisibility()
         }
         setPointing(false)
         updateInteractiveRects()
@@ -790,6 +909,7 @@ final class NotchWindowController {
         model.selectedIndex = nil
         model.accountPicker = nil
         model.isHoveringSettings = false
+        model.isHoveringNotch = false
         setPointing(false)
     }
 
@@ -799,8 +919,7 @@ final class NotchWindowController {
     /// held open by a standing choice, and letting a click release it meant
     /// the setting said one thing and the notch did another.
     func togglePinned() {
-        guard !model.isAlwaysOn, visibility != .hidden,
-              visibility != .autoHide || model.isExpanded else { return }
+        guard !model.isAlwaysOn, wantsPanelOnScreen else { return }
         model.isPinned.toggle()
         if model.isPinned {
             foldWork?.cancel()

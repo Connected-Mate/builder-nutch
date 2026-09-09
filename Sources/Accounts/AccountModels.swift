@@ -116,12 +116,21 @@ struct AutomaticAccountSwitch: Identifiable, Equatable {
 struct ManagedAccountState {
     var isConnected = false
     var email: String? = nil
+    /// An opaque digest of whatever the provider itself calls this subscription,
+    /// for vendors that expose no address. Never a nickname or a typed hint:
+    /// two rows only merge on something the provider confirmed.
+    var identity: String? = nil
     var plan: String? = nil
     var windows: [LimitWindow] = []
     var refreshedAt: Date? = nil
     var message: String? = nil
     var isBusy = false
     var requiresKeychainAccess = false
+    /// The saved login expired or was revoked. Only a fresh sign-in fixes this,
+    /// so it must be surfaced long before a rotation needs the account.
+    var requiresSignIn = false
+    /// True when this account cannot take a session as it stands.
+    var needsAttention: Bool { requiresKeychainAccess || requiresSignIn || !isConnected }
     var remainingPercent: Double? {
         let fractions = windows.compactMap(\.usedFraction)
         guard !fractions.isEmpty else { return nil }
@@ -162,17 +171,36 @@ enum AccountSelection {
     /// Only a fresh limit reading from the actual system account triggers rotation.
     static func systemClaude(accounts: [ManagedAccount], states: [UUID: ManagedAccountState],
                              order: [UUID], currentID: UUID, preferredID: UUID?,
-                             thresholdPercent: Double, now: Date = Date()) -> ManagedAccount? {
+                             thresholdPercent: Double,
+                             forecasts: [UUID: UsageForecast] = [:],
+                             switchAheadMinutes: Double = 20,
+                             now: Date = Date()) -> ManagedAccount? {
         guard let current = states[currentID], current.isConnected, !current.isBusy,
-              current.isFresh(at: now), let remaining = current.remainingPercent,
-              remaining <= min(max(thresholdPercent, 0), 100) + 0.001 else { return nil }
-        if let preferredID, preferredID != currentID,
+              current.isFresh(at: now), let remaining = current.remainingPercent else { return nil }
+        let threshold = min(max(thresholdPercent, 0), 100)
+        // The person asked for this account. Once its own window has rolled over
+        // it takes its place back, rather than waiting for the stand-in to run out.
+        if let preferredID, preferredID != currentID, forecasts[preferredID]?.recoveredAt != nil,
            let preferred = best(provider: .claude, accounts: accounts.filter { $0.id == preferredID }, states: states, now: now),
-           (states[preferredID]?.remainingPercent ?? 0) > thresholdPercent + 0.001 {
+           (states[preferredID]?.remainingPercent ?? 0) > max(remaining, threshold) + 0.001 {
             return preferred
         }
+        // Switch on whichever comes first: the quota floor, or the moment the
+        // measured burn rate says this window has less than a switch's notice left.
+        let predicted = forecasts[currentID]?.minutesUntilExhausted(at: now)
+        let runningOut = predicted.map { $0 <= max(switchAheadMinutes, 0) } ?? false
+        let spent = remaining <= threshold + 0.001
+        guard spent || runningOut else { return nil }
+        if let preferredID, preferredID != currentID,
+           let preferred = best(provider: .claude, accounts: accounts.filter { $0.id == preferredID }, states: states, now: now),
+           (states[preferredID]?.remainingPercent ?? 0) > threshold + 0.001 {
+            return preferred
+        }
+        // A forecast switch happens while the account still clears the floor, so
+        // the current account must not be allowed to win the rotation again.
         let candidate = rotating(provider: .claude, accounts: accounts, states: states,
-            order: order, currentID: currentID, thresholdPercent: thresholdPercent, now: now)
+            order: order, currentID: currentID, thresholdPercent: threshold,
+            keepCurrent: spent, now: now)
         return candidate?.id == currentID ? nil : candidate
     }
 
@@ -203,6 +231,7 @@ enum AccountSelection {
         order: [UUID],
         currentID: UUID?,
         thresholdPercent: Double,
+        keepCurrent: Bool = true,
         now: Date = Date()
     ) -> ManagedAccount? {
         guard provider.supportsAutomaticSelection else { return nil }
@@ -224,7 +253,7 @@ enum AccountSelection {
         let clearsThreshold: (ManagedAccount) -> Bool = { account in
             (states[account.id]?.remainingPercent ?? 0) > threshold + 0.001
         }
-        if let currentID, let current = byID[currentID], clearsThreshold(current) { return current }
+        if keepCurrent, let currentID, let current = byID[currentID], clearsThreshold(current) { return current }
         // Keep the exhausted account's position in the full order. Removing it
         // before finding the index incorrectly restarted rotation at the first row.
         let fullOrder = order + accounts.filter { $0.provider == provider && !order.contains($0.id) }
@@ -232,9 +261,19 @@ enum AccountSelection {
         let currentIndex = currentID.flatMap { fullOrder.firstIndex(of: $0) }
         let wrapped = (0..<fullOrder.count).compactMap { offset in
             byID[fullOrder[((currentIndex ?? -1) + 1 + offset) % fullOrder.count]]
+        }.filter { keepCurrent || $0.id != currentID }
+        // Among the accounts with room, the fullest one buys the person the most
+        // working time. Ties keep the order they chose, so rotation stays theirs.
+        if let ready = fullest(wrapped.filter(clearsThreshold), states: states) { return ready }
+        return fullest(cycle.filter { keepCurrent || $0.id != currentID }, states: states)
+    }
+
+    /// First entry with the highest remaining quota, preserving the given order.
+    private static func fullest(_ accounts: [ManagedAccount], states: [UUID: ManagedAccountState]) -> ManagedAccount? {
+        accounts.reduce(nil) { best, next in
+            guard let best else { return next }
+            return (states[next.id]?.remainingPercent ?? 0) > (states[best.id]?.remainingPercent ?? 0) ? next : best
         }
-        return wrapped.first(where: clearsThreshold)
-            ?? cycle.max { (states[$0.id]?.remainingPercent ?? 0) < (states[$1.id]?.remainingPercent ?? 0) }
     }
 }
 
@@ -259,4 +298,45 @@ struct AccountAttention: Equatable, Identifiable {
     let detail: String
     let raisedAt: Date
     var id: String { kind.rawValue + (accountID?.uuidString ?? "") }
+}
+
+extension AccountAttention {
+    /// The single thing the button says. One attention, one action — a banner
+    /// that offers a choice is a banner nobody acts on.
+    var actionTitle: String {
+        switch kind {
+        case .reconnect: return NSLocalizedString("Reconnect", comment: "Attention action")
+        case .switchPaused: return NSLocalizedString("Retry", comment: "Attention action")
+        case .queueEmpty: return NSLocalizedString("Add account", comment: "Attention action")
+        case .keychainAccess: return NSLocalizedString("Allow access", comment: "Attention action")
+        }
+    }
+
+    var symbolName: String {
+        switch kind {
+        case .reconnect: return "person.crop.circle.badge.exclamationmark"
+        case .switchPaused: return "pause.circle"
+        case .queueEmpty: return "tray"
+        case .keychainAccess: return "lock.circle"
+        }
+    }
+}
+
+/// A plain-language answer to "is my Mac going to keep working?". Published by
+/// `AccountManager` next to `attention`: attention is what to fix, health is
+/// what is true right now.
+struct AccountHealth: Equatable {
+    var currentID: UUID?
+    var currentName: String?
+    var currentRemainingPercent: Double?
+    /// Minutes of headroom predicted for the account in use, when a trend exists.
+    var currentMinutesRemaining: Double?
+    var nextID: UUID?
+    var nextName: String?
+    var nextRemainingPercent: Double?
+    var nextMinutesRemaining: Double?
+    /// True when an automatic switch would succeed if it were needed right now.
+    var isSwitchReady = false
+    /// Why a switch would not happen, in the person's words. Nil when ready.
+    var reason: String?
 }

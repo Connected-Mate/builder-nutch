@@ -54,6 +54,10 @@ private struct TooltipShell<Content: View>: View {
     let height: CGFloat
     /// Which side of the notch the card is on, so the tail goes on the other one.
     let direction: NotchEdge.TooltipDirection
+    /// What the tail is filled with. The card's own black by default; the alert
+    /// card hands in a gradient instead, so the join to a notch that has gone
+    /// red is a continuation rather than a seam.
+    var tailStyle: AnyShapeStyle = AnyShapeStyle(Palette.card)
     @ViewBuilder let content: Content
 
     private var card: some View {
@@ -86,7 +90,7 @@ private struct TooltipShell<Content: View>: View {
         // The tail is deliberately outside the clip: it is part of the card's
         // silhouette, not of its contents.
         return TooltipTail(direction: direction)
-            .fill(Palette.card)
+            .fill(tailStyle)
             .frame(width: size.width, height: size.height)
     }
 
@@ -253,7 +257,9 @@ private struct LimitWindowRow: View {
 
     /// Blank rather than invented: some providers never say when the window rolls.
     private var resetText: String {
-        window.resetsAt.map { ResetCopy.text(for: $0, now: now) } ?? ""
+        window.resetsAt.map {
+            ResetCopy.text(for: $0, now: now, derived: window.isResetDerived)
+        } ?? ""
     }
 
     var body: some View {
@@ -516,5 +522,78 @@ struct TooltipCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+    }
+}
+
+/// What the notch says when it has gone red.
+///
+/// The one card this app volunteers. Everywhere else the notch shows details
+/// only when a provider is explicitly clicked, on purpose — hovering the edge
+/// of the screen should not throw a panel at you. An alert is the exception it
+/// exists for: the point of the red edge is that the problem finds you, and a
+/// red shape that will not say what is wrong until you guess where to click is
+/// a worse thing than no red shape at all.
+///
+/// It leaves the moment a provider's own details are opened, so the two never
+/// argue over the same space.
+struct AttentionCard: View {
+    let alert: NotchAlert
+    var direction: NotchEdge.TooltipDirection = .leading
+
+    /// The same figure the layout uses, so what is drawn and what is reachable
+    /// cannot drift apart.
+    private var height: CGFloat {
+        NotchLayout.attentionCardHeight(detail: alert.detail)
+    }
+
+    /// Said plainly, because the click is not otherwise discoverable: the whole
+    /// notch becomes one button while this is up, and nothing about a black bar
+    /// announces that.
+    private static let hint = NSLocalizedString(
+        "Click the notch to open Builder Nutch.",
+        comment: "What clicking the alerted notch does"
+    )
+
+    var body: some View {
+        TooltipShell(height: height, direction: direction,
+                     tailStyle: AnyShapeStyle(NotchAlertSkin.tailGradient(for: direction))) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: NotchLayout.headerGap) {
+                    // Sized into the same box a provider mark occupies, not by
+                    // point size: a symbol set to 17pt draws to its cap height
+                    // and comes out visibly smaller than the 17pt glyph beside
+                    // it on every other card.
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: NotchLayout.glyphSize, height: NotchLayout.glyphSize)
+                        .foregroundStyle(Palette.alert)
+                    Text(alert.title)
+                        .font(Typography.cardTitle)
+                        .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 0)
+                }
+
+                Text(alert.detail)
+                    .font(Typography.cardBody)
+                    .foregroundStyle(Palette.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(Int(NotchLayout.attentionDetailLines))
+                    .padding(.top, NotchLayout.headerToBlock)
+
+                Text(Self.hint)
+                    .font(Typography.cardBody)
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .padding(.top, NotchLayout.sessionRowGap)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(alert.title)
+        .accessibilityValue(alert.detail)
+        .accessibilityHint(Self.hint)
     }
 }

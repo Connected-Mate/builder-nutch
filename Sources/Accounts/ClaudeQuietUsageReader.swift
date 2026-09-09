@@ -10,12 +10,17 @@ actor ClaudeQuietUsageReader: ClaudeAccountReading {
     private let credentials: ClaudeSystemCredentials
     private let session: URLSession
     private let now: () -> Date
+    /// Renew a login two hours before it expires, so a queued account is never
+    /// found to be stale at the moment a rotation needs it.
+    private let renewAhead: TimeInterval
     private var retryAfter: [String: Date] = [:]
     private let endpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
 
-    init(credentials: ClaudeSystemCredentials, session: URLSession? = nil, now: @escaping () -> Date = Date.init) {
+    init(credentials: ClaudeSystemCredentials, session: URLSession? = nil, now: @escaping () -> Date = Date.init,
+         renewAhead: TimeInterval = 2 * 3600) {
         self.credentials = credentials
         self.now = now
+        self.renewAhead = renewAhead
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil
         configuration.urlCredentialStorage = nil
@@ -31,9 +36,10 @@ actor ClaudeQuietUsageReader: ClaudeAccountReading {
             throw UsageProviderError.rateLimited(retryAfter: until.timeIntervalSince(now()))
         }
         let credentials = self.credentials
+        let renewAhead = self.renewAhead
         let login = try await withTaskCancellationHandler(operation: {
             try await Task.detached(priority: .utility) {
-                try credentials.subscriptionLogin(at: location, cancellation: cancellation)
+                try credentials.subscriptionLogin(at: location, cancellation: cancellation, renewAhead: renewAhead)
             }.value
         }, onCancel: { cancellation.cancel() })
         guard !cancellation.isCancelled, !Task.isCancelled else { throw ManagedAccountError.cancelled }

@@ -39,6 +39,15 @@ enum NotchMotion {
     /// accelerates as it goes.
     static let merge = Animation.easeIn(duration: 0.2)
 
+    /// The red arriving in the notch, and leaving it again.
+    ///
+    /// An ease rather than a spring, and the one place in this file that is:
+    /// a colour has no mass and nothing to overshoot, and a spring on it just
+    /// makes the red arrive late. Ease-out-quart, so it comes on quickly and
+    /// settles — the notch should already be red by the time you have looked
+    /// across at it, without anything having flashed on.
+    static let alertRaise = Animation.timingCurve(0.25, 1, 0.5, 1, duration: 0.4)
+
     /// Each cell trails the one above it, so the stack unfurls rather than
     /// appearing all at once. Capped so a long list never feels sluggish.
     static func stagger(index: Int) -> Animation {

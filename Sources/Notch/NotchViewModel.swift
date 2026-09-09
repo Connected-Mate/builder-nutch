@@ -24,6 +24,79 @@ final class NotchViewModel: ObservableObject {
     /// Ticked on refresh so the "Resets in N min" copy stays honest.
     @Published var now: Date = Date()
 
+    /// Something that needs doing, published by the account layer.
+    ///
+    /// While it is set the notch wears its alert skin, the resting handle stays
+    /// out even under Auto-hide, and a click anywhere on it goes to the problem
+    /// rather than to a provider's usage.
+    @Published var attention: NotchAlert? {
+        didSet {
+            guard attention?.id != oldValue?.id else { return }
+            // A problem that was fixed and later comes back is a new event and
+            // deserves the flash again, so the record only ever covers the one
+            // standing now.
+            flashed.removeAll()
+            attentionFlash = nil
+            armAttentionFlash()
+        }
+    }
+
+    /// The problem whose flash should be playing, or nil.
+    ///
+    /// Held apart from `attention` because the two are different kinds of
+    /// thing: the alert is a state that lasts until somebody fixes it, the
+    /// flash is a single event. Raising a problem while the notch is folded
+    /// would otherwise play the flash to a closed shape and leave nothing for
+    /// the first look.
+    @Published private(set) var attentionFlash: String?
+    private var flashed: Set<String> = []
+
+    /// Called once the readings are actually on screen. Plays the flash a
+    /// single time per problem, the first moment there is somebody to see it.
+    func armAttentionFlash() {
+        guard isExpanded, let attention, !flashed.contains(attention.id) else { return }
+        flashed.insert(attention.id)
+        attentionFlash = attention.id
+    }
+
+    /// The flash this cell should carry: only the ring being complained about,
+    /// or every ring when the problem belongs to no single account.
+    func attentionFlash(forSnapshot id: String) -> String? {
+        guard let attentionFlash, let attention,
+              attention.id == attentionFlash,
+              attention.concerns(snapshotID: id) else { return nil }
+        return attentionFlash
+    }
+
+    /// The pointer is on the notch, or on the card the notch is showing.
+    ///
+    /// Deliberately not `isExpanded`, which under Always show is simply never
+    /// false. Without this the alert card would sit on the desktop for the
+    /// whole hour under that one setting — a panel nobody asked for, parked
+    /// over whatever they were doing.
+    @Published var isHoveringNotch = false
+
+    /// Whether the notch is currently volunteering what is wrong.
+    ///
+    /// The one thing this app shows without being asked, and it is kept to a
+    /// hover: a red edge that will not say what it means until you guess where
+    /// to click is worse than no red edge, and a card that will not go away is
+    /// worse than both.
+    var showsAttentionCard: Bool {
+        attention != nil && isExpanded && isHoveringNotch
+            && selectedIndex == nil && accountPicker == nil
+    }
+
+    /// Which cell the alert card points at. The first one when the problem is
+    /// the app's rather than an account's — the card still has to be anchored
+    /// somewhere, and the head of the stack is where the eye starts.
+    var attentionIndex: Int? {
+        guard attention != nil, !snapshots.isEmpty else { return nil }
+        if let id = attention?.snapshotID,
+           let index = snapshots.firstIndex(where: { $0.id == id }) { return index }
+        return 0
+    }
+
     /// Whether the notch is open or folded away to its pill.
     @Published var isExpanded = false
     /// Clicked open, so it stays open until clicked shut again. A gesture,

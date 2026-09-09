@@ -21,6 +21,10 @@ struct ProviderRing: View {
     var activity: ActivitySummary?
     /// A fetch this cell asked for, in flight.
     var isRefreshing: Bool = false
+    /// Names a newly raised problem this ring is the subject of, and nothing
+    /// else. Set, the glyph flashes three times and then holds; the red
+    /// gradient behind it is what carries the state from there on.
+    var attentionFlash: String? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var spin: Double = 0
@@ -66,6 +70,10 @@ struct ProviderRing: View {
                     .foregroundStyle(Palette.textPrimary)
                     // A spent limit dims its glyph so the ring reads as "waiting".
                     .opacity(band == .exhausted ? 0.35 : 1)
+                    // The flash goes on the glyph alone, not on the ring: the
+                    // ring is a measurement, and a measurement that pulses
+                    // reads as a number nobody is sure of.
+                    .attentionFlash(trigger: attentionFlash)
             }
             .opacity(isStale ? 0.45 : 1)
 
@@ -165,6 +173,8 @@ struct ProviderCell: View {
     var activity: ActivitySummary?
     var isRefreshing: Bool = false
     var displayMode: UsageDisplayMode = .used
+    /// Passed straight through to the ring's glyph — see `ProviderRing`.
+    var attentionFlash: String? = nil
 
     /// A dash, not "0%": nothing read is not the same as nothing used.
     private var percentText: String {
@@ -180,7 +190,8 @@ struct ProviderCell: View {
                 isStale: snapshot.status.isStale || !snapshot.hasReading,
                 isBlocked: snapshot.block != nil,
                 activity: activity,
-                isRefreshing: isRefreshing
+                isRefreshing: isRefreshing,
+                attentionFlash: attentionFlash
             )
             Text(percentText)
                 .font(Typography.percent)

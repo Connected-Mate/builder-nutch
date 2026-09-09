@@ -37,6 +37,18 @@ final class Preferences: ObservableObject {
 
     @Published private(set) var hasChosenUsageDisplay: Bool
 
+    /// Whether macOS says something when an account passes half, three quarters
+    /// or 85% of a limit.
+    ///
+    /// On by default, and deliberately so. Somebody paying for several
+    /// subscriptions installed this to stop being surprised by a limit; an
+    /// off-by-default warning is one they would find out about the first time
+    /// it would have helped. Three points across a whole window is not a lot to
+    /// hear from an app, and the switch is right here for anyone who disagrees.
+    @Published var usageAlerts: Bool {
+        didSet { defaults.set(usageAlerts, forKey: Keys.usageAlerts) }
+    }
+
     /// The version whose changes have already been shown.
     ///
     /// Written when the What's New dialogue is dismissed rather than when it
@@ -68,6 +80,7 @@ final class Preferences: ObservableObject {
         static let lastSeenVersion = "lastSeenVersion"
         static let usageDisplayMode = "usageDisplayMode"
         static let hasChosenUsageDisplay = "hasChosenUsageDisplay"
+        static let usageAlerts = "usageAlerts"
     }
 
     /// True the very first time this copy runs, and never again.
@@ -124,6 +137,9 @@ final class Preferences: ObservableObject {
         self.usageDisplayMode = defaults.string(forKey: Keys.usageDisplayMode)
             .flatMap(UsageDisplayMode.init(rawValue:)) ?? .remaining
         self.hasChosenUsageDisplay = defaults.bool(forKey: Keys.hasChosenUsageDisplay)
+        // Absent means never chosen, and never chosen means on — `bool(forKey:)`
+        // alone would read a missing key as a deliberate "no".
+        self.usageAlerts = defaults.object(forKey: Keys.usageAlerts) as? Bool ?? true
         // Absent means nothing has been shown yet, which is true of a fresh
         // install — so the current release reads as new to it.
         self.lastSeenVersion = defaults.string(forKey: Keys.lastSeenVersion)

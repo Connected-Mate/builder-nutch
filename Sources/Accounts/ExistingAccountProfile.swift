@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Darwin
 
 /// Stable source reference, never a copied login. Discovery only examines conventional
@@ -67,6 +68,43 @@ struct ExistingAccountProfile: Codable, Equatable {
               let access = object["access_token"] as? String,
               let refresh = object["refresh_token"] as? String else { return .unknown }
         return access.isEmpty && refresh.isEmpty ? .signedOut : .present
+    }
+
+    /// Which Moonshot subscription this profile holds, as an opaque digest.
+    ///
+    /// One subscription signed in on two profiles produces two different device
+    /// registrations but the same account claim, which is why matching on the
+    /// directory or on an email never caught the duplicate. The claim itself is
+    /// hashed and never stored, logged or shown: only the comparison matters.
+    /// Reads the same file `kimiAuthenticationStatus()` already opens, so this
+    /// asks for no new access. Anything unreadable returns nil, and an
+    /// unverifiable identity must never merge two real subscriptions.
+    func kimiSubscriptionFingerprint() -> String? {
+        guard kimiAuthenticationStatus() == .present, let root = try? validatedDirectory() else { return nil }
+        let credentials = root.appendingPathComponent("credentials/kimi-code.json")
+        guard let data = try? Data(contentsOf: credentials, options: .mappedIfSafe), data.count <= 1_048_576,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let token = object["access_token"] as? String else { return nil }
+        let segments = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard segments.count == 3, let claims = Self.decodeJWTSegment(segments[1]) else { return nil }
+        guard let subject = (claims["user_id"] as? String) ?? (claims["sub"] as? String),
+              !subject.isEmpty, subject.count <= 200 else { return nil }
+        return Self.digest("kimi:" + subject)
+    }
+
+    static func digest(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// A JWT payload is base64url without padding. Nothing is verified here: the
+    /// token is this Mac's own, and only the account claim is read from it.
+    private static func decodeJWTSegment(_ segment: Substring) -> [String: Any]? {
+        var text = segment.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        guard text.count <= 8192 else { return nil }
+        if text.count % 4 != 0 { text += String(repeating: "=", count: 4 - text.count % 4) }
+        guard let data = Data(base64Encoded: text), data.count <= 65_536,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return object
     }
 }
 

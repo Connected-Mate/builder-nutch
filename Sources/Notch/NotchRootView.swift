@@ -59,13 +59,65 @@ struct NotchRootView: View {
                             y: model.edge.outward.y * Design.px(24)
                         )))
                 }
+
+                // Stands down as soon as a provider's own details are opened,
+                // so the two cards never contest the same space.
+                if model.showsAttentionCard, let alert = model.attention,
+                   let index = model.attentionIndex {
+                    AttentionCard(alert: alert, direction: model.edge.tooltipDirection)
+                        .position(attentionCentre(place, index: index, alert: alert))
+                        .transition(.opacity.combined(with: .offset(
+                            x: model.edge.outward.x * Design.px(24),
+                            y: model.edge.outward.y * Design.px(24)
+                        )))
+                }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
             // Swapping cards is a movement like any other here.
             .animation(motion(NotchMotion.glide), value: model.selectedIndex)
+            .animation(motion(NotchMotion.glide), value: model.attention?.id)
         }
         .animation(motion(NotchMotion.unfold), value: model.isExpanded)
         .environment(\.colorScheme, .dark)
+        // The flash is played to whoever is looking, not to a folded shape:
+        // a problem raised while the notch is shut waits for the first time it
+        // opens. Armed on appearance too, for the Always-show placement, where
+        // opening never happens because it is never closed.
+        .onAppear { model.armAttentionFlash() }
+        .onChange(of: model.isExpanded) { _, _ in model.armAttentionFlash() }
+    }
+
+    /// What VoiceOver reads for one cell.
+    ///
+    /// The problem leads when there is one. Everything else this feature does
+    /// — the red gradient, the flash, the card that appears under the pointer —
+    /// has to be seen or pointed at, and this line is the only place somebody
+    /// who does neither is told anything at all.
+    private func cellValue(_ snapshot: ProviderSnapshot, index: Int) -> String {
+        var parts: [String] = []
+        if let attention = model.attention, attention.concerns(snapshotID: snapshot.id) {
+            parts.append(attention.title)
+            parts.append(attention.detail)
+        }
+        parts.append(snapshot.hasReading
+            ? snapshot.headlineText(for: model.usageDisplayMode) + " " + model.usageDisplayMode.unit
+            : "Usage unavailable")
+        parts.append("Details \(model.selectedIndex == index ? "open" : "closed")")
+        return parts.joined(separator: ". ") + "."
+    }
+
+    /// Where the alert card sits: on the ring it concerns, the same way a
+    /// usage card sits on the ring it belongs to.
+    private func attentionCentre(
+        _ place: NotchPlacement, index: Int, alert: NotchAlert
+    ) -> CGPoint {
+        let card = model.edge.isVertical
+            ? NotchLayout.cardWidth
+            : NotchLayout.attentionCardHeight(detail: alert.detail)
+        return place.point(
+            along: model.slack + model.ringCenter(index: index),
+            across: model.tooltipInset + (NotchLayout.tailLength + card) / 2
+        )
     }
 
     /// Opening and closing are not mirror images. Appearing, the arc waits its
@@ -79,9 +131,22 @@ struct NotchRootView: View {
     }
 
     private func notch(_ place: NotchPlacement) -> some View {
-        SideNotchShape(edge: model.edge, joining: model.joinedNotch)
+        let shape = SideNotchShape(edge: model.edge, joining: model.joinedNotch)
+        return shape
             .fill(Palette.notch)
             .frame(width: model.notchSize.width, height: model.notchSize.height)
+            // The alert skin is a second fill over the black rather than a
+            // swapped one. Two shape styles cannot be interpolated between, so
+            // exchanging them would make the notch change colour in a single
+            // frame; laid over the top, it is one opacity and the red grows in.
+            // Geometry is untouched — same shape, same frame, same clip.
+            .overlay {
+                shape
+                    .fill(NotchAlertSkin.gradient(for: model.edge))
+                    .opacity(model.attention == nil ? 0 : 1)
+                    .animation(motion(NotchMotion.alertRaise), value: model.attention == nil)
+                    .accessibilityHidden(true)
+            }
             // Aligned to the corner where the stack starts *and* the bezel is,
             // then pushed clear of any hardware notch. Centring the contents in
             // a shape that had been made deeper is what put the top of every
@@ -124,7 +189,8 @@ struct NotchRootView: View {
                         snapshot: snapshot,
                         activity: model.activity(for: snapshot.id),
                         isRefreshing: model.refreshing.contains(snapshot.id),
-                        displayMode: model.usageDisplayMode
+                        displayMode: model.usageDisplayMode,
+                        attentionFlash: model.attentionFlash(forSnapshot: snapshot.id)
                     )
                 // Pinned to what the cell claims along the stack, or the drawn
                 // rings stop lining up with the centres `ringCenter` hands to
@@ -134,11 +200,19 @@ struct NotchRootView: View {
                 .frame(width: model.edge.isVertical ? nil : NotchLayout.cellAlong(for: model.edge))
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(snapshot.displayName) usage details")
-                .accessibilityValue("\(snapshot.hasReading ? snapshot.headlineText(for: model.usageDisplayMode) + " " + model.usageDisplayMode.unit : "Usage unavailable"). Details \(model.selectedIndex == index ? "open" : "closed").")
-                .accessibilityHint(NSLocalizedString(
-                    "Click for details. Press and hold to reorder accounts.",
-                    comment: "Provider ring interaction hint"
-                ))
+                .accessibilityValue(cellValue(snapshot, index: index))
+                // What the click actually does, which changes while something
+                // needs doing. A hint that still promised usage details after
+                // the notch had turned into a button to the problem would be
+                // the one part of this feature that lies to the people who
+                // cannot see the red.
+                .accessibilityHint(model.attention == nil
+                    ? NSLocalizedString(
+                        "Click for details. Press and hold to reorder accounts.",
+                        comment: "Provider ring interaction hint")
+                    : NSLocalizedString(
+                        "Click the notch to open Builder Nutch.",
+                        comment: "What clicking the alerted notch does"))
                 .help(Text(NSLocalizedString(
                     "Press and hold to reorder accounts",
                     comment: "Provider ring hover help"

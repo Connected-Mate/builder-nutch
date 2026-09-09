@@ -9,6 +9,9 @@ struct AccountCatalog: Codable {
     /// Optional so catalogs written by older releases decode without migration.
     var rotationOrder: [AccountProvider: [UUID]]? = nil
     var switchThresholdPercent: Double? = nil
+    /// How much notice a forecast switch takes, in minutes. Optional for the
+    /// same reason as the fields above: older catalogs must decode untouched.
+    var switchAheadMinutes: Double? = nil
 }
 
 struct AccountStorage {

@@ -80,4 +80,41 @@ final class AccountProcessShutdownTests: XCTestCase {
         catch { XCTAssertEqual(error.localizedDescription, ManagedAccountError.cancelled.localizedDescription) }
         try await assertExited(child)
     }
+
+    /// A credential transaction that cannot finish must not hold the app open.
+    /// `osascript … quit` reported "User canceled (-128)" because the reply owed
+    /// to macOS waited on this lock with no deadline.
+    private final class BlockingKeychain: ClaudeCredentialKeychain {
+        let entered = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        func read(service: String, account: String) throws -> ClaudeCredentialSnapshot? {
+            entered.signal()
+            release.wait()
+            return nil
+        }
+        func replace(service: String, account: String, expected: ClaudeCredentialSnapshot?, data: Data) throws -> ClaudeCredentialSnapshot {
+            throw ClaudeSystemCredentialError.changedDuringCopy
+        }
+        func restore(service: String, account: String, written: ClaudeCredentialSnapshot, previous: ClaudeCredentialSnapshot?) throws {}
+    }
+
+    func testWaitingForABlockedCredentialTransactionGivesUpInsteadOfHanging() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("stuck-credentials-\(UUID().uuidString)")
+        try AccountStorage.privateDirectory(root)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let location = ClaudeCredentialLocation(directory: root.appendingPathComponent(".claude"), isDefault: true)
+        try AccountStorage.privateDirectory(location.directory)
+        try AccountStorage.write(Data(#"{"oauthAccount":{"accountUuid":"A","organizationUuid":"org","emailAddress":"a@example.test"}}"#.utf8), to: location.configURL)
+        let keychain = BlockingKeychain()
+        let credentials = ClaudeSystemCredentials(keychain: keychain, account: "tester")
+        Thread.detachNewThread { _ = try? credentials.subscriptionLogin(at: location) }
+        XCTAssertEqual(keychain.entered.wait(timeout: .now() + 5), .success)
+
+        let started = Date()
+        XCTAssertFalse(credentials.waitUntilIdle(timeout: 0.4), "A held transaction must report that it is still running")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 3, "Quitting cannot wait on a transaction forever")
+        keychain.release.signal()
+        XCTAssertTrue(credentials.waitUntilIdle(timeout: 5))
+    }
+
 }

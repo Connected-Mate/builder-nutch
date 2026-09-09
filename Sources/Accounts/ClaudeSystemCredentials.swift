@@ -181,10 +181,24 @@ final class ClaudeSystemCredentials {
         let error: Error
     }
     private var renewalFailures: [String: RenewalFailure] = [:]
+    /// When each saved login was last renewed ahead of its expiry. Subscription
+    /// tokens are short-lived, so an unthrottled "renew early" would exchange a
+    /// token on every refresh instead of keeping one warm.
+    private var earlyRenewals: [String: Date] = [:]
+    static let earlyRenewalInterval: TimeInterval = 1800
     private var stopping = false
 
     func requestStop() { lifecycleLock.lock(); stopping = true; lifecycleLock.unlock() }
-    func waitUntilIdle() { lock.lock(); lock.unlock() }
+
+    /// Waits for any credential transaction to finish, but never forever: quitting
+    /// the app must not depend on a network call or a contended storage lock.
+    /// Returns false when the deadline passed with work still in flight.
+    @discardableResult
+    func waitUntilIdle(timeout: TimeInterval = 3) -> Bool {
+        guard lock.lock(before: Date().addingTimeInterval(max(timeout, 0))) else { return false }
+        lock.unlock()
+        return true
+    }
     private func checkRunning() throws {
         lifecycleLock.lock(); defer { lifecycleLock.unlock() }
         if stopping { throw ManagedAccountError.cancelled }
@@ -227,8 +241,14 @@ final class ClaudeSystemCredentials {
 
     /// Fresh credentials remain read-only. Expired credentials are renewed without
     /// starting Claude or permitting any Keychain authorization UI.
+    ///
+    /// `renewAhead` renews a login that is *about* to expire, so an account is
+    /// never discovered to be stale at the moment a rotation needs it. A failed
+    /// early renewal is not an error: the current token still works, and the
+    /// caller keeps using it.
     func subscriptionLogin(at location: ClaudeCredentialLocation,
-                           cancellation: AccountCancellation? = nil) throws -> SubscriptionLogin {
+                           cancellation: AccountCancellation? = nil,
+                           renewAhead: TimeInterval = 0) throws -> SubscriptionLogin {
         lock.lock()
         defer { lock.unlock() }
         func checkCancellation() throws {
@@ -245,8 +265,14 @@ final class ClaudeSystemCredentials {
             else { throw ClaudeSystemCredentialError.missingLogin }
             return (identity, secret, oauth)
         }
-        func fresh(_ oauth: [String: Any]) -> Bool {
-            ((oauth["expiresAt"] as? NSNumber)?.doubleValue ?? 0) > now().timeIntervalSince1970 * 1000
+        func expiry(_ oauth: [String: Any]) -> Double {
+            ((oauth["expiresAt"] as? NSNumber)?.doubleValue ?? 0) / 1000
+        }
+        /// The token can still be used right now.
+        func usable(_ oauth: [String: Any]) -> Bool { expiry(oauth) > now().timeIntervalSince1970 }
+        /// The token will still be usable long enough that nothing has to be done.
+        func warm(_ oauth: [String: Any]) -> Bool {
+            expiry(oauth) > now().timeIntervalSince1970 + max(renewAhead, 0)
         }
         func login(_ identity: ClaudeCredentialIdentity, _ oauth: [String: Any]) -> SubscriptionLogin {
             SubscriptionLogin(identity: identity, accessToken: oauth["accessToken"] as! String,
@@ -254,68 +280,87 @@ final class ClaudeSystemCredentials {
         }
         try checkCancellation()
         let initial = try snapshot()
-        if fresh(initial.2) { return login(initial.0, initial.2) }
+        if warm(initial.2) { return login(initial.0, initial.2) }
+        // A login that has not expired yet is renewed *early*, at most twice an
+        // hour, and a failure there changes nothing: the token still works.
+        let early = usable(initial.2)
+        if early, let last = earlyRenewals[location.service],
+           now().timeIntervalSince(last) < Self.earlyRenewalInterval {
+            return login(initial.0, initial.2)
+        }
         // Do not create a lock or send a request when no renewal is possible.
         guard let refresh = initial.2["refreshToken"] as? String, !refresh.isEmpty else {
+            if early { return login(initial.0, initial.2) }
             throw ClaudeSystemCredentialError.expiredLogin
         }
-        let storageLock = try ClaudeStorageWriteLock(directory: location.directory, checkCancellation: checkCancellation)
-        defer { storageLock.release() }
-        try checkCancellation()
-        // Claude may have rotated this token while we waited for its storage lock.
-        let (identity, previous, oauth) = try snapshot()
-        guard identity == initial.0 else { throw ClaudeSystemCredentialError.changedDuringCopy }
-        if fresh(oauth) { return login(identity, oauth) }
-        guard let refreshToken = oauth["refreshToken"] as? String, !refreshToken.isEmpty else {
-            throw ClaudeSystemCredentialError.expiredLogin
+
+        func exchange() throws -> SubscriptionLogin {
+            let storageLock = try ClaudeStorageWriteLock(directory: location.directory, checkCancellation: checkCancellation)
+            defer { storageLock.release() }
+            try checkCancellation()
+            // Claude may have rotated this token while we waited for its storage lock.
+            let (identity, previous, oauth) = try snapshot()
+            guard identity == initial.0 else { throw ClaudeSystemCredentialError.changedDuringCopy }
+            if warm(oauth) { return login(identity, oauth) }
+            guard let refreshToken = oauth["refreshToken"] as? String, !refreshToken.isEmpty else {
+                throw ClaudeSystemCredentialError.expiredLogin
+            }
+            if let failure = renewalFailures[location.service], failure.credential == previous, failure.until > now() {
+                throw failure.error
+            }
+            let scopes = try ClaudeTokenRefresh.scopes(oauth["scopes"])
+            try storageLock.check()
+            try checkCancellation()
+            let renewed: ClaudeTokenRenewal
+            do { renewed = try renew(refreshToken, scopes) }
+            catch {
+                let until: Date
+                if case ClaudeSystemCredentialError.expiredLogin = error { until = .distantFuture }
+                else if case UsageProviderError.rateLimited(let delay) = error { until = now().addingTimeInterval(max(60, delay)) }
+                else { until = now().addingTimeInterval(60) }
+                renewalFailures[location.service] = RenewalFailure(credential: previous, until: until, error: error)
+                throw error
+            }
+            // The server may already have invalidated the old refresh token. From here
+            // finish persistence even on cancellation/shutdown; NEVER restore the old token.
+            try Self.validateLocation(location)
+            guard try self.identity(at: location) == identity,
+                  let current = try keychain.read(service: location.service, account: account) else {
+                throw ClaudeSystemCredentialError.changedDuringCopy
+            }
+            var payload = try Self.object(current.data)
+            guard var currentOAuth = payload["claudeAiOauth"] as? [String: Any],
+                  current.reference == previous.reference,
+                  currentOAuth["refreshToken"] as? String == refreshToken,
+                  currentOAuth["accessToken"] as? String == oauth["accessToken"] as? String else {
+                throw ClaudeSystemCredentialError.changedDuringCopy
+            }
+            // Merge into the latest payload, preserving unrelated credentials and metadata.
+            currentOAuth["accessToken"] = renewed.accessToken
+            currentOAuth["refreshToken"] = renewed.refreshToken ?? refreshToken
+            currentOAuth["expiresAt"] = (now().timeIntervalSince1970 + renewed.expiresIn) * 1000
+            if let scopes = renewed.scopes { currentOAuth["scopes"] = scopes }
+            if let lifetime = renewed.refreshTokenExpiresIn {
+                currentOAuth["refreshTokenExpiresAt"] = (now().timeIntervalSince1970 + lifetime) * 1000
+            }
+            payload["claudeAiOauth"] = currentOAuth
+            try storageLock.check()
+            _ = try keychain.replace(service: location.service, account: account, expected: current,
+                                     data: Self.encodeKeychainPayload(payload))
+            renewalFailures.removeValue(forKey: location.service)
+            // A cache-marker failure must never roll back a remotely rotated token.
+            try invalidateCache(location)
+            try checkCancellation()
+            return login(identity, currentOAuth)
         }
-        if let failure = renewalFailures[location.service], failure.credential == previous, failure.until > now() {
-            throw failure.error
-        }
-        let scopes = try ClaudeTokenRefresh.scopes(oauth["scopes"])
-        try storageLock.check()
-        try checkCancellation()
-        let renewed: ClaudeTokenRenewal
-        do { renewed = try renew(refreshToken, scopes) }
+
+        if early { earlyRenewals[location.service] = now() }
+        do { return try exchange() }
         catch {
-            let until: Date
-            if case ClaudeSystemCredentialError.expiredLogin = error { until = .distantFuture }
-            else if case UsageProviderError.rateLimited(let delay) = error { until = now().addingTimeInterval(max(60, delay)) }
-            else { until = now().addingTimeInterval(60) }
-            renewalFailures[location.service] = RenewalFailure(credential: previous, until: until, error: error)
-            throw error
+            // An early renewal is an optimisation. Never turn one into an outage.
+            guard early, let current = try? snapshot(), usable(current.2) else { throw error }
+            return login(current.0, current.2)
         }
-        // The server may already have invalidated the old refresh token. From here
-        // finish persistence even on cancellation/shutdown; NEVER restore the old token.
-        try Self.validateLocation(location)
-        guard try self.identity(at: location) == identity,
-              let current = try keychain.read(service: location.service, account: account) else {
-            throw ClaudeSystemCredentialError.changedDuringCopy
-        }
-        var payload = try Self.object(current.data)
-        guard var currentOAuth = payload["claudeAiOauth"] as? [String: Any],
-              current.reference == previous.reference,
-              currentOAuth["refreshToken"] as? String == refreshToken,
-              currentOAuth["accessToken"] as? String == oauth["accessToken"] as? String else {
-            throw ClaudeSystemCredentialError.changedDuringCopy
-        }
-        // Merge into the latest payload, preserving unrelated credentials and metadata.
-        currentOAuth["accessToken"] = renewed.accessToken
-        currentOAuth["refreshToken"] = renewed.refreshToken ?? refreshToken
-        currentOAuth["expiresAt"] = (now().timeIntervalSince1970 + renewed.expiresIn) * 1000
-        if let scopes = renewed.scopes { currentOAuth["scopes"] = scopes }
-        if let lifetime = renewed.refreshTokenExpiresIn {
-            currentOAuth["refreshTokenExpiresAt"] = (now().timeIntervalSince1970 + lifetime) * 1000
-        }
-        payload["claudeAiOauth"] = currentOAuth
-        try storageLock.check()
-        _ = try keychain.replace(service: location.service, account: account, expected: current,
-                                 data: Self.encodeKeychainPayload(payload))
-        renewalFailures.removeValue(forKey: location.service)
-        // A cache-marker failure must never roll back a remotely rotated token.
-        try invalidateCache(location)
-        try checkCancellation()
-        return login(identity, currentOAuth)
     }
 
     func authorize(at location: ClaudeCredentialLocation) throws {
@@ -332,7 +377,10 @@ final class ClaudeSystemCredentials {
         try checkRunning()
         try Self.validateLocation(location)
         guard let resilient = keychain as? ClaudeResilientCredentialKeychain else { return false }
-        let storageLock = try ClaudeStorageWriteLock(directory: location.directory)
+        // Quitting must interrupt this wait. Without a cancellation check the
+        // retry loop held the credential lock for seconds after shutdown began.
+        let storageLock = try ClaudeStorageWriteLock(directory: location.directory,
+                                                    checkCancellation: { try self.checkRunning() })
         defer { storageLock.release() }
         try storageLock.check()
         return try resilient.shareWithHelper(service: location.service, account: account)

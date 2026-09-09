@@ -38,12 +38,26 @@ final class AccountManager: ObservableObject {
                 reconcileAutomaticSelection()
                 Task { await reconcileSystemClaudeSelection() }
             }
+            updateHealth()
             do { try persist(accounts: accounts, selected: selected) }
             catch { notice = error.localizedDescription }
         }
     }
     @Published private(set) var rotationOrder: [AccountProvider: [UUID]] = [:]
     @Published private(set) var switchThresholdPercent: Double = 15
+    /// How far ahead of a predicted exhaustion the Mac login moves on.
+    @Published private(set) var switchAheadMinutes: Double = 20
+    /// The single thing the person has to act on right now, or nil when nothing
+    /// needs them. Never more than one: a list of problems is a list nobody reads.
+    @Published private(set) var attention: AccountAttention?
+    /// What is true right now, whether or not anything needs fixing.
+    @Published private(set) var health = AccountHealth()
+    /// Burn-rate history per account. In memory only; never persisted.
+    private(set) var usageForecasts: [UUID: UsageForecast] = [:]
+    private var lastQueueAudit: Date?
+    /// A queued account that quietly expired has to be found long before a
+    /// rotation needs it, so the whole queue is rechecked on this cadence.
+    static let queueAuditInterval: TimeInterval = 1800
 
     private let storage: AccountStorage?
     private let runner: any AccountCommandRunning
@@ -87,6 +101,7 @@ final class AccountManager: ObservableObject {
             accounts = catalog.accounts; selected = catalog.selected; automaticSelection = catalog.automaticSelection
             rotationOrder = catalog.rotationOrder ?? [:]
             switchThresholdPercent = catalog.switchThresholdPercent ?? 15
+            switchAheadMinutes = catalog.switchAheadMinutes ?? 20
             normalizeRotationOrder()
             states = Dictionary(uniqueKeysWithValues: accounts.map {
                 ($0.id, $0.provider.isBrowserProfile ? Self.browserState($0) : ManagedAccountState(message: "Refresh to check this account."))
@@ -97,6 +112,7 @@ final class AccountManager: ObservableObject {
         loaded = true
         recoverClaudeCacheMarkers()
         shareSavedClaudeLogins()
+        updateHealth()
     }
 
     /// Saved logins this app created natively are moved to Apple's helper once,
@@ -139,7 +155,8 @@ final class AccountManager: ObservableObject {
     private func persist(accounts: [ManagedAccount], selected: [AccountProvider: UUID]) throws {
         try usableStorage().save(AccountCatalog(accounts: accounts, selected: selected,
             automaticSelection: automaticSelection, ignoredExistingProfiles: ignoredExistingProfiles,
-            rotationOrder: rotationOrder, switchThresholdPercent: switchThresholdPercent))
+            rotationOrder: rotationOrder, switchThresholdPercent: switchThresholdPercent,
+            switchAheadMinutes: switchAheadMinutes))
     }
 
     @discardableResult
@@ -153,6 +170,7 @@ final class AccountManager: ObservableObject {
         accounts.append(account); selected = selection; states[account.id] = ManagedAccountState()
         normalizeRotationOrder()
         try persist(accounts: accounts, selected: selected)
+        updateHealth()
         return account
     }
 
@@ -255,6 +273,16 @@ final class AccountManager: ObservableObject {
     func setSwitchThreshold(_ percent: Double) throws {
         switchThresholdPercent = min(max(percent.rounded(), 0), 100)
         reconcileAutomaticSelection()
+        updateHealth()
+        Task { await reconcileSystemClaudeSelection() }
+        try persist(accounts: accounts, selected: selected)
+    }
+
+    /// How much notice an automatic switch takes when the burn rate says the
+    /// current account is about to run out. Zero disables forecast switching.
+    func setSwitchAheadMinutes(_ minutes: Double) throws {
+        switchAheadMinutes = min(max(minutes.rounded(), 0), 240)
+        updateHealth()
         Task { await reconcileSystemClaudeSelection() }
         try persist(accounts: accounts, selected: selected)
     }
@@ -269,9 +297,11 @@ final class AccountManager: ObservableObject {
         do { try persist(accounts: updated, selected: selection) }
         catch { ignoredExistingProfiles = previousIgnored; throw error }
         accounts = updated; selected = selection; states.removeValue(forKey: account.id)
+        usageForecasts.removeValue(forKey: account.id)
         normalizeRotationOrder()
         try persist(accounts: accounts, selected: selected)
         browserOpenedIDs.remove(account.id)
+        updateHealth()
         notice = "Account removed from the list. Its private profile and official app credentials were retained; existing sessions continue."
     }
 
@@ -371,13 +401,15 @@ final class AccountManager: ObservableObject {
     }
 
     private func reconcileSystemClaudeSelection() async {
+        defer { updateHealth() }
         guard systemCredentials != nil, !systemSwitchPaused, !isSwitchingClaude, !hasShutDown else { return }
         updateSystemClaudeIdentity()
         guard automaticSelection, !authenticationInProgress,
               let currentID = systemClaudeAccountID,
               let candidate = AccountSelection.systemClaude(accounts: accounts, states: states,
                 order: rotationOrder[.claude] ?? [], currentID: currentID,
-                preferredID: selected[.claude], thresholdPercent: switchThresholdPercent),
+                preferredID: selected[.claude], thresholdPercent: switchThresholdPercent,
+                forecasts: usageForecasts, switchAheadMinutes: switchAheadMinutes),
               !busyIDs.contains(currentID), !busyIDs.contains(candidate.id) else { return }
         do { try await activateSystemClaude(candidate, automatic: true) }
         catch {
@@ -385,6 +417,18 @@ final class AccountManager: ObservableObject {
             systemSwitchPaused = true
             notice = NSLocalizedString("Automatic Claude switching is paused. Use account to retry when ready.", comment: "") + " " + error.localizedDescription
         }
+    }
+
+    /// True while automatic switching has stopped and will not resume on its own.
+    var isSystemSwitchPaused: Bool { systemSwitchPaused }
+
+    /// Clears a pause and gives the switch another go. This is the Retry action
+    /// behind the accounts banner; it never opens a browser or a Terminal.
+    func retrySystemSwitch() async {
+        guard !hasShutDown else { return }
+        systemSwitchPaused = false
+        notice = nil
+        await refreshAll()
     }
 
     private func prepare(_ account: ManagedAccount) throws -> (URL, URL, [String: String]) {
@@ -428,7 +472,7 @@ final class AccountManager: ObservableObject {
         let cancellation = AccountCancellation()
         loginAccountID = account.id; markBusy(account.id, cancellation: cancellation)
         states[account.id]?.message = "Complete sign-in in your browser. Only this profile will be connected."
-        defer { loginAccountID = nil; finish(account.id) }
+        defer { loginAccountID = nil; finish(account.id); updateHealth() }
         do {
             if account.provider.isBrowserProfile {
                 try await showBrowser(account, signingIn: true)
@@ -466,20 +510,23 @@ final class AccountManager: ObservableObject {
     }
 
     /// A single user-requested authorization. No automatic path calls this.
-    func allowClaudeAccess(_ account: ManagedAccount) async {
+    @discardableResult
+    func allowClaudeAccess(_ account: ManagedAccount) async -> Bool {
         guard !hasShutDown, account.provider == .claude, let credentials = systemCredentials,
-              !authenticationInProgress, !isSwitchingClaude, busyIDs.isEmpty else { return }
+              !authenticationInProgress, !isSwitchingClaude, busyIDs.isEmpty else { return false }
         let location = systemClaudeAccountID == account.id ? systemClaudeLocation : credentialLocation(for: account)
         authorizationAccountID = account.id
-        defer { authorizationAccountID = nil }
+        defer { authorizationAccountID = nil; updateHealth() }
         do {
             try await Task.detached(priority: .userInitiated) { try credentials.authorize(at: location) }.value
-            guard !hasShutDown else { return }
+            guard !hasShutDown else { return false }
             await refresh(account)
+            return states[account.id]?.requiresKeychainAccess != true
         } catch {
             pausedRefreshIDs.insert(account.id)
             states[account.id]?.requiresKeychainAccess = true
             states[account.id]?.message = error.localizedDescription
+            return false
         }
     }
 
@@ -490,14 +537,25 @@ final class AccountManager: ObservableObject {
         discoveryCancellation?.cancel()
     }
 
-    func shutdownAndWait() async {
+    /// Gives an already-committing switch time to persist its matching catalog,
+    /// then returns — always. Waiting without a deadline is what made
+    /// `osascript … quit` fail with "User canceled (-128)": the reply to
+    /// `applicationShouldTerminate` was owed to macOS while this hung on a
+    /// credential lock held by a blocked background thread. A credential
+    /// transaction is worth a few seconds of patience, never a refusal to quit.
+    func shutdownAndWait(within seconds: TimeInterval = 4) async {
         shutdown()
-        // Give an already-committing switch time to persist its matching catalog.
-        // The UI run loop remains free while the transaction finishes or cancels.
-        while isSwitchingClaude { try? await Task.sleep(nanoseconds: 10_000_000) }
-        if let credentials = systemCredentials {
-            await Task.detached(priority: .utility) { credentials.waitUntilIdle() }.value
+        let deadline = Date().addingTimeInterval(max(seconds, 0.5))
+        while isSwitchingClaude && Date() < deadline { try? await Task.sleep(nanoseconds: 10_000_000) }
+        guard let credentials = systemCredentials else { return }
+        // Detached and polled rather than awaited: under a starved thread pool an
+        // awaited detached task may never even start, and quitting would hang.
+        let idle = ShutdownSignal()
+        Task.detached(priority: .userInitiated) {
+            credentials.waitUntilIdle(timeout: max(0.5, deadline.timeIntervalSinceNow))
+            idle.signal()
         }
+        while !idle.isSignalled && Date() < deadline { try? await Task.sleep(nanoseconds: 20_000_000) }
     }
 
     private func read(_ account: ManagedAccount, cancellation: AccountCancellation) async throws -> ManagedAccountState {
@@ -520,8 +578,10 @@ final class AccountManager: ObservableObject {
             (executable, profile, environment) = try prepare(account)
         }
         if account.provider == .kimi {
-            if account.existingProfile != nil { return try await readExistingKimi(executable, profile, environment, cancellation) }
-            return try await readKimi(executable, profile, environment, cancellation)
+            let state = account.existingProfile != nil
+                ? try await readExistingKimi(executable, profile, environment, cancellation)
+                : try await readKimi(executable, profile, environment, cancellation)
+            return Self.stampKimiIdentity(state, profile: profile)
         }
         let codex = account.provider == .codex
         let arguments = codex ? (account.existingProfile == nil ? ["--config", "cli_auth_credentials_store=\"keyring\"", "app-server"] : ["app-server"]) : ["auth", "status", "--json"]
@@ -558,7 +618,7 @@ final class AccountManager: ObservableObject {
               loginAccountID == nil || loginAccountID == account.id,
               authorizationAccountID == nil || authorizationAccountID == account.id else { return }
         let cancellation = AccountCancellation(); markBusy(account.id, cancellation: cancellation)
-        defer { finish(account.id) }
+        defer { finish(account.id); updateHealth() }
         do {
             states[account.id] = try await read(account, cancellation: cancellation)
             guard !hasShutDown, !cancellation.isCancelled else { return }
@@ -566,6 +626,7 @@ final class AccountManager: ObservableObject {
                 externalRetryAfter.removeValue(forKey: account.id)
                 pausedRefreshIDs.remove(account.id)
             } else { pausedRefreshIDs.insert(account.id) }
+            recordUsage(for: account)
         }
         catch {
             guard !hasShutDown, !cancellation.isCancelled else { return }
@@ -574,6 +635,10 @@ final class AccountManager: ObservableObject {
             // Retain the last displayed quotas, but never use a failed refresh for automation.
             state.refreshedAt = nil
             state.requiresKeychainAccess = (error as? ClaudeSystemCredentialError)?.requiresAccess == true
+            // A revoked or expired saved login is not a transient failure. Say so
+            // now, so the person signs in before a rotation needs this account.
+            if case ClaudeSystemCredentialError.expiredLogin = error { state.requiresSignIn = true }
+            else { state.requiresSignIn = false }
             if account.provider == .claude, claudeReader != nil, !state.requiresKeychainAccess {
                 externalRetryAfter[account.id] = Date().addingTimeInterval(60)
             } else { pausedRefreshIDs.insert(account.id) }
@@ -589,11 +654,39 @@ final class AccountManager: ObservableObject {
         guard !hasShutDown, !authenticationInProgress else { return }
         recoverClaudeCacheMarkers()
         updateSystemClaudeIdentity()
+        auditQueueIfDue()
         await refreshAccounts(accounts.filter { !pausedRefreshIDs.contains($0.id) && externalRetryAfter[$0.id].map { $0 > Date() } != true })
         guard !hasShutDown, !Task.isCancelled else { return }
         if automaticDiscovery { await discoverExistingAccounts() }
+        mergeDuplicateAccounts()
         reconcileAutomaticSelection()
         await reconcileSystemClaudeSelection()
+    }
+
+    /// Rechecks the whole rotation queue, not just the account in use. Yesterday's
+    /// failure mode was a queued account whose login had been revoked weeks
+    /// earlier: it was only discovered at the moment of the switch, when it was
+    /// too late to do anything about it. Runs once at launch and every 30 minutes.
+    /// Accounts waiting for the person's Keychain permission are left alone —
+    /// retrying those would be a prompt they did not ask for.
+    private func auditQueueIfDue(now: Date = Date()) {
+        guard lastQueueAudit.map({ now.timeIntervalSince($0) >= Self.queueAuditInterval }) ?? true else { return }
+        lastQueueAudit = now
+        for account in accounts where account.provider.supportsAutomaticSelection {
+            guard states[account.id]?.requiresKeychainAccess != true else { continue }
+            pausedRefreshIDs.remove(account.id)
+            externalRetryAfter.removeValue(forKey: account.id)
+        }
+    }
+
+    /// Keeps a short burn-rate history for the window closest to running out.
+    private func recordUsage(for account: ManagedAccount, now: Date = Date()) {
+        guard account.provider.supportsAutomaticSelection, let state = states[account.id],
+              state.isConnected, state.isFresh(at: now),
+              let used = state.windows.compactMap(\.usedFraction).max() else { return }
+        var forecast = usageForecasts[account.id] ?? UsageForecast()
+        forecast.record(usedFraction: used, at: state.refreshedAt ?? now)
+        usageForecasts[account.id] = forecast
     }
 
     /// Failed probes are quiet and bounded; manual refresh of an existing row can retry immediately.
@@ -628,7 +721,7 @@ final class AccountManager: ObservableObject {
                         state = ManagedAccountState(email: identity.email, message: error.localizedDescription, requiresKeychainAccess: true)
                     }
                 } else if candidate.provider == .kimi {
-                    state = try await readExistingKimi(executable, directory, environment, cancellation)
+                    state = Self.stampKimiIdentity(try await readExistingKimi(executable, directory, environment, cancellation), profile: directory)
                 } else {
                     let codex = candidate.provider == .codex
                     let data = try await runner.run(AccountCommand(executable: executable,
@@ -644,8 +737,20 @@ final class AccountManager: ObservableObject {
                 guard !hasShutDown, !Task.isCancelled, !cancellation.isCancelled,
                       state.isConnected || state.requiresKeychainAccess else { continue }
                 // Only verified identities count. User-entered hints never suppress a real account.
-                if let email = state.email?.lowercased(), !email.isEmpty,
-                   accounts.contains(where: { $0.provider == candidate.provider && states[$0.id]?.isConnected == true && states[$0.id]?.email?.lowercased() == email }) { continue }
+                // The address is the readable signal; the opaque fingerprint covers
+                // vendors that publish no address at all, which is how one Kimi
+                // subscription came to occupy two rows. An unverifiable identity
+                // falls through and the row is added: hiding a real subscription
+                // is the worse mistake.
+                let alreadyListed = accounts.contains { existing in
+                    guard existing.provider == candidate.provider, states[existing.id]?.isConnected == true else { return false }
+                    if let email = state.email?.lowercased(), !email.isEmpty,
+                       states[existing.id]?.email?.lowercased() == email { return true }
+                    if let identity = state.identity, !identity.isEmpty,
+                       states[existing.id]?.identity == identity { return true }
+                    return false
+                }
+                if alreadyListed { continue }
                 let account = ManagedAccount(id: UUID(), provider: candidate.provider,
                     label: try AccountStorage.validLabel(candidate.label), createdAt: now, existingProfile: candidate.source)
                 var selection = selected
@@ -657,6 +762,130 @@ final class AccountManager: ObservableObject {
             } catch { continue }
         }
         if found > 0 { discoveryNotice = "Found \(found) signed-in account\(found == 1 ? "" : "s") on this Mac. Their original app keeps each sign-in and configuration." }
+    }
+
+    // MARK: - Duplicate rows
+
+    /// Kimi has no address and no userinfo route, so the subscription behind a
+    /// profile is only knowable from the account claim in its own saved token.
+    static func stampKimiIdentity(_ state: ManagedAccountState, profile: URL) -> ManagedAccountState {
+        guard state.isConnected, state.identity == nil else { return state }
+        var stamped = state
+        stamped.identity = ExistingAccountProfile(directory: profile.standardizedFileURL.path, usesDefaultClaudeHome: false)
+            .kimiSubscriptionFingerprint()
+        return stamped
+    }
+
+    /// What identifies the subscription behind a row, when the vendor told us.
+    /// A nickname or a typed email hint never counts: only something the
+    /// provider itself confirmed can merge two rows into one.
+    private func identityKey(for account: ManagedAccount) -> String? {
+        if account.provider == .claude, let credentials = systemCredentials {
+            let location = systemClaudeAccountID == account.id ? systemClaudeLocation : credentialLocation(for: account)
+            if let identity = try? credentials.identity(at: location) {
+                return "claude:\(identity.accountID):\(identity.organizationID)"
+            }
+        }
+        if let identity = states[account.id]?.identity, !identity.isEmpty {
+            return "\(account.provider.rawValue):\(identity)"
+        }
+        guard let email = states[account.id]?.email?.lowercased(), !email.isEmpty else { return nil }
+        return "\(account.provider.rawValue):\(email)"
+    }
+
+    /// True for one of this app's own profiles that has never held a sign-in:
+    /// no credential file, no identity, and not connected now. Only the app's
+    /// own directory is examined, and nothing inside it is ever deleted.
+    private func isEmptyIsolatedProfile(_ account: ManagedAccount) -> Bool {
+        guard account.existingProfile == nil, !account.provider.isBrowserProfile,
+              let state = states[account.id], !state.isConnected, !state.isBusy,
+              state.email == nil, state.windows.isEmpty, !state.requiresKeychainAccess else { return false }
+        let directory = configurationDirectory(for: account)
+        switch account.provider {
+        case .kimi:
+            return ExistingAccountProfile(directory: directory.path, usesDefaultClaudeHome: false)
+                .kimiAuthenticationStatus() != .present
+        case .claude:
+            guard let credentials = systemCredentials else { return false }
+            let location = ClaudeCredentialLocation(directory: directory, isDefault: false)
+            return (try? credentials.identity(at: location)) == nil
+        case .codex:
+            return !FileManager.default.fileExists(atPath: directory.appendingPathComponent("auth.json").path)
+        default:
+            return false
+        }
+    }
+
+    /// Which of two rows for the same subscription the person should keep.
+    private func survivor(_ left: ManagedAccount, _ right: ManagedAccount) -> ManagedAccount {
+        func rank(_ account: ManagedAccount) -> (Int, Int, Int) {
+            // The account this Mac is actually running can never be the one removed.
+            (account.id == systemClaudeAccountID ? 1 : 0,
+             states[account.id]?.isConnected == true ? 1 : 0,
+             // The vendor's own profile outlives a copy this app made.
+             account.existingProfile != nil ? 1 : 0)
+        }
+        if rank(left) != rank(right) { return rank(left) > rank(right) ? left : right }
+        return left.createdAt <= right.createdAt ? left : right
+    }
+
+    /// One subscription shown twice is the same bug either way round: a profile
+    /// this app created and the vendor profile it later found are the same
+    /// account. Removing a row never touches the vendor's files or its sign-in.
+    @discardableResult
+    func mergeDuplicateAccounts() -> [ManagedAccount] {
+        guard loaded, catalogError == nil, busyIDs.isEmpty, !authenticationInProgress, !isSwitchingClaude else { return [] }
+        var survivors = accounts
+        var dropped: [ManagedAccount] = []
+
+        // (a) Two rows the provider itself says are the same subscription.
+        var byIdentity: [String: ManagedAccount] = [:]
+        for account in accounts where !account.provider.isBrowserProfile {
+            guard let key = identityKey(for: account) else { continue }
+            guard let rival = byIdentity[key] else { byIdentity[key] = account; continue }
+            let keep = survivor(rival, account)
+            let drop = keep.id == rival.id ? account : rival
+            byIdentity[key] = keep
+            survivors.removeAll { $0.id == drop.id }
+            dropped.append(drop)
+        }
+
+        // (b) An empty profile of ours sitting next to the real, connected one.
+        for account in survivors where account.existingProfile == nil {
+            guard isEmptyIsolatedProfile(account),
+                  survivors.contains(where: { $0.id != account.id && $0.provider == account.provider
+                      && $0.existingProfile != nil && states[$0.id]?.isConnected == true }) else { continue }
+            survivors.removeAll { $0.id == account.id }
+            dropped.append(account)
+        }
+
+        guard !dropped.isEmpty else { return [] }
+        var selection = selected
+        for account in dropped where selection[account.provider] == account.id {
+            selection[account.provider] = survivors.first { $0.provider == account.provider }?.id
+        }
+        // A discovered row that loses must not come straight back on the next sweep.
+        let previousIgnored = ignoredExistingProfiles
+        for account in dropped {
+            if let source = account.existingProfile { ignoredExistingProfiles.insert(source.key(provider: account.provider)) }
+        }
+        do { try persist(accounts: survivors, selected: selection) }
+        catch { ignoredExistingProfiles = previousIgnored; return [] }
+        accounts = survivors
+        selected = selection
+        for account in dropped {
+            states.removeValue(forKey: account.id)
+            usageForecasts.removeValue(forKey: account.id)
+            externalRetryAfter.removeValue(forKey: account.id)
+            pausedRefreshIDs.remove(account.id)
+            browserOpenedIDs.remove(account.id)
+        }
+        normalizeRotationOrder()
+        try? persist(accounts: accounts, selected: selected)
+        let names = dropped.map { $0.label }.joined(separator: ", ")
+        notice = String(format: NSLocalizedString("Merged duplicate rows for the same subscription: %@. Its sign-in and files were left untouched.", comment: "Duplicate merge notice"), names)
+        updateHealth()
+        return dropped
     }
 
     /// Older builds could save Kimi's logged-out default profile as an account.
@@ -696,6 +925,7 @@ final class AccountManager: ObservableObject {
 
     func launch(_ account: ManagedAccount, project: URL) async {
         guard !hasShutDown, !authenticationInProgress else { return }
+        defer { updateHealth() }
         do {
             if account.provider == .claude, systemCredentials != nil {
                 updateSystemClaudeIdentity()
@@ -798,5 +1028,195 @@ final class AccountManager: ObservableObject {
         }
         if changed, loaded { try? persist(accounts: accounts, selected: selected) }
         switches.forEach { automaticSwitch = $0 }
+        updateHealth()
     }
+
+    // MARK: - Health
+
+    /// Recomputes `attention` and `health` together. Called after everything that
+    /// can change the answer, so the app never silently keeps a stale one.
+    func updateHealth(now: Date = Date()) {
+        health = computeHealth(now: now)
+        let next = computeAttention(now: now)
+        // Keep the original timestamp while the same problem persists: the notch
+        // escalates on age, and a recomputation is not a new incident.
+        if next?.id != attention?.id { attention = next }
+    }
+
+    private func label(_ account: ManagedAccount) -> String {
+        account.emoji.map { "\($0) \(account.label)" } ?? account.label
+    }
+
+    private func needsSignIn(_ account: ManagedAccount) -> Bool {
+        guard let state = states[account.id], !account.provider.isBrowserProfile else { return false }
+        return state.requiresSignIn || (!state.isConnected && !state.isBusy)
+    }
+
+    private func claudeQueue() -> [ManagedAccount] {
+        let ordered = rotationAccounts(for: .claude)
+        guard !ordered.isEmpty else { return [] }
+        return AccountActivitySelection.queue(accounts: ordered,
+            currentID: systemClaudeAccountID ?? selected[.claude], selectedID: selected[.claude])
+    }
+
+    private func computeAttention(now: Date) -> AccountAttention? {
+        let queue = claudeQueue()
+        let current = queue.first
+        let next = queue.count > 1 ? queue[1] : nil
+        // Ordered by what actually stops the Mac from working, not by severity in
+        // the abstract: a blocked Keychain stops everything, a paused switch stops
+        // rotation, a dead queue entry stops the *next* switch.
+        let blocked = [current, next].compactMap { $0 }
+            + accounts.filter { $0.provider == .claude }
+        if let account = blocked.first(where: { states[$0.id]?.requiresKeychainAccess == true }) {
+            return AccountAttention(kind: .keychainAccess, accountID: account.id,
+                title: String(format: NSLocalizedString("macOS is blocking %@", comment: "Attention title"), label(account)),
+                detail: NSLocalizedString("Builder Nutch cannot read this saved login, so it cannot switch to it. Allow access once and switching resumes.", comment: "Attention detail"),
+                raisedAt: now)
+        }
+        if systemSwitchPaused, automaticSelection {
+            return AccountAttention(kind: .switchPaused, accountID: current?.id,
+                title: NSLocalizedString("Automatic switching is paused", comment: "Attention title"),
+                detail: NSLocalizedString("The last account change did not finish, so Builder Nutch stopped instead of retrying in a loop. Retry when you are ready.", comment: "Attention detail"),
+                raisedAt: now)
+        }
+        if let next, needsSignIn(next) {
+            return AccountAttention(kind: .reconnect, accountID: next.id,
+                title: String(format: NSLocalizedString("%@ needs a new sign-in", comment: "Attention title"), label(next)),
+                detail: NSLocalizedString("This is the next account in your queue. Its saved sign-in expired, so the switch would fail. Sign in now and it will be ready.", comment: "Attention detail"),
+                raisedAt: now)
+        }
+        if let stale = accounts.first(where: { $0.provider.supportsAutomaticSelection && needsSignIn($0) }) {
+            return AccountAttention(kind: .reconnect, accountID: stale.id,
+                title: String(format: NSLocalizedString("%@ needs a new sign-in", comment: "Attention title"), label(stale)),
+                detail: NSLocalizedString("Its saved sign-in expired. Sign in again to put this account back in the rotation.", comment: "Attention detail"),
+                raisedAt: now)
+        }
+        if automaticSelection, systemCredentials != nil, let current,
+           AccountSelection.rotating(provider: .claude, accounts: accounts, states: states,
+                order: rotationOrder[.claude] ?? [], currentID: current.id,
+                thresholdPercent: switchThresholdPercent, keepCurrent: false, now: now) == nil {
+            return AccountAttention(kind: .queueEmpty, accountID: current.id,
+                title: NSLocalizedString("No account left to switch to", comment: "Attention title"),
+                detail: String(format: NSLocalizedString("When %@ runs out there is nothing to move to. Add another subscription to keep working.", comment: "Attention detail"), label(current)),
+                raisedAt: now)
+        }
+        return nil
+    }
+
+    private func computeHealth(now: Date) -> AccountHealth {
+        var health = AccountHealth()
+        let queue = claudeQueue()
+        guard let current = queue.first else {
+            health.reason = NSLocalizedString("Add a Claude account to switch between subscriptions.", comment: "Health reason")
+            return health
+        }
+        let next = queue.count > 1 ? queue[1] : nil
+        health.currentID = current.id
+        health.currentName = label(current)
+        health.currentRemainingPercent = states[current.id]?.remainingPercent
+        health.currentMinutesRemaining = usageForecasts[current.id]?.minutesUntilExhausted(at: now)
+        health.nextID = next?.id
+        health.nextName = next.map(label)
+        health.nextRemainingPercent = next.flatMap { states[$0.id]?.remainingPercent }
+        health.nextMinutesRemaining = next.flatMap { usageForecasts[$0.id]?.minutesUntilExhausted(at: now) }
+        let ready = AccountSelection.rotating(provider: .claude, accounts: accounts, states: states,
+            order: rotationOrder[.claude] ?? [], currentID: current.id,
+            thresholdPercent: switchThresholdPercent, keepCurrent: false, now: now)
+        if systemCredentials == nil {
+            health.reason = NSLocalizedString("Switching is unavailable in this build.", comment: "Health reason")
+        } else if !automaticSelection {
+            health.reason = NSLocalizedString("Automatic switching is off.", comment: "Health reason")
+        } else if systemSwitchPaused {
+            health.reason = NSLocalizedString("Automatic switching is paused.", comment: "Health reason")
+        } else if let next, states[next.id]?.requiresKeychainAccess == true {
+            health.reason = String(format: NSLocalizedString("%@ is waiting for your permission.", comment: "Health reason"), label(next))
+        } else if let next, needsSignIn(next) {
+            health.reason = String(format: NSLocalizedString("%@ needs a new sign-in.", comment: "Health reason"), label(next))
+        } else if ready == nil {
+            health.reason = NSLocalizedString("No other account has usage left.", comment: "Health reason")
+        } else {
+            health.isSwitchReady = true
+        }
+        return health
+    }
+
+    /// One line for the accounts window: state, the account in use, and what is
+    /// queued behind it with how long it should last.
+    var healthSummary: String {
+        guard let current = health.currentName else {
+            return health.reason ?? NSLocalizedString("Add a Claude account to switch between subscriptions.", comment: "Health reason")
+        }
+        var parts = [health.isSwitchReady
+            ? NSLocalizedString("Switch ready", comment: "Health status")
+            : (health.reason ?? NSLocalizedString("Switching unavailable", comment: "Health status"))]
+        parts.append(String(format: NSLocalizedString("%@ now", comment: "Account in use"), current))
+        if let next = health.nextName {
+            let headroom = health.nextMinutesRemaining.flatMap(UsageForecast.headroom(minutes:))
+                ?? health.nextRemainingPercent.map { String(format: NSLocalizedString("%d%% left", comment: "Remaining quota"), Int($0.rounded())) }
+            if let headroom {
+                parts.append(String(format: NSLocalizedString("next: %1$@ (≈ %2$@ left)", comment: "Next account with headroom"), next, headroom))
+            } else {
+                parts.append(String(format: NSLocalizedString("next: %@", comment: "Next account"), next))
+            }
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    #if DEBUG
+    /// Test seam: stands in for a row that discovery found on this Mac.
+    func adoptForTesting(_ account: ManagedAccount, state: ManagedAccountState) {
+        var selection = selected
+        if selection[account.provider] == nil { selection[account.provider] = account.id }
+        try? persist(accounts: accounts + [account], selected: selection)
+        accounts.append(account)
+        selected = selection
+        states[account.id] = state
+        normalizeRotationOrder()
+        try? persist(accounts: accounts, selected: selected)
+        updateHealth()
+    }
+
+    /// Test seam. Production state only ever comes from a refresh.
+    func applyState(_ change: (inout ManagedAccountState) -> Void, to id: UUID) {
+        guard accounts.contains(where: { $0.id == id }) else { return }
+        var state = states[id] ?? ManagedAccountState()
+        change(&state)
+        states[id] = state
+        updateHealth()
+    }
+    #endif
+
+    /// Performs the one action the current attention asks for. Returns false when
+    /// the person has to do something the app cannot do for them, such as adding
+    /// a subscription.
+    @discardableResult
+    func repairAttention() async -> Bool {
+        guard let attention, !hasShutDown else { return false }
+        let account = attention.accountID.flatMap { id in accounts.first { $0.id == id } }
+        defer { updateHealth() }
+        switch attention.kind {
+        case .keychainAccess:
+            guard let account else { return false }
+            return await allowClaudeAccess(account)
+        case .reconnect:
+            guard let account else { return false }
+            await connect(account)
+            return states[account.id]?.isConnected == true
+        case .switchPaused:
+            await retrySystemSwitch()
+            return !systemSwitchPaused
+        case .queueEmpty:
+            return false
+        }
+    }
+}
+
+/// A one-way flag a blocking background thread can raise for the main actor.
+/// Deliberately not an actor: shutdown must observe it without awaiting anything.
+final class ShutdownSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var raised = false
+    func signal() { lock.lock(); raised = true; lock.unlock() }
+    var isSignalled: Bool { lock.lock(); defer { lock.unlock() }; return raised }
 }

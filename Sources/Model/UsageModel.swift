@@ -42,15 +42,23 @@ struct LimitWindow: Identifiable, Codable, Equatable {
     let used: Int?
     /// Nil when the provider does not say when the window rolls over.
     let resetsAt: Date?
+    /// True when `resetsAt` was worked out from a written hint rather than read
+    /// from a timestamp the vendor sent. Optional so catalogs and archives
+    /// written by older releases still decode. Kimi is the case that needs it:
+    /// its server only ever says "resets in 2d 6h 36m".
+    let derivedReset: Bool?
+    var isResetDerived: Bool { derivedReset == true }
 
     init(id: String, label: String, usedFraction: Double? = nil,
-         remaining: Int? = nil, used: Int? = nil, resetsAt: Date? = nil) {
+         remaining: Int? = nil, used: Int? = nil, resetsAt: Date? = nil,
+         derivedReset: Bool? = nil) {
         self.id = id
         self.label = label
         self.usedFraction = usedFraction
         self.remaining = remaining
         self.used = used
         self.resetsAt = resetsAt
+        self.derivedReset = derivedReset
     }
 
     /// What the tooltip says on the line under the bar.

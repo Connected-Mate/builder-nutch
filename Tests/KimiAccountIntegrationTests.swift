@@ -14,7 +14,12 @@ final class KimiAccountIntegrationTests: XCTestCase {
         return url
     }
 
-    func testInstalledUsageSchemaAndNoInventedReset() throws {
+    /// This test used to assert that `reset_hint` never became a date. That was
+    /// right while the hint was treated as free prose. It is now read as the
+    /// duration it always was, marked as derived, so Kimi's rings show the same
+    /// countdown Claude's and Codex's do. A hint this app cannot fully parse
+    /// still yields no date at all, which the ResetHint tests cover.
+    func testInstalledUsageSchemaAndDerivedReset() throws {
         let usage: [String: Any] = ["kind": "ok", "summary": ["label": "Weekly", "used": 80, "limit": 100, "reset_hint": "in 2 days"],
             "limits": [["label": "Weekly", "used": 80, "limit": 100], ["label": "5h", "used": 25, "limit": 100]],
             "extra_usage": ["balance_cents": 999_999, "total_cents": 999_999]]
@@ -24,7 +29,8 @@ final class KimiAccountIntegrationTests: XCTestCase {
         XCTAssertEqual(state.windows.count, 2, "Summary duplicate must not become a second window")
         XCTAssertEqual(state.windows.first?.id, "primary")
         XCTAssertEqual(state.remainingPercent ?? -1, 20, accuracy: 0.001)
-        XCTAssertNil(state.windows.first?.resetsAt, "reset_hint must never manufacture a date")
+        XCTAssertEqual(state.windows.first?.resetsAt?.timeIntervalSince(now), 172_800, "\"in 2 days\" is a duration, not prose")
+        XCTAssertTrue(state.windows.first?.isResetDerived == true, "A worked-out time must never pose as one the vendor sent")
         XCTAssertEqual(state.refreshedAt, now)
     }
 

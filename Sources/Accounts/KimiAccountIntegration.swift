@@ -162,15 +162,20 @@ enum KimiAccountIntegration {
         }
         guard kind == "ok", let limits = usage["limits"] as? [Any], limits.count <= 50 else { throw ManagedAccountError.invalidResponse }
         if let summary = usage["summary"] as? [String: Any] {
-            state.windows.append(try window(summary, id: "primary", fallback: "Subscription limit"))
+            state.windows.append(try window(summary, id: "primary", fallback: "Subscription limit", now: now))
         } else if usage["summary"] != nil && !(usage["summary"] is NSNull) { throw ManagedAccountError.invalidResponse }
         for (index, item) in limits.enumerated() {
             guard let row = item as? [String: Any] else { throw ManagedAccountError.invalidResponse }
-            let window = try window(row, id: "limit-\(index)", fallback: "Usage limit \(index + 1)")
-            // The server can repeat its primary summary among its windows.
-            if !state.windows.contains(where: { $0.label == window.label && $0.usedFraction == window.usedFraction && $0.resetsAt == window.resetsAt }) {
-                state.windows.append(window)
+            let window = try window(row, id: "limit-\(index)", fallback: "Usage limit \(index + 1)", now: now)
+            // The server can repeat its primary summary among its windows, and
+            // the repeat often carries less: the summary states when it resets
+            // and the copy says nothing. A copy with a missing reset is still
+            // the same window, so it must not become a second row.
+            let repeated = state.windows.contains { existing in
+                existing.label == window.label && existing.usedFraction == window.usedFraction
+                    && (existing.resetsAt == window.resetsAt || existing.resetsAt == nil || window.resetsAt == nil)
             }
+            if !repeated { state.windows.append(window) }
         }
         if state.windows.isEmpty { state.message = "Kimi is connected. No subscription limits were reported." }
         else { state.refreshedAt = now }
@@ -179,7 +184,7 @@ enum KimiAccountIntegration {
         return state
     }
 
-    private static func window(_ row: [String: Any], id: String, fallback: String) throws -> LimitWindow {
+    private static func window(_ row: [String: Any], id: String, fallback: String, now: Date = Date()) throws -> LimitWindow {
         guard let used = number(row["used"]), let limit = number(row["limit"]), used >= 0, limit >= 0 else { throw ManagedAccountError.invalidResponse }
         var label = text(row["label"]) ?? text(row["name"])
         if label == nil, let duration = row["window"] as? [String: Any],
@@ -189,11 +194,16 @@ enum KimiAccountIntegration {
         }
         let reset = AccountQuotas.date(row["reset_at"])
         if let value = row["reset_at"], !(value is NSNull), reset == nil { throw ManagedAccountError.invalidResponse }
-        // reset_hint is human text, not a timestamp. It never becomes an
-        // invented date, even if it happens to contain a number.
+        // This server never sends reset_at; it writes the same fact as a
+        // sentence, "resets in 2d 6h 36m". Reading that as now + duration is a
+        // derivation and is marked as one, so the countdown is never presented
+        // as a timestamp the vendor gave us. A sentence we cannot fully parse
+        // yields no reset time at all rather than a guess.
+        let derived = reset == nil ? ResetHint.date(from: row["reset_hint"], now: now) : nil
         return LimitWindow(id: id, label: label ?? fallback,
                            usedFraction: limit > 0 ? min(1, used / limit) : (used > 0 ? 1 : nil),
-                           resetsAt: reset)
+                           resetsAt: reset ?? derived,
+                           derivedReset: derived != nil ? true : nil)
     }
 
     private static func text(_ raw: Any?) -> String? {

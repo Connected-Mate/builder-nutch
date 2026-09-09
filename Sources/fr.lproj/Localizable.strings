@@ -149,3 +149,46 @@
 "On your Mac. In your control." = "Sur votre Mac. Sous votre contrôle.";
 "Switched automatically" = "Changement automatique";
 "%@ accounts" = "Comptes %@";
+
+/* Attention banner and health line */
+"Reconnect" = "Reconnecter";
+"Retry" = "Réessayer";
+"Add account" = "Ajouter un compte";
+"macOS is blocking %@" = "macOS bloque %@";
+"Builder Nutch cannot read this saved login, so it cannot switch to it. Allow access once and switching resumes." = "Builder Nutch ne peut pas lire cette connexion enregistrée, donc il ne peut pas basculer dessus. Autorisez l’accès une fois et le changement reprend.";
+"Automatic switching is paused" = "Le changement automatique est en pause";
+"The last account change did not finish, so Builder Nutch stopped instead of retrying in a loop. Retry when you are ready." = "Le dernier changement de compte ne s’est pas terminé : Builder Nutch s’est arrêté au lieu de réessayer en boucle. Réessayez quand vous voulez.";
+"%@ needs a new sign-in" = "%@ doit être reconnecté";
+"This is the next account in your queue. Its saved sign-in expired, so the switch would fail. Sign in now and it will be ready." = "C’est le prochain compte de votre file. Sa connexion enregistrée a expiré : le changement échouerait. Reconnectez-le maintenant et il sera prêt.";
+"Its saved sign-in expired. Sign in again to put this account back in the rotation." = "Sa connexion enregistrée a expiré. Reconnectez-vous pour le remettre dans la rotation.";
+"No account left to switch to" = "Plus aucun compte disponible";
+"When %@ runs out there is nothing to move to. Add another subscription to keep working." = "Quand %@ sera épuisé, il n’y aura plus rien à prendre. Ajoutez un autre abonnement pour continuer.";
+"Add a Claude account to switch between subscriptions." = "Ajoutez un compte Claude pour basculer entre vos abonnements.";
+"Switching is unavailable in this build." = "Le changement de compte n’est pas disponible dans cette version.";
+"Automatic switching is off." = "Le changement automatique est désactivé.";
+"Automatic switching is paused." = "Le changement automatique est en pause.";
+"%@ is waiting for your permission." = "%@ attend votre autorisation.";
+"%@ needs a new sign-in." = "%@ doit être reconnecté.";
+"No other account has usage left." = "Aucun autre compte n’a de quota disponible.";
+"Switch ready" = "Prêt à basculer";
+"Switching unavailable" = "Changement indisponible";
+"%@ now" = "%@ maintenant";
+"next: %@" = "ensuite : %@";
+"next: %1$@ (≈ %2$@ left)" = "ensuite : %1$@ (≈ %2$@ restant)";
+"%d%% left" = "%d%% restant";
+"%d min" = "%d min";
+"%d h" = "%d h";
+"%d h %02d" = "%d h %02d";
+
+/* Attention alert, usage notifications */
+"Click the notch to open Builder Nutch." = "Cliquez sur l’encoche pour ouvrir Builder Nutch.";
+"%1$@ · %2$d%% used" = "%1$@ · %2$d %% utilisés";
+"%1$@ · %2$d%% left." = "%1$@ · %2$d %% restants.";
+"Tell me when an account is running low" = "Me prévenir quand un compte s’épuise";
+"A notification at 50%, 75% and 85% of each limit, once per account each time the limit resets. Builder Nutch always tells you when an account needs reconnecting." = "Une notification à 50 %, 75 % et 85 % de chaque limite, une fois par compte à chaque remise à zéro. Builder Nutch vous prévient toujours lorsqu’un compte doit être reconnecté.";
+
+/* Switch-ahead control and duplicate merge */
+"Switch before the cut" = "Basculer avant la coupure";
+"Switch %d min before the cut" = "Basculer %d min avant la coupure";
+"Builder Nutch watches how fast the account is being used and moves on this long before it would stop working." = "Builder Nutch observe la vitesse de consommation du compte et bascule ce délai avant l’arrêt.";
+"Merged duplicate rows for the same subscription: %@. Its sign-in and files were left untouched." = "Doublons fusionnés pour le même abonnement : %@. Sa connexion et ses fichiers n’ont pas été touchés.";

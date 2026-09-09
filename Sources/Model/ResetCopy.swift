@@ -3,7 +3,20 @@ import Foundation
 /// "Resets in 51 min" under an hour, "Resets Thu 12:00 AM" within the week,
 /// "Resets Sep 28" beyond it.
 enum ResetCopy {
-    static func text(for resetsAt: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+    /// `derived` marks a time this app worked out from a written hint rather
+    /// than one the vendor timestamped. It shows as a "~" in front of the
+    /// value, so an approximate countdown never reads as an exact one.
+    static func text(for resetsAt: Date, now: Date = Date(), calendar: Calendar = .current,
+                     derived: Bool = false) -> String {
+        let text = exactText(for: resetsAt, now: now, calendar: calendar)
+        guard derived else { return text }
+        for prefix in ["Resets in ", "Resets "] where text.hasPrefix(prefix) {
+            return prefix + "~" + text.dropFirst(prefix.count)
+        }
+        return text
+    }
+
+    private static func exactText(for resetsAt: Date, now: Date, calendar: Calendar) -> String {
         let seconds = resetsAt.timeIntervalSince(now)
         guard seconds > 0 else { return "Resetting…" }
 
