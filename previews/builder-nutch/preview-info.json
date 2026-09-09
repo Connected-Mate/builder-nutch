@@ -1,0 +1,66 @@
+{
+  "source": "https://connected-mate.github.io/builder-nutch/",
+  "assets": [
+    {
+      "path": "favicon.svg",
+      "bytes": 218
+    },
+    {
+      "path": "fonts/bricolage-grotesque.woff2",
+      "bytes": 131312
+    },
+    {
+      "path": "logos/claude.svg",
+      "bytes": 1992
+    },
+    {
+      "path": "logos/cursor.svg",
+      "bytes": 4373
+    },
+    {
+      "path": "logos/deepseek.svg",
+      "bytes": 3642
+    },
+    {
+      "path": "logos/gemini.svg",
+      "bytes": 401
+    },
+    {
+      "path": "logos/grok.svg",
+      "bytes": 9758
+    },
+    {
+      "path": "logos/kimi.svg",
+      "bytes": 1083
+    },
+    {
+      "path": "logos/mistral.svg",
+      "bytes": 1001
+    },
+    {
+      "path": "logos/openai.svg",
+      "bytes": 1775
+    },
+    {
+      "path": "logos/perplexity.svg",
+      "bytes": 2438
+    },
+    {
+      "path": "screenshots/accounts.png",
+      "bytes": 356735
+    },
+    {
+      "path": "screenshots/appearance.png",
+      "bytes": 175447
+    },
+    {
+      "path": "screenshots/assistants.png",
+      "bytes": 270301
+    },
+    {
+      "path": "screenshots/codex.png",
+      "bytes": 249060
+    }
+  ],
+  "note": "Local snapshot. Original design and interactions preserved."
+}

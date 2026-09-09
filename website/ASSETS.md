@@ -53,4 +53,4 @@ These are static screenshots taken at that time. The website does not read curre
 
 ## Builder Nutch icon
 
-`app-icon.png` and `favicon.svg` use the project's own large geometric N on the existing charcoal palette. The native asset catalog is generated at every macOS icon size by `Scripts/render-app-icon.swift`; provider logos remain unchanged.
+`app-icon.png`, also used as the favicon, contains the approved BN monogram. Its master is `Sources/Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png`. `Scripts/render-app-icon.swift` resizes that artwork for macOS and the menu bar, and copies the unchanged master to the website; it never redraws the logo. Provider logos remain unchanged.

@@ -42,22 +42,14 @@ final class StatusItemController {
         self.item = nil
     }
 
-    /// The menu bar mark: its own drawing, not the app icon shrunk down.
-    ///
-    /// A template image, which is what lets macOS tint it — dark on a light
-    /// menu bar, light on a dark one, and correct against a wallpaper-tinted
-    /// bar without the app knowing any of that. The full-colour app icon can do
-    /// none of it: it would fight every system item beside it and ignore the
-    /// user's appearance entirely.
-    ///
-    /// Vector, so it is drawn at whatever the bar asks for rather than scaled
-    /// from a fixed bitmap.
+    /// Use the approved BN artwork in both the Dock and the menu bar.
+    /// Its charcoal tile provides contrast in either system appearance.
     static func icon() -> NSImage? {
         guard let image = NSImage(named: "MenuBarIcon") else { return nil }
         // Menu bar items are laid out on an 18pt square; taller and macOS
         // clips it, shorter and it floats.
         image.size = NSSize(width: 18, height: 18)
-        image.isTemplate = true
+        image.isTemplate = false
         return image
     }
 
