@@ -192,3 +192,9 @@
 "Switch %d min before the cut" = "Basculer %d min avant la coupure";
 "Builder Nutch watches how fast the account is being used and moves on this long before it would stop working." = "Builder Nutch observe la vitesse de consommation du compte et bascule ce délai avant l’arrêt.";
 "Merged duplicate rows for the same subscription: %@. Its sign-in and files were left untouched." = "Doublons fusionnés pour le même abonnement : %@. Sa connexion et ses fichiers n’ont pas été touchés.";
+
+/* Why the Mac login moved */
+"%1$@ had %2$d%% left on its %3$@." = "Il restait %2$d%% à %1$@ sur sa %3$@.";
+"%1$@ was about %2$@ from running out at its current pace." = "À ce rythme, %1$@ était à environ %2$@ de l’épuisement.";
+"The account you chose is available again, so %1$@ handed back." = "Le compte que vous aviez choisi est de nouveau disponible : %1$@ lui rend la main.";
+"usage limit" = "limite d’usage";

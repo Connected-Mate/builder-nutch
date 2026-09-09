@@ -343,7 +343,8 @@ final class NotchWindowController {
                 blockMessage: snapshot.block?.summary(now: model.now),
                 identitySubtitle: snapshot.accountEmail?.isEmpty == false)
             : NotchLayout.automaticSwitchCardHeight(
-                identitySubtitle: snapshot.accountEmail?.isEmpty == false))
+                identitySubtitle: snapshot.accountEmail?.isEmpty == false,
+                reason: accountSwitch?.reason ?? ""))
         // Across the stack the region is the card, its tail, and the gap the
         // pointer has to cross. Along it, the card's own extent.
         let cardAcross = model.edge.isVertical ? NotchLayout.cardWidth : cardHeight

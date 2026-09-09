@@ -111,6 +111,10 @@ struct AutomaticAccountSwitch: Identifiable, Equatable {
     let fromName: String
     let toID: UUID
     let toName: String
+    /// One sentence saying why this happened, in the person's language. A switch
+    /// they cannot explain reads as the app helping itself rather than them, and
+    /// the limit that ran out is usually not the one they were watching.
+    var reason: String = ""
 }
 
 struct ManagedAccountState {
@@ -137,6 +141,16 @@ struct ManagedAccountState {
         return max(0, 100 * (1 - (fractions.max() ?? 1)))
     }
     var needsFirstUsage: Bool { isConnected && windows.isEmpty }
+    /// The window that is actually holding this account back. `remainingPercent`
+    /// reports the worst window, which is often the weekly one rather than the
+    /// five-hour one the person has been watching all day.
+    var bindingWindow: LimitWindow? {
+        windows.filter { $0.usedFraction != nil }
+            .reduce(nil) { worst, next in
+                guard let worst else { return next }
+                return (next.usedFraction ?? 0) > (worst.usedFraction ?? 0) ? next : worst
+            }
+    }
     func isFresh(at now: Date = Date()) -> Bool {
         guard let refreshedAt else { return false }
         return now.timeIntervalSince(refreshedAt) >= -5 && now.timeIntervalSince(refreshedAt) <= 300
@@ -169,39 +183,80 @@ enum ManagedAccountError: LocalizedError {
 enum AccountSelection {
     /// A queued account is not permission to move a healthy running login.
     /// Only a fresh limit reading from the actual system account triggers rotation.
+    /// Why the Mac's login moved. The person is entitled to an answer, and
+    /// building it here is the only place that actually knows.
+    struct SystemClaudeDecision: Equatable {
+        enum Cause: Equatable {
+            /// The account reached the quota floor on its worst window.
+            case spent(remainingPercent: Double)
+            /// The measured burn rate says it is about to.
+            case runningOut(minutes: Double)
+            /// The account the person chose is available again.
+            case preferredReturned
+        }
+        let target: ManagedAccount
+        let cause: Cause
+    }
+
+    /// Below this, "the account I picked is free again" is worth a switch. Above
+    /// it the running account is healthy and moving would be churn for its own sake.
+    static let returnToPreferredCeiling: Double = 50
+
     static func systemClaude(accounts: [ManagedAccount], states: [UUID: ManagedAccountState],
                              order: [UUID], currentID: UUID, preferredID: UUID?,
                              thresholdPercent: Double,
                              forecasts: [UUID: UsageForecast] = [:],
                              switchAheadMinutes: Double = 20,
                              now: Date = Date()) -> ManagedAccount? {
+        systemClaudeDecision(accounts: accounts, states: states, order: order, currentID: currentID,
+                             preferredID: preferredID, thresholdPercent: thresholdPercent,
+                             forecasts: forecasts, switchAheadMinutes: switchAheadMinutes, now: now)?.target
+    }
+
+    /// A healthy account is never left. There are exactly three reasons to move,
+    /// and a fuller sibling is not one of them: which account is best only ever
+    /// decides *where* to go once one of these has already said to go.
+    static func systemClaudeDecision(accounts: [ManagedAccount], states: [UUID: ManagedAccountState],
+                                     order: [UUID], currentID: UUID, preferredID: UUID?,
+                                     thresholdPercent: Double,
+                                     forecasts: [UUID: UsageForecast] = [:],
+                                     switchAheadMinutes: Double = 20,
+                                     now: Date = Date()) -> SystemClaudeDecision? {
         guard let current = states[currentID], current.isConnected, !current.isBusy,
               current.isFresh(at: now), let remaining = current.remainingPercent else { return nil }
         let threshold = min(max(thresholdPercent, 0), 100)
-        // The person asked for this account. Once its own window has rolled over
-        // it takes its place back, rather than waiting for the stand-in to run out.
-        if let preferredID, preferredID != currentID, forecasts[preferredID]?.recoveredAt != nil,
+
+        // (c) The account the person asked for has had its window roll over. Only
+        // worth interrupting a running account that is itself well down.
+        if let preferredID, preferredID != currentID, remaining < Self.returnToPreferredCeiling,
+           forecasts[preferredID]?.recoveredAt != nil,
            let preferred = best(provider: .claude, accounts: accounts.filter { $0.id == preferredID }, states: states, now: now),
            (states[preferredID]?.remainingPercent ?? 0) > max(remaining, threshold) + 0.001 {
-            return preferred
+            return SystemClaudeDecision(target: preferred, cause: .preferredReturned)
         }
-        // Switch on whichever comes first: the quota floor, or the moment the
-        // measured burn rate says this window has less than a switch's notice left.
-        let predicted = forecasts[currentID]?.minutesUntilExhausted(at: now)
-        let runningOut = predicted.map { $0 <= max(switchAheadMinutes, 0) } ?? false
+
+        // (a) The quota floor, and (b) a burn rate measured from real history.
+        // A forecast with one or two readings is not history and cannot move a login.
+        let forecast = forecasts[currentID]
+        let predicted = forecast?.hasReliableTrend == true ? forecast?.minutesUntilExhausted(at: now) : nil
         let spent = remaining <= threshold + 0.001
-        guard spent || runningOut else { return nil }
+        let cause: SystemClaudeDecision.Cause
+        if spent { cause = .spent(remainingPercent: remaining) }
+        else if let predicted, predicted <= max(switchAheadMinutes, 0) { cause = .runningOut(minutes: predicted) }
+        else { return nil }
+
         if let preferredID, preferredID != currentID,
            let preferred = best(provider: .claude, accounts: accounts.filter { $0.id == preferredID }, states: states, now: now),
            (states[preferredID]?.remainingPercent ?? 0) > threshold + 0.001 {
-            return preferred
+            return SystemClaudeDecision(target: preferred, cause: cause)
         }
         // A forecast switch happens while the account still clears the floor, so
         // the current account must not be allowed to win the rotation again.
         let candidate = rotating(provider: .claude, accounts: accounts, states: states,
             order: order, currentID: currentID, thresholdPercent: threshold,
             keepCurrent: spent, now: now)
-        return candidate?.id == currentID ? nil : candidate
+        guard let candidate, candidate.id != currentID else { return nil }
+        return SystemClaudeDecision(target: candidate, cause: cause)
     }
 
     static func best(provider: AccountProvider, accounts: [ManagedAccount], states: [UUID: ManagedAccountState], now: Date = Date()) -> ManagedAccount? {

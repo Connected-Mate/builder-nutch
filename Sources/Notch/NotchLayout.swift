@@ -335,14 +335,28 @@ enum NotchLayout {
 
     /// The automatic handoff receipt always has a two-line message: the event
     /// label, followed by the old and new account names.
-    static func automaticSwitchCardHeight(identitySubtitle: Bool) -> CGFloat {
+    static func automaticSwitchCardHeight(identitySubtitle: Bool,
+                                          reason: String = "") -> CGFloat {
         let header = max(glyphSize, cardTitleLineHeight)
         var height = 2 * cardPadding + header
         if identitySubtitle {
             height += sessionRowGap + cardBodyLineHeight
         }
-        return height + headerToBlock + 2 * cardBodyLineHeight + sessionRowGap
+        height += headerToBlock + 2 * cardBodyLineHeight + sessionRowGap
+        // The sentence saying which limit actually ran out. Capped, like the
+        // alert card's detail and for the same reason: this text is measured in
+        // the system font and drawn in Bricolage, and the receipt only stays up
+        // for a few seconds, so a third line would be more than can be read
+        // anyway.
+        if !reason.isEmpty {
+            height += sessionRowGap
+                + min(bodyTextHeight(reason), switchReasonLines * cardBodyLineHeight)
+        }
+        return height
     }
+
+    /// How much of the switch reason the receipt will show.
+    static let switchReasonLines: CGFloat = 2
 
 
     /// Room at each end of the stack: enough for the settings orb to hang past

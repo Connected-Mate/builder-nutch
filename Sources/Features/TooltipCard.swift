@@ -341,14 +341,27 @@ private struct AutomaticSwitchTooltip: View {
             }
             VStack(alignment: .leading, spacing: NotchLayout.sessionRowGap) {
                 Text("Switched automatically")
+                    .foregroundStyle(Palette.textPrimary)
                 HStack(spacing: NotchLayout.sessionRowGap) {
                     Text(event.fromName).lineLimit(1)
                     Image(systemName: "arrow.right")
                     Text(event.toName).lineLimit(1)
                 }
+                .foregroundStyle(Palette.textPrimary)
+
+                // Which limit actually ran out. Quieter than the handoff above
+                // it, because it is the footnote to that event rather than a
+                // second event — but present, because a switch you cannot
+                // explain reads as the app helping itself rather than you, and
+                // the window that ran out is rarely the one you were watching.
+                if !event.reason.isEmpty {
+                    Text(event.reason)
+                        .foregroundStyle(Palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(Int(NotchLayout.switchReasonLines))
+                }
             }
                 .font(Typography.cardBody)
-                .foregroundStyle(Palette.textPrimary)
                 .padding(.top, NotchLayout.headerToBlock)
         }
     }
@@ -484,9 +497,10 @@ struct TooltipCard: View {
     /// The same figure the hover region uses, so what is drawn and what is
     /// reachable can never drift apart.
     private var height: CGFloat {
-        if automaticSwitch != nil {
+        if let automaticSwitch {
             return NotchLayout.automaticSwitchCardHeight(
-                identitySubtitle: snapshot.accountEmail?.isEmpty == false)
+                identitySubtitle: snapshot.accountEmail?.isEmpty == false,
+                reason: automaticSwitch.reason)
         }
         return NotchLayout.cardHeight(
             windowCount: snapshot.windows.count,

@@ -299,7 +299,8 @@ struct NotchRootView: View {
             ? NotchLayout.cardWidth
             : (model.automaticSwitch?.toID.uuidString == snapshot.id
                 ? NotchLayout.automaticSwitchCardHeight(
-                    identitySubtitle: snapshot.accountEmail?.isEmpty == false)
+                    identitySubtitle: snapshot.accountEmail?.isEmpty == false,
+                    reason: model.automaticSwitch?.reason ?? "")
                 : NotchLayout.cardHeight(
                     windowCount: snapshot.windows.count,
                     sessionCount: model.activity(for: snapshot.id)?.sessions.count ?? 0,

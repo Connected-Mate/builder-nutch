@@ -150,6 +150,18 @@ final class ClaudeSystemRotationTests: XCTestCase {
     }
 
     @MainActor
+    func testTheAutomaticSwitchSaysWhyItHappened() async throws {
+        let (manager, _, _, _, _, accounts, _) = try fixture()
+        manager.automaticSelection = true
+        await manager.refreshAll()
+        let event = try XCTUnwrap(manager.automaticSwitch)
+        XCTAssertEqual(event.toID, accounts[1].id)
+        XCTAssertTrue(event.reason.contains("A"), "The reason names the account that ran out")
+        XCTAssertTrue(event.reason.contains("5h limit"), "and the window that ran out: \(event.reason)")
+        XCTAssertTrue(manager.notice?.contains(event.reason) == true, "The notice leads with the reason")
+    }
+
+    @MainActor
     func testPausedSwitchIsReportedAndTheRetryActionClearsIt() async throws {
         let (manager, _, keychain, credentials, system, accounts, _) = try fixture()
         keychain.rejectDefaultWrite = true

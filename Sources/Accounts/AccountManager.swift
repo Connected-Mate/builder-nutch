@@ -355,7 +355,29 @@ final class AccountManager: ObservableObject {
 
     /// Switch credentials in place. No process is restarted, no transcript is
     /// copied and no Terminal window is created by an automatic rotation.
-    private func activateSystemClaude(_ target: ManagedAccount, automatic: Bool) async throws {
+    /// Says, in one sentence, what made the app move the Mac's login. The window
+    /// that ran out is named because it is usually not the one being watched: a
+    /// weekly limit can be spent while today's five-hour usage looks fine.
+    private func switchReason(_ cause: AccountSelection.SystemClaudeDecision.Cause,
+                              from account: ManagedAccount) -> String {
+        switch cause {
+        case .spent(let remaining):
+            let window = states[account.id]?.bindingWindow?.label
+                ?? NSLocalizedString("usage limit", comment: "Generic limit name")
+            return String(format: NSLocalizedString("%1$@ had %2$d%% left on its %3$@.", comment: "Switch reason"),
+                          account.label, Int(remaining.rounded()), window)
+        case .runningOut(let minutes):
+            let headroom = UsageForecast.headroom(minutes: minutes) ?? ""
+            return String(format: NSLocalizedString("%1$@ was about %2$@ from running out at its current pace.", comment: "Switch reason"),
+                          account.label, headroom)
+        case .preferredReturned:
+            return String(format: NSLocalizedString("The account you chose is available again, so %1$@ handed back.", comment: "Switch reason"),
+                          account.label)
+        }
+    }
+
+    private func activateSystemClaude(_ target: ManagedAccount, automatic: Bool,
+                                      cause: AccountSelection.SystemClaudeDecision.Cause? = nil) async throws {
         guard let credentials = systemCredentials, target.provider == .claude,
               !hasShutDown, !isSwitchingClaude, !busyIDs.contains(target.id), !authenticationInProgress else { throw ManagedAccountError.busy }
         updateSystemClaudeIdentity()
@@ -384,10 +406,12 @@ final class AccountManager: ObservableObject {
         systemClaudeAccountID = target.id
         guard !hasShutDown else { return }
         ClaudeCredentials.forgetCached()
+        let reason = cause.map { switchReason($0, from: current) } ?? ""
         notice = "Claude now uses \(target.label) on this Mac. Sessions using the Mac login pick up this account on their next request."
+        if !reason.isEmpty { notice = reason + " " + (notice ?? "") }
         if automatic {
             automaticSwitch = AutomaticAccountSwitch(provider: .claude, fromID: current.id,
-                fromName: current.label, toID: target.id, toName: target.label)
+                fromName: current.label, toID: target.id, toName: target.label, reason: reason)
         }
     }
 
@@ -406,12 +430,13 @@ final class AccountManager: ObservableObject {
         updateSystemClaudeIdentity()
         guard automaticSelection, !authenticationInProgress,
               let currentID = systemClaudeAccountID,
-              let candidate = AccountSelection.systemClaude(accounts: accounts, states: states,
+              let decision = AccountSelection.systemClaudeDecision(accounts: accounts, states: states,
                 order: rotationOrder[.claude] ?? [], currentID: currentID,
                 preferredID: selected[.claude], thresholdPercent: switchThresholdPercent,
                 forecasts: usageForecasts, switchAheadMinutes: switchAheadMinutes),
-              !busyIDs.contains(currentID), !busyIDs.contains(candidate.id) else { return }
-        do { try await activateSystemClaude(candidate, automatic: true) }
+              !busyIDs.contains(currentID), !busyIDs.contains(decision.target.id) else { return }
+        let candidate = decision.target
+        do { try await activateSystemClaude(candidate, automatic: true, cause: decision.cause) }
         catch {
             guard !hasShutDown else { return }
             systemSwitchPaused = true

@@ -49,6 +49,11 @@ struct UsageForecast: Equatable {
         if samples.count > Self.capacity { samples.removeFirst(samples.count - Self.capacity) }
     }
 
+    /// True only when there is enough history to claim a rate at all: three
+    /// readings spanning five minutes. A forecast is allowed to move the Mac's
+    /// login, so the bar for having one is stated here rather than left implied.
+    var hasReliableTrend: Bool { burnRate != nil }
+
     /// Fraction of the window spent per minute, or nil while the trend is unknown.
     /// A least-squares slope, so one noisy reading cannot fake an emergency.
     var burnRate: Double? {
