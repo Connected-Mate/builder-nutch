@@ -17,6 +17,8 @@ struct ClaudeAccountDiagnostics {
         var hasAccess: Bool?
         var hasRefresh: Bool?
         var keychainStatus: Int32?
+        var access: String?
+        var readableByClaude: Bool?
     }
     struct Report: Codable {
         let version: Int
@@ -24,7 +26,7 @@ struct ClaudeAccountDiagnostics {
         let entries: [Entry]
     }
 
-    var keychain: any ClaudeCredentialKeychain = ClaudeNativeCredentialKeychain()
+    var keychain: any ClaudeCredentialKeychain = ClaudeResilientCredentialKeychain()
     var interaction = KeychainInteraction.shared
     var readFile: (URL) throws -> Data? = Self.readFileSafely
     var now: () -> Date = Date.init
@@ -136,6 +138,10 @@ struct ClaudeAccountDiagnostics {
             }
             result.expired = expiry.doubleValue / 1000 <= now().timeIntervalSince1970
             result.credentialStatus = result.hasAccess == true && result.hasRefresh == true ? "read" : "incomplete"
+            result.access = (keychain as? ClaudeResilientCredentialKeychain)?.backend(for: location.service).rawValue
+            if let missing = try? ClaudeNativeCredentialKeychain().needsHelperSharing(service: location.service, account: keychainAccount) {
+                result.readableByClaude = !missing
+            }
         } catch ClaudeSystemCredentialError.keychain(let status) {
             result.keychainStatus = status
             result.credentialStatus = [errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled].contains(status) ? "denied" : "read_error"

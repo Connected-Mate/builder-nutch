@@ -28,7 +28,7 @@ struct ClaudeCredentialIdentity: Equatable {
 
 enum ClaudeSystemCredentialError: LocalizedError {
     case unsafePath, malformedData, missingLogin, identityMismatch, expiredLogin
-    case changedDuringCopy, fallbackCredentials, keychain(OSStatus), rollbackFailed, storageBusy
+    case changedDuringCopy, fallbackCredentials, keychain(OSStatus), rollbackFailed, storageBusy, refreshUnavailable
 
     var requiresAccess: Bool {
         guard case .keychain(let status) = self else { return false }
@@ -42,6 +42,7 @@ enum ClaudeSystemCredentialError: LocalizedError {
         case .missingLogin: return "This Claude account has no saved subscription login."
         case .identityMismatch: return "The saved Claude login no longer matches the selected account."
         case .expiredLogin: return "This saved Claude login has expired. Sign in to that account again."
+        case .refreshUnavailable: return "Claude could not renew this login right now. It will retry automatically."
         case .storageBusy: return "Claude is updating its login. Try the switch again in a moment."
         case .changedDuringCopy: return "Claude changed its login or settings during the switch. Try again."
         case .fallbackCredentials: return "Claude has a separate credentials file. Switching is unavailable until this ambiguous login is resolved."
@@ -173,6 +174,13 @@ final class ClaudeSystemCredentials {
     private let invalidateCache: (ClaudeCredentialLocation) throws -> Void
     private let lock = NSLock()
     private let lifecycleLock = NSLock()
+    private let renew: (String, [String]?) throws -> ClaudeTokenRenewal
+    private struct RenewalFailure {
+        let credential: ClaudeCredentialSnapshot
+        let until: Date
+        let error: Error
+    }
+    private var renewalFailures: [String: RenewalFailure] = [:]
     private var stopping = false
 
     func requestStop() { lifecycleLock.lock(); stopping = true; lifecycleLock.unlock() }
@@ -182,16 +190,18 @@ final class ClaudeSystemCredentials {
         if stopping { throw ManagedAccountError.cancelled }
     }
 
-    init(keychain: any ClaudeCredentialKeychain = ClaudeNativeCredentialKeychain(),
+    init(keychain: any ClaudeCredentialKeychain = ClaudeResilientCredentialKeychain(),
          account: String = ClaudeSystemCredentials.keychainAccount(),
          now: @escaping () -> Date = Date.init,
          writeConfig: @escaping (Data, URL, Data?) throws -> Void = ClaudeSystemCredentials.writeConfigSafely,
-         invalidateCache: @escaping (ClaudeCredentialLocation) throws -> Void = ClaudeSystemCredentials.invalidateLoginCache) {
+         invalidateCache: @escaping (ClaudeCredentialLocation) throws -> Void = ClaudeSystemCredentials.invalidateLoginCache,
+         renew: @escaping (String, [String]?) throws -> ClaudeTokenRenewal = ClaudeTokenRefresh.exchange) {
         self.keychain = keychain
         self.account = account
         self.now = now
         self.writeConfig = writeConfig
         self.invalidateCache = invalidateCache
+        self.renew = renew
     }
 
     static func keychainAccount(environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -215,25 +225,117 @@ final class ClaudeSystemCredentials {
         let plan: String?
     }
 
-    /// Read-only and noninteractive. The official app owns token refresh.
-    func subscriptionLogin(at location: ClaudeCredentialLocation) throws -> SubscriptionLogin {
+    /// Fresh credentials remain read-only. Expired credentials are renewed without
+    /// starting Claude or permitting any Keychain authorization UI.
+    func subscriptionLogin(at location: ClaudeCredentialLocation,
+                           cancellation: AccountCancellation? = nil) throws -> SubscriptionLogin {
         lock.lock()
         defer { lock.unlock() }
-        try checkRunning()
-        guard let identity = try identity(at: location),
-              let secret = try keychain.read(service: location.service, account: account),
-              let oauth = try Self.object(secret.data)["claudeAiOauth"] as? [String: Any],
-              let token = oauth["accessToken"] as? String, !token.isEmpty,
-              let expiry = oauth["expiresAt"] as? NSNumber,
-              CFGetTypeID(expiry) != CFBooleanGetTypeID(), expiry.doubleValue.isFinite
-        else { throw ClaudeSystemCredentialError.missingLogin }
-        guard expiry.doubleValue / 1000 > now().timeIntervalSince1970 else { throw ClaudeSystemCredentialError.expiredLogin }
-        return SubscriptionLogin(identity: identity, accessToken: token, plan: oauth["subscriptionType"] as? String)
+        func checkCancellation() throws {
+            try checkRunning()
+            if cancellation?.isCancelled == true { throw ManagedAccountError.cancelled }
+        }
+        func snapshot() throws -> (ClaudeCredentialIdentity, ClaudeCredentialSnapshot, [String: Any]) {
+            guard let identity = try self.identity(at: location),
+                  let secret = try keychain.read(service: location.service, account: account),
+                  let oauth = try Self.object(secret.data)["claudeAiOauth"] as? [String: Any],
+                  let token = oauth["accessToken"] as? String, !token.isEmpty,
+                  let expiry = oauth["expiresAt"] as? NSNumber,
+                  CFGetTypeID(expiry) != CFBooleanGetTypeID(), expiry.doubleValue.isFinite
+            else { throw ClaudeSystemCredentialError.missingLogin }
+            return (identity, secret, oauth)
+        }
+        func fresh(_ oauth: [String: Any]) -> Bool {
+            ((oauth["expiresAt"] as? NSNumber)?.doubleValue ?? 0) > now().timeIntervalSince1970 * 1000
+        }
+        func login(_ identity: ClaudeCredentialIdentity, _ oauth: [String: Any]) -> SubscriptionLogin {
+            SubscriptionLogin(identity: identity, accessToken: oauth["accessToken"] as! String,
+                              plan: oauth["subscriptionType"] as? String)
+        }
+        try checkCancellation()
+        let initial = try snapshot()
+        if fresh(initial.2) { return login(initial.0, initial.2) }
+        // Do not create a lock or send a request when no renewal is possible.
+        guard let refresh = initial.2["refreshToken"] as? String, !refresh.isEmpty else {
+            throw ClaudeSystemCredentialError.expiredLogin
+        }
+        let storageLock = try ClaudeStorageWriteLock(directory: location.directory, checkCancellation: checkCancellation)
+        defer { storageLock.release() }
+        try checkCancellation()
+        // Claude may have rotated this token while we waited for its storage lock.
+        let (identity, previous, oauth) = try snapshot()
+        guard identity == initial.0 else { throw ClaudeSystemCredentialError.changedDuringCopy }
+        if fresh(oauth) { return login(identity, oauth) }
+        guard let refreshToken = oauth["refreshToken"] as? String, !refreshToken.isEmpty else {
+            throw ClaudeSystemCredentialError.expiredLogin
+        }
+        if let failure = renewalFailures[location.service], failure.credential == previous, failure.until > now() {
+            throw failure.error
+        }
+        let scopes = try ClaudeTokenRefresh.scopes(oauth["scopes"])
+        try storageLock.check()
+        try checkCancellation()
+        let renewed: ClaudeTokenRenewal
+        do { renewed = try renew(refreshToken, scopes) }
+        catch {
+            let until: Date
+            if case ClaudeSystemCredentialError.expiredLogin = error { until = .distantFuture }
+            else if case UsageProviderError.rateLimited(let delay) = error { until = now().addingTimeInterval(max(60, delay)) }
+            else { until = now().addingTimeInterval(60) }
+            renewalFailures[location.service] = RenewalFailure(credential: previous, until: until, error: error)
+            throw error
+        }
+        // The server may already have invalidated the old refresh token. From here
+        // finish persistence even on cancellation/shutdown; NEVER restore the old token.
+        try Self.validateLocation(location)
+        guard try self.identity(at: location) == identity,
+              let current = try keychain.read(service: location.service, account: account) else {
+            throw ClaudeSystemCredentialError.changedDuringCopy
+        }
+        var payload = try Self.object(current.data)
+        guard var currentOAuth = payload["claudeAiOauth"] as? [String: Any],
+              current.reference == previous.reference,
+              currentOAuth["refreshToken"] as? String == refreshToken,
+              currentOAuth["accessToken"] as? String == oauth["accessToken"] as? String else {
+            throw ClaudeSystemCredentialError.changedDuringCopy
+        }
+        // Merge into the latest payload, preserving unrelated credentials and metadata.
+        currentOAuth["accessToken"] = renewed.accessToken
+        currentOAuth["refreshToken"] = renewed.refreshToken ?? refreshToken
+        currentOAuth["expiresAt"] = (now().timeIntervalSince1970 + renewed.expiresIn) * 1000
+        if let scopes = renewed.scopes { currentOAuth["scopes"] = scopes }
+        if let lifetime = renewed.refreshTokenExpiresIn {
+            currentOAuth["refreshTokenExpiresAt"] = (now().timeIntervalSince1970 + lifetime) * 1000
+        }
+        payload["claudeAiOauth"] = currentOAuth
+        try storageLock.check()
+        _ = try keychain.replace(service: location.service, account: account, expected: current,
+                                 data: Self.encodeKeychainPayload(payload))
+        renewalFailures.removeValue(forKey: location.service)
+        // A cache-marker failure must never roll back a remotely rotated token.
+        try invalidateCache(location)
+        try checkCancellation()
+        return login(identity, currentOAuth)
     }
 
     func authorize(at location: ClaudeCredentialLocation) throws {
         try Self.validateLocation(location)
         try ClaudeNativeCredentialKeychain().authorize(service: location.service, account: account)
+    }
+
+    /// Make a saved login readable by Claude Code's own `security` calls without a
+    /// password prompt. Silent, prompt-free, and a no-op for items the helper
+    /// already owns. Returns true when the item was moved.
+    func shareLoginWithClaude(at location: ClaudeCredentialLocation) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        try checkRunning()
+        try Self.validateLocation(location)
+        guard let resilient = keychain as? ClaudeResilientCredentialKeychain else { return false }
+        let storageLock = try ClaudeStorageWriteLock(directory: location.directory)
+        defer { storageLock.release() }
+        try storageLock.check()
+        return try resilient.shareWithHelper(service: location.service, account: account)
     }
 
     /// Recover the same login if an older build wrote pretty-printed password

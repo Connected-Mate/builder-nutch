@@ -780,8 +780,7 @@ final class UpdateOutcomeTests: XCTestCase {
     }
 }
 
-/// The menu bar mark. Loaded from the asset catalogue rather than drawn from
-/// the app icon, and a template so macOS can tint it for whatever the bar is.
+/// The menu bar uses the approved BN artwork, retaining its charcoal tile.
 @MainActor
 final class MenuBarIconTests: XCTestCase {
     func testTheIconLoadsAndIsNotEmpty() throws {
@@ -791,10 +790,8 @@ final class MenuBarIconTests: XCTestCase {
         XCTAssertFalse(icon.representations.isEmpty, "the image carries nothing to draw")
     }
 
-    /// Without this macOS cannot tint it, and the mark stays black on a dark
-    /// menu bar — invisible.
-    func testItIsATemplate() throws {
-        XCTAssertTrue(try XCTUnwrap(StatusItemController.icon()).isTemplate)
+    func testItPreservesTheApprovedArtwork() throws {
+        XCTAssertFalse(try XCTUnwrap(StatusItemController.icon()).isTemplate)
     }
 }
 

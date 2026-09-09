@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "cli": {
+    "pid": 30450,
+    "version": "2.1.266",
+    "session": "a781d658-ca23-4dde-a66c-47c05800fcca"
+  },
+  "requests": [
+    {
+      "stage": "initial",
+      "authorization": "Bearer TEST-ONLY-A",
+      "stream": true
+    },
+    {
+      "stage": "immediate-switch",
+      "authorization": "Bearer TEST-ONLY-B",
+      "stream": true
+    },
+    {
+      "stage": "idle-past-marker-cleanup",
+      "authorization": "Bearer TEST-ONLY-A",
+      "stream": true
+    }
+  ],
+  "idle_seconds": 37.001972292,
+  "marker_removed": true,
+  "external_network": "kernel-denied",
+  "production_copy_login_calls": 2,
+  "keychain": "explicit disposable keychain; guarded helper; search list unchanged"
+}

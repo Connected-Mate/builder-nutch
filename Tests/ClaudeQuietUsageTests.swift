@@ -7,15 +7,22 @@ final class ClaudeQuietUsageTests: XCTestCase {
         var reads = 0
         var error: Error?
         var expiry = Date().addingTimeInterval(3600)
+        var refreshToken: String?
+        var written: ClaudeCredentialSnapshot?
         func read(service: String, account: String) throws -> ClaudeCredentialSnapshot? {
             reads += 1
             if let error { throw error }
+            if let written { return written }
+            var oauth: [String: Any] = ["accessToken": "FAKE-TEST-ONLY", "expiresAt": expiry.timeIntervalSince1970 * 1000, "subscriptionType": "max"]
+            if let refreshToken { oauth["refreshToken"] = refreshToken }
             return ClaudeCredentialSnapshot(reference: Data([1]), data: try JSONSerialization.data(withJSONObject:
-                ["claudeAiOauth": ["accessToken": "FAKE-TEST-ONLY", "expiresAt": expiry.timeIntervalSince1970 * 1000,
-                                  "subscriptionType": "max"]]))
+                ["claudeAiOauth": oauth]))
         }
         func replace(service: String, account: String, expected: ClaudeCredentialSnapshot?, data: Data) throws -> ClaudeCredentialSnapshot {
-            XCTFail("A usage read must never update credentials"); throw ManagedAccountError.unavailable
+            guard refreshToken != nil else { XCTFail("Fresh usage must not write credentials"); throw ManagedAccountError.unavailable }
+            let snapshot = ClaudeCredentialSnapshot(reference: expected!.reference, data: data)
+            written = snapshot
+            return snapshot
         }
         func restore(service: String, account: String, written: ClaudeCredentialSnapshot, previous: ClaudeCredentialSnapshot?) throws {
             XCTFail("A usage read must never write credentials")
@@ -40,7 +47,9 @@ final class ClaudeQuietUsageTests: XCTestCase {
         override func stopLoading() {}
     }
 
-    private func fixture() throws -> (ClaudeQuietUsageReader, ClaudeCredentialLocation, Keychain) {
+    private func fixture(renew: @escaping (String, [String]?) throws -> ClaudeTokenRenewal = { _, _ in
+        XCTFail("This test must not renew credentials"); throw ManagedAccountError.unavailable
+    }) throws -> (ClaudeQuietUsageReader, ClaudeCredentialLocation, Keychain) {
         let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("quiet-usage-\(UUID())")
         try AccountStorage.privateDirectory(root)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
@@ -52,8 +61,28 @@ final class ClaudeQuietUsageTests: XCTestCase {
         configuration.protocolClasses = [Transport.self]
         Transport.requests = 0; Transport.status = 200
         Transport.payload = Data(#"{"five_hour":{"utilization":23},"seven_day":{"utilization":60}}"#.utf8)
-        return (ClaudeQuietUsageReader(credentials: ClaudeSystemCredentials(keychain: keychain),
+        return (ClaudeQuietUsageReader(credentials: ClaudeSystemCredentials(keychain: keychain, invalidateCache: { _ in }, renew: renew),
             session: URLSession(configuration: configuration)), location, keychain)
+    }
+
+    func testExpiredSavedSubscriptionRenewsThenReadsUsageWithoutCLI() async throws {
+        var exchanges = 0
+        let (reader, location, keychain) = try fixture { token, scopes in
+            exchanges += 1
+            XCTAssertEqual(token, "fake-refresh")
+            XCTAssertNil(scopes, "Missing stored scopes must not request extra permissions")
+            return ClaudeTokenRenewal(accessToken: "FAKE-TEST-ONLY", refreshToken: "fake-rotated",
+                                      expiresIn: 3600, scopes: nil, refreshTokenExpiresIn: nil)
+        }
+        keychain.expiry = .distantPast
+        keychain.refreshToken = "fake-refresh"
+        let state = try await reader.read(location, cancellation: AccountCancellation())
+        XCTAssertEqual(state.remainingPercent, 40)
+        XCTAssertTrue(state.isFresh())
+        XCTAssertEqual(exchanges, 1)
+        XCTAssertEqual(Transport.requests, 1)
+        let saved = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(keychain.written).data) as? [String: Any])
+        XCTAssertEqual((saved["claudeAiOauth"] as? [String: Any])?["refreshToken"] as? String, "fake-rotated")
     }
 
     func testReadsRealShapeWithoutWritingOrLaunchingCLI() async throws {

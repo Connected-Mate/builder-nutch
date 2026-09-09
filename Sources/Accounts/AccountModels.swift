@@ -237,3 +237,26 @@ enum AccountSelection {
             ?? cycle.max { (states[$0.id]?.remainingPercent ?? 0) < (states[$1.id]?.remainingPercent ?? 0) }
     }
 }
+
+/// Something the person has to act on. Published by `AccountManager`; rendered
+/// by the notch (red edge, flashing glyph, escalation to a notification after
+/// an hour) and by the accounts window (banner with a Repair / Reconnect action).
+struct AccountAttention: Equatable, Identifiable {
+    enum Kind: String, Equatable {
+        /// A saved login expired or was revoked and needs a fresh sign-in.
+        case reconnect
+        /// Automatic switching stopped and will not resume on its own.
+        case switchPaused
+        /// No usable account is left in the queue after the current one.
+        case queueEmpty
+        /// macOS refuses the app access to a login; the person must allow it.
+        case keychainAccess
+    }
+    let kind: Kind
+    /// The account concerned, when there is one.
+    let accountID: UUID?
+    let title: String
+    let detail: String
+    let raisedAt: Date
+    var id: String { kind.rawValue + (accountID?.uuidString ?? "") }
+}

@@ -5,7 +5,7 @@ protocol ClaudeAccountReading {
 }
 
 /// Reads the same endpoint as Claude's usage page, without starting Claude or
-/// its interactive `security` helper. Failures never launch a login or refresh tokens.
+/// its interactive `security` helper. Expired subscriptions renew natively without prompts.
 actor ClaudeQuietUsageReader: ClaudeAccountReading {
     private let credentials: ClaudeSystemCredentials
     private let session: URLSession
@@ -31,7 +31,11 @@ actor ClaudeQuietUsageReader: ClaudeAccountReading {
             throw UsageProviderError.rateLimited(retryAfter: until.timeIntervalSince(now()))
         }
         let credentials = self.credentials
-        let login = try await Task.detached(priority: .utility) { try credentials.subscriptionLogin(at: location) }.value
+        let login = try await withTaskCancellationHandler(operation: {
+            try await Task.detached(priority: .utility) {
+                try credentials.subscriptionLogin(at: location, cancellation: cancellation)
+            }.value
+        }, onCancel: { cancellation.cancel() })
         guard !cancellation.isCancelled, !Task.isCancelled else { throw ManagedAccountError.cancelled }
         var request = URLRequest(url: endpoint)
         request.setValue("Bearer \(login.accessToken)", forHTTPHeaderField: "Authorization")

@@ -96,6 +96,25 @@ final class AccountManager: ObservableObject {
         }
         loaded = true
         recoverClaudeCacheMarkers()
+        shareSavedClaudeLogins()
+    }
+
+    /// Saved logins this app created natively are moved to Apple's helper once,
+    /// so a sign-in or session launched for that profile never asks for the
+    /// Keychain password. Runs in the background; failures stay silent because
+    /// the app itself can still read the item either way.
+    private func shareSavedClaudeLogins() {
+        guard let credentials = systemCredentials else { return }
+        let locations = accounts.filter { $0.provider == .claude && $0.existingProfile == nil }.map(credentialLocation)
+        Task.detached(priority: .utility) {
+            for location in locations { _ = try? credentials.shareLoginWithClaude(at: location) }
+        }
+    }
+
+    private func shareClaudeLogin(_ account: ManagedAccount) async {
+        guard let credentials = systemCredentials, account.provider == .claude, account.existingProfile == nil else { return }
+        let location = credentialLocation(for: account)
+        _ = try? await Task.detached(priority: .userInitiated) { try credentials.shareLoginWithClaude(at: location) }.value
     }
 
     private func recoverClaudeCacheMarkers() {
@@ -418,6 +437,7 @@ final class AccountManager: ObservableObject {
                 return
             }
             let (executable, profile, environment) = try prepare(account)
+            await shareClaudeLogin(account)
             var args: [String]
             switch account.provider {
             case .claude: args = ["auth", "login", "--claudeai"]
@@ -701,6 +721,7 @@ final class AccountManager: ObservableObject {
                 chosen = candidate
             } else { await refresh(chosen) }
             guard !busyIDs.contains(chosen.id), state(for: chosen).isConnected else { throw ManagedAccountError.notConnected }
+            await shareClaudeLogin(chosen)
             let (executable, profile, _) = try prepare(chosen)
             let scripts = try usableStorage().root.appendingPathComponent("launchers", isDirectory: true)
             try AccountStorage.privateDirectory(scripts)
