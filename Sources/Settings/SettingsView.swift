@@ -90,6 +90,31 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // One switch per thing macOS might say. The notch shows everything
+            // regardless; these only decide what is allowed to interrupt.
+            settingsSection("Notifications") {
+                Toggle("Tell me when an account is running low", isOn: $preferences.usageAlerts)
+                // Wrapped in a key rather than written as a concatenated
+                // literal: `Text` only localises a literal, and a `+` chain
+                // is a `String` by the time it arrives.
+                Text(LocalizedStringKey(SettingsView.usageAlertsCopy))
+                    .font(AppTheme.font(.caption))
+                    .foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Toggle("Tell me when an account needs me", isOn: $preferences.problemAlerts)
+                Text(LocalizedStringKey(SettingsView.problemAlertsCopy))
+                    .font(AppTheme.font(.caption))
+                    .foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Toggle("Tell me when the account changes by itself", isOn: $preferences.switchAlerts)
+                Text(LocalizedStringKey(SettingsView.switchAlertsCopy))
+                    .font(AppTheme.font(.caption))
+                    .foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             // Startup and updates together: both are about what Codenotch does
             // without being asked, and one switch under its own header looked
             // like an oversight rather than a section.
@@ -99,16 +124,6 @@ struct SettingsView: View {
                                     get: { AppLanguage(rawValue: appLanguage) ?? .system },
                                     set: { appLanguage = $0.rawValue }
                                 ), title: { $0.title })
-                Toggle("Tell me when an account is running low", isOn: $preferences.usageAlerts)
-
-                // Wrapped in a key rather than written as a concatenated
-                // literal: `Text` only localises a literal, and a `+` chain
-                // is a `String` by the time it arrives.
-                Text(LocalizedStringKey(SettingsView.usageAlertsCopy))
-                    .font(AppTheme.font(.caption))
-                    .foregroundStyle(AppTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-
                 Toggle("Open Builder Nutch at login", isOn: $preferences.launchAtLogin)
                 if let problem = preferences.launchAtLoginProblem {
                     Text(problem)
@@ -243,8 +258,16 @@ struct SettingsView: View {
     /// come away thinking they have also silenced a broken account.
     static let usageAlertsCopy =
         "A notification at 50%, 75% and 85% of each limit, once per account "
-        + "each time the limit resets. Builder Nutch always tells you when an "
-        + "account needs reconnecting."
+        + "each time the limit resets."
+
+    static let problemAlertsCopy =
+        "A notification when the notch has been red for an hour without being "
+        + "looked at: a login to redo, a switch that stopped. The notch shows it "
+        + "either way."
+
+    static let switchAlertsCopy =
+        "A notification each time Builder Nutch moves the Mac to another "
+        + "account. The notch shows the handoff either way."
 
     /// Nothing to read from anywhere. On a first launch that is the normal
     /// state, and it is the only moment the sheet has something to explain.

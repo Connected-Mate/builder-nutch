@@ -49,6 +49,20 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(usageAlerts, forKey: Keys.usageAlerts) }
     }
 
+    /// Whether macOS says something when an account has needed the person for
+    /// an hour and the notch's red has gone unnoticed. On by default: this is
+    /// the one that stops a rotation from failing silently.
+    @Published var problemAlerts: Bool {
+        didSet { defaults.set(problemAlerts, forKey: Keys.problemAlerts) }
+    }
+
+    /// Whether macOS says something each time the Mac's login moves to another
+    /// account by itself. Off by default: the notch already shows the receipt,
+    /// and a handoff is good news, not an interruption.
+    @Published var switchAlerts: Bool {
+        didSet { defaults.set(switchAlerts, forKey: Keys.switchAlerts) }
+    }
+
     /// The version whose changes have already been shown.
     ///
     /// Written when the What's New dialogue is dismissed rather than when it
@@ -81,6 +95,8 @@ final class Preferences: ObservableObject {
         static let usageDisplayMode = "usageDisplayMode"
         static let hasChosenUsageDisplay = "hasChosenUsageDisplay"
         static let usageAlerts = "usageAlerts"
+        static let problemAlerts = "problemAlerts"
+        static let switchAlerts = "switchAlerts"
     }
 
     /// True the very first time this copy runs, and never again.
@@ -140,6 +156,8 @@ final class Preferences: ObservableObject {
         // Absent means never chosen, and never chosen means on — `bool(forKey:)`
         // alone would read a missing key as a deliberate "no".
         self.usageAlerts = defaults.object(forKey: Keys.usageAlerts) as? Bool ?? true
+        self.problemAlerts = defaults.object(forKey: Keys.problemAlerts) as? Bool ?? true
+        self.switchAlerts = defaults.object(forKey: Keys.switchAlerts) as? Bool ?? false
         // Absent means nothing has been shown yet, which is true of a fresh
         // install — so the current release reads as new to it.
         self.lastSeenVersion = defaults.string(forKey: Keys.lastSeenVersion)

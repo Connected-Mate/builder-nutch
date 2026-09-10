@@ -74,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let escalator = AttentionEscalator(notifier: notifier)
         let thresholds = UsageThresholdNotifier(notifier: notifier)
         thresholds.isEnabled = preferences.usageAlerts
+        escalator.isEnabled = preferences.problemAlerts
         // A notification about a broken account is only useful if clicking it
         // lands on the account.
         notifier.onActivate = { [weak self] in self?.openAccounts() }
@@ -139,12 +140,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences.$usageAlerts.receive(on: RunLoop.main).sink { [weak thresholds] in
             thresholds?.isEnabled = $0
         }.store(in: &cancellables)
+        preferences.$problemAlerts.receive(on: RunLoop.main).sink { [weak escalator] in
+            escalator?.isEnabled = $0
+        }.store(in: &cancellables)
         manager.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
             self?.updateNotch()
         }.store(in: &cancellables)
-        manager.$automaticSwitch.compactMap { $0 }.receive(on: RunLoop.main).sink { [weak self] event in
+        manager.$automaticSwitch.compactMap { $0 }.receive(on: RunLoop.main).sink { [weak self, weak notifier] event in
             self?.updateNotch()
             self?.notchController?.presentAutomaticSwitch(event)
+            // Only when asked: the notch's receipt is the default way of hearing
+            // about a handoff, and a notification for good news is noise to
+            // most people. Off by default, one line in Settings to turn on.
+            if self?.preferences?.switchAlerts == true {
+                notifier?.post(UserNotice(
+                    id: "switch." + event.id.uuidString,
+                    title: String(format: NSLocalizedString("Claude now uses %@", comment: "Switch notification title"), event.toName),
+                    body: event.reason.isEmpty
+                        ? String(format: NSLocalizedString("%@ handed over.", comment: "Switch notification body"), event.fromName)
+                        : event.reason))
+            }
         }.store(in: &cancellables)
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.refresh() }

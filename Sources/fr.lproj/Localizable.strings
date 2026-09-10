@@ -185,7 +185,7 @@
 "%1$@ · %2$@ %3$d%% used" = "%1$@ · %2$@ %3$d %% utilisés";
 "%1$@ · %2$d%% left." = "%1$@ · %2$d %% restants.";
 "Tell me when an account is running low" = "Me prévenir quand un compte s’épuise";
-"A notification at 50%, 75% and 85% of each limit, once per account each time the limit resets. Builder Nutch always tells you when an account needs reconnecting." = "Une notification à 50 %, 75 % et 85 % de chaque limite, une fois par compte à chaque remise à zéro. Builder Nutch vous prévient toujours lorsqu’un compte doit être reconnecté.";
+"A notification at 50%, 75% and 85% of each limit, once per account each time the limit resets." = "Une notification à 50 %, 75 % et 85 % de chaque limite, une fois par compte à chaque remise à zéro.";
 
 /* Switch-ahead control and duplicate merge */
 "Switch before the cut" = "Basculer avant la coupure";
@@ -236,3 +236,10 @@
 "%1$@ is now signed in as %2$@ (it was %3$@)." = "%1$@ est maintenant connecté avec %2$@ (c’était %3$@).";
 "Something outside Builder Nutch — usually a Claude session still running as %1$@ — put it back on this Mac, so your choice was restored. To use %1$@ instead, choose it here; close and reopen older Claude sessions so they follow." = "Quelque chose hors de Builder Nutch — en général une session Claude encore ouverte avec %1$@ — l’a remis sur ce Mac : votre choix a été rétabli. Pour utiliser %1$@ à la place, choisissez-le ici ; fermez puis rouvrez les anciennes sessions Claude pour qu’elles suivent.";
 "This Mac is signed in to %@, which is not in your list. Add it as an account first so its login is kept, or sign in to a listed account." = "Ce Mac est connecté avec %@, qui n’est pas dans votre liste. Ajoutez-le d’abord comme compte pour garder sa connexion, ou connectez-vous à un compte de la liste.";
+"Notifications" = "Notifications";
+"Tell me when an account needs me" = "Me prévenir quand un compte a besoin de moi";
+"A notification when the notch has been red for an hour without being looked at: a login to redo, a switch that stopped. The notch shows it either way." = "Une notification quand l’encoche est restée rouge une heure sans être regardée : une connexion à refaire, un changement arrêté. L’encoche l’affiche de toute façon.";
+"Tell me when the account changes by itself" = "Me prévenir quand le compte change tout seul";
+"A notification each time Builder Nutch moves the Mac to another account. The notch shows the handoff either way." = "Une notification à chaque fois que Builder Nutch fait passer le Mac sur un autre compte. L’encoche affiche le passage de toute façon.";
+"Claude now uses %@" = "Claude utilise maintenant %@";
+"%@ handed over." = "%@ a passé la main.";

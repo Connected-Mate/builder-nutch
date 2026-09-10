@@ -24,6 +24,9 @@ final class AttentionEscalator {
     private let delay: TimeInterval
     private let clock: () -> Date
 
+    /// Off means the notch still goes red, and macOS is never asked to speak.
+    var isEnabled = true
+
     private var alert: NotchAlert?
     /// Problems already escalated. One notification per problem, ever.
     private var escalated: Set<String> = []
@@ -60,7 +63,7 @@ final class AttentionEscalator {
     /// waiting an hour or owning a notification centre.
     @discardableResult
     func evaluate(now: Date) -> UserNotice? {
-        guard let alert, !escalated.contains(alert.id) else { return nil }
+        guard isEnabled, let alert, !escalated.contains(alert.id) else { return nil }
         guard now.timeIntervalSince(alert.raisedAt) >= delay else { return nil }
         if let lastOpenedAccounts, lastOpenedAccounts >= alert.raisedAt { return nil }
         escalated.insert(alert.id)

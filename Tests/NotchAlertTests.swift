@@ -279,6 +279,21 @@ final class AttentionEscalatorTests: XCTestCase {
         AttentionEscalator(notifier: notifier, delay: 3600, clock: { self.raised })
     }
 
+    /// Switched off in Settings, the hour passes in silence — and the problem
+    /// is not marked as said, so switching back on later still tells it once.
+    func testSwitchedOffTheHourPassesInSilenceAndNothingIsSpent() {
+        let notifier = RecordingNotifier()
+        let escalator = escalator(notifier)
+        defer { escalator.stop() }
+        escalator.isEnabled = false
+        escalator.update(makeAlert(raisedAt: raised))
+        XCTAssertNil(escalator.evaluate(now: raised.addingTimeInterval(7200)))
+        XCTAssertTrue(notifier.posted.isEmpty)
+        escalator.isEnabled = true
+        XCTAssertNotNil(escalator.evaluate(now: raised.addingTimeInterval(7200)))
+        XCTAssertEqual(notifier.posted.count, 1)
+    }
+
     func testNothingIsSaidBeforeTheHourAndOnlyOnceAfterIt() {
         let notifier = RecordingNotifier()
         let escalator = escalator(notifier)
