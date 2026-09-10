@@ -412,6 +412,9 @@ final class UsageThresholdNotifierTests: XCTestCase {
         let notifier = RecordingNotifier()
         let thresholds = UsageThresholdNotifier(notifier: notifier)
         let first = now.addingTimeInterval(600)
+        // Establish the window first. A window's first sighting is never an
+        // event — see `testAlreadyHighAtLaunchIsNotNews`.
+        thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: 0.10, resetsAt: first)], now: now)
         thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: 0.90, resetsAt: first)], now: now)
         XCTAssertEqual(notifier.posted.count, 1)
 
@@ -427,6 +430,10 @@ final class UsageThresholdNotifierTests: XCTestCase {
     func testEachAccountKeepsItsOwnRecord() {
         let notifier = RecordingNotifier()
         let thresholds = UsageThresholdNotifier(notifier: notifier)
+        thresholds.evaluate(snapshots: [
+            makeSnapshot(id: "a", used: 0.10, name: "Claude"),
+            makeSnapshot(id: "b", used: 0.10, name: "Codex")
+        ], now: now)
         thresholds.evaluate(snapshots: [
             makeSnapshot(id: "a", used: 0.55, name: "Claude"),
             makeSnapshot(id: "b", used: 0.10, name: "Codex")
@@ -458,6 +465,32 @@ final class UsageThresholdNotifierTests: XCTestCase {
         // The next genuinely new point still arrives.
         thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: 0.87)], now: now)
         XCTAssertEqual(notifier.posted.count, 1)
+    }
+
+    /// The record lives in memory only, so every launch starts blank. Opening
+    /// the app with accounts already past half must not fire for all of them on
+    /// the spot — and then do it again at the next launch, and the next. The
+    /// promise is "tell me when an account crosses 50%", not "tell me it is
+    /// above 50%".
+    func testAlreadyHighAtLaunchIsNotNews() {
+        let notifier = RecordingNotifier()
+        let thresholds = UsageThresholdNotifier(notifier: notifier)
+        thresholds.evaluate(snapshots: [
+            makeSnapshot(id: "a", used: 0.62, name: "Claude"),
+            makeSnapshot(id: "b", used: 0.91, name: "Codex")
+        ], now: now)
+        XCTAssertTrue(notifier.posted.isEmpty,
+                      "Launching the app announced usage nobody had just crossed")
+
+        // A restart is another blank record, and just as quiet.
+        let afterRelaunch = UsageThresholdNotifier(notifier: notifier)
+        afterRelaunch.evaluate(snapshots: [makeSnapshot(id: "a", used: 0.62)], now: now)
+        XCTAssertTrue(notifier.posted.isEmpty)
+
+        // But a point crossed while the app is watching still arrives.
+        thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: 0.77)], now: now)
+        XCTAssertEqual(notifier.posted.count, 1)
+        XCTAssertTrue(notifier.posted[0].title.contains("75"))
     }
 
     func testAWindowWithNoDenominatorIsNeverGuessedAt() {

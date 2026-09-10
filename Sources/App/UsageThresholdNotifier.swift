@@ -59,6 +59,15 @@ final class UsageThresholdNotifier {
                 // the rest of the readings.
                 let percent = min(100, max(0, Int((fraction * 100).rounded(.down))))
 
+                // The first time this app lays eyes on a window is not an
+                // event. This record lives in memory only, so every launch
+                // starts blank: without this, opening Builder Nutch with three
+                // accounts already past half would fire three notifications on
+                // the spot, and again at the next launch, and the next. The
+                // promise is "tell me when an account crosses 50%", not "tell
+                // me it is above 50%", and the difference is the whole reason
+                // this setting is safe to leave on.
+                let isFirstSighting = memory[key] == nil
                 var state = memory[key] ?? WindowMemory(resetsAt: window.resetsAt,
                                                         fired: [], lastPercent: percent)
                 // A new window: either the vendor moved the reset, or the count
@@ -76,7 +85,7 @@ final class UsageThresholdNotifier {
                 state.fired.formUnion(crossed)
                 memory[key] = state
 
-                guard isEnabled, let highest = crossed.max() else { continue }
+                guard isEnabled, !isFirstSighting, let highest = crossed.max() else { continue }
                 let notice = Self.notice(
                     snapshot: snapshot, window: window, threshold: highest, now: now
                 )
