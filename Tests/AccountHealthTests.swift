@@ -239,6 +239,60 @@ final class AccountHealthTests: XCTestCase {
     }
 
     @MainActor
+    func testNextIsWhoWouldActuallyTakeOverNotWhoseTurnItIs() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("next-\(UUID().uuidString)")
+        try AccountStorage.privateDirectory(root)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let manager = AccountManager(rootURL: root)
+        // The order and the state observed on this Mac: 4, 2, 3, 5, 6, 1, running
+        // on 6, with 1 next in the order but spent on a single model's weekly
+        // allowance. Saying "next: Claude 1" there is worse than saying nothing.
+        var made: [String: ManagedAccount] = [:]
+        for name in ["Claude 4", "Claude 2", "Claude 3", "Claude 5", "Claude 6", "Claude 1"] {
+            made[name] = try manager.add(provider: .claude, label: name, emailHint: nil)
+        }
+        func healthy(_ name: String, remaining: Double) {
+            manager.applyState({ $0.isConnected = true; $0.message = nil
+                $0.windows = [LimitWindow(id: "five_hour", label: "5h limit", usedFraction: 1 - remaining / 100,
+                                          resetsAt: self.now.addingTimeInterval(3600))]
+                $0.refreshedAt = Date() }, to: made[name]!.id)
+        }
+        healthy("Claude 6", remaining: 87)
+        healthy("Claude 3", remaining: 72)
+        healthy("Claude 5", remaining: 70)
+        healthy("Claude 4", remaining: 0)
+        healthy("Claude 2", remaining: 0)
+        let fable = LimitWindow(id: "model-0", label: "Fable weekly limit", usedFraction: 1,
+                                resetsAt: now.addingTimeInterval(7200), modelName: "Fable")
+        manager.applyState({ $0.isConnected = true
+            $0.windows = [LimitWindow(id: "five_hour", label: "5h limit", usedFraction: 0.1,
+                                      resetsAt: self.now.addingTimeInterval(3600)), fable]
+            $0.message = ClaudeAccountUsage.restriction(ManagedAccountState(isConnected: true, windows: [fable]), now: self.now)
+            $0.refreshedAt = Date() }, to: made["Claude 1"]!.id)
+        try manager.select(made["Claude 6"]!)
+        manager.automaticSelection = true
+
+        XCTAssertEqual(manager.health.currentName, "Claude 6")
+        XCTAssertEqual(manager.health.nextName, "Claude 3", "The fullest usable account, not the order neighbour")
+        XCTAssertEqual(manager.health.nextRemainingPercent ?? -1, 72, accuracy: 0.001)
+        XCTAssertNotEqual(manager.health.nextName, "Claude 1")
+    }
+
+    func testAModelLimitSaysWhichModelAndUntilWhen() {
+        let fable = LimitWindow(id: "model-0", label: "Fable weekly limit", usedFraction: 1,
+                                resetsAt: now.addingTimeInterval(3600), modelName: "Fable")
+        let message = ClaudeAccountUsage.restriction(ManagedAccountState(isConnected: true, windows: [fable]), now: now)
+        XCTAssertTrue(message.contains("Fable weekly limit"), message)
+        XCTAssertTrue(message.contains("60 min") || message.contains("Resets"), message)
+        XCTAssertFalse(message.contains("subscription restriction"), "The blanket wording tells the person nothing")
+        // A whole-subscription limit must not claim other models still work.
+        let weekly = LimitWindow(id: "seven_day", label: "Weekly limit", usedFraction: 1, resetsAt: now.addingTimeInterval(3600))
+        let plain = ClaudeAccountUsage.restriction(ManagedAccountState(isConnected: true, windows: [weekly]), now: now)
+        XCTAssertTrue(plain.contains("Weekly limit"), plain)
+        XCTAssertFalse(plain.lowercased().contains("other models"), plain)
+    }
+
+    @MainActor
     func testTheQueuedAccountThatNeedsSigningInIsTheOneReported() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("health-\(UUID().uuidString)")
         try AccountStorage.privateDirectory(root)
@@ -257,7 +311,10 @@ final class AccountHealthTests: XCTestCase {
         XCTAssertEqual(reconnect.actionTitle, NSLocalizedString("Reconnect", comment: ""))
         XCTAssertFalse(manager.health.isSwitchReady)
         XCTAssertEqual(manager.health.currentName, "Claude 1")
-        XCTAssertEqual(manager.health.nextName, "Claude 2")
+        // `next` is now who could actually take over, and nobody can: Claude 2 is
+        // the queued account and it is exactly the one that cannot take a session.
+        // Naming it as "next" was the thing that misled the person.
+        XCTAssertNil(manager.health.nextName)
         XCTAssertTrue(manager.healthSummary.contains("Claude 1"))
 
         // A blocked Keychain outranks a queued account that needs signing in.

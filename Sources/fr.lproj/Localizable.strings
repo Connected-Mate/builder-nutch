@@ -182,6 +182,7 @@
 /* Attention alert, usage notifications */
 "Click the notch to open Builder Nutch." = "Cliquez sur l’encoche pour ouvrir Builder Nutch.";
 "%1$@ · %2$d%% used" = "%1$@ · %2$d %% utilisés";
+"%1$@ · %2$@ %3$d%% used" = "%1$@ · %2$@ %3$d %% utilisés";
 "%1$@ · %2$d%% left." = "%1$@ · %2$d %% restants.";
 "Tell me when an account is running low" = "Me prévenir quand un compte s’épuise";
 "A notification at 50%, 75% and 85% of each limit, once per account each time the limit resets. Builder Nutch always tells you when an account needs reconnecting." = "Une notification à 50 %, 75 % et 85 % de chaque limite, une fois par compte à chaque remise à zéro. Builder Nutch vous prévient toujours lorsqu’un compte doit être reconnecté.";
@@ -209,3 +210,11 @@
 "Claude now uses %@ on this Mac. That change was made outside Builder Nutch." = "Claude utilise maintenant %@ sur ce Mac. Ce changement a été fait en dehors de Builder Nutch.";
 "Claude now uses %@ (changed outside the app)" = "Claude utilise maintenant %@ (changé hors de l’app)";
 "Checking the other accounts…" = "Vérification des autres comptes…";
+
+/* An account held back by one spent limit */
+"%1$@ is used up.%2$@ Your other models still work." = "%1$@ est épuisée.%2$@ Vos autres modèles fonctionnent toujours.";
+"%1$@ is used up.%2$@" = "%1$@ est épuisée.%2$@";
+"Claude reports a subscription restriction. Choose an account manually or refresh its usage." = "Claude signale une restriction d’abonnement. Choisissez un compte manuellement ou actualisez son quota.";
+"%1$@ is next in your order, but %2$@" = "%1$@ est le suivant dans votre ordre, mais %2$@";
+"its %1$@ is used up.%2$@" = "sa %1$@ est épuisée.%2$@";
+"it has no usage left." = "il n’a plus de quota.";

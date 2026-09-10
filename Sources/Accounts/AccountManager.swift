@@ -1243,6 +1243,19 @@ final class AccountManager: ObservableObject {
         }
     }
 
+    /// Why this account could not take a session, in the person's words. Nil when
+    /// nothing is wrong with it.
+    private func blockedReason(_ account: ManagedAccount) -> String? {
+        guard let state = states[account.id] else { return nil }
+        if let window = state.bindingWindow, (window.usedFraction ?? 0) >= 1 {
+            let reset = window.resetsAt.map { " " + ResetCopy.text(for: $0, derived: window.isResetDerived) } ?? ""
+            return String(format: NSLocalizedString("its %1$@ is used up.%2$@", comment: "Health reason"), window.label, reset)
+        }
+        if let message = state.message, !message.isEmpty { return message }
+        if state.remainingPercent == 0 { return NSLocalizedString("it has no usage left.", comment: "Health reason") }
+        return nil
+    }
+
     /// True while another Claude account is mid-refresh. A reading in flight is
     /// not an empty queue: without this, an ordinary refresh flashed "no account
     /// left to switch to" and then announced its own recovery a second later.
@@ -1320,18 +1333,27 @@ final class AccountManager: ObservableObject {
             health.reason = NSLocalizedString("Add a Claude account to switch between subscriptions.", comment: "Health reason")
             return health
         }
-        let next = queue.count > 1 ? queue[1] : nil
+        // The account whose turn it is in the person's order. It is what the
+        // rotation tries first and therefore what a warning has to be about,
+        // but it is not necessarily where a switch would land.
+        let queued = queue.count > 1 ? queue[1] : nil
+        // Where a switch would actually land if it had to happen this minute.
+        // The threshold is deliberately ignored here: the question is not "is it
+        // time to move" but "if we moved now, who could take it". Answering that
+        // with the raw order neighbour told the person an exhausted account was
+        // next while two healthy ones sat behind it.
+        let ready = AccountSelection.rotating(provider: .claude, accounts: accounts, states: states,
+            order: rotationOrder[.claude] ?? [], currentID: current.id,
+            thresholdPercent: 0, keepCurrent: false, now: now)
         health.currentID = current.id
         health.currentName = label(current)
         health.currentRemainingPercent = states[current.id]?.remainingPercent
         health.currentMinutesRemaining = usageForecasts[current.id]?.minutesUntilExhausted(at: now)
-        health.nextID = next?.id
-        health.nextName = next.map(label)
-        health.nextRemainingPercent = next.flatMap { states[$0.id]?.remainingPercent }
-        health.nextMinutesRemaining = next.flatMap { usageForecasts[$0.id]?.minutesUntilExhausted(at: now) }
-        let ready = AccountSelection.rotating(provider: .claude, accounts: accounts, states: states,
-            order: rotationOrder[.claude] ?? [], currentID: current.id,
-            thresholdPercent: switchThresholdPercent, keepCurrent: false, now: now)
+        health.nextID = ready?.id
+        health.nextName = ready.map(label)
+        health.nextRemainingPercent = ready.flatMap { states[$0.id]?.remainingPercent }
+        health.nextMinutesRemaining = ready.flatMap { usageForecasts[$0.id]?.minutesUntilExhausted(at: now) }
+        let next = queued
         if systemCredentials == nil {
             health.reason = NSLocalizedString("Switching is unavailable in this build.", comment: "Health reason")
         } else if !automaticSelection {
@@ -1343,7 +1365,13 @@ final class AccountManager: ObservableObject {
         } else if let next, needsSignIn(next) {
             health.reason = String(format: NSLocalizedString("%@ needs a new sign-in.", comment: "Health reason"), label(next))
         } else if ready == nil, !claudeCandidateIsBusy(excluding: current.id) {
-            health.reason = NSLocalizedString("No other account has usage left.", comment: "Health reason")
+            // Name the account that was supposed to be next and what stopped it,
+            // rather than a blanket "nothing left" the person cannot act on.
+            if let next, let blocked = blockedReason(next) {
+                health.reason = String(format: NSLocalizedString("%1$@ is next in your order, but %2$@", comment: "Health reason"), label(next), blocked)
+            } else {
+                health.reason = NSLocalizedString("No other account has usage left.", comment: "Health reason")
+            }
         } else if ready == nil {
             health.reason = NSLocalizedString("Checking the other accounts…", comment: "Health reason")
         } else {

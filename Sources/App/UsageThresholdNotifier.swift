@@ -102,11 +102,25 @@ final class UsageThresholdNotifier {
 
     static func notice(snapshot: ProviderSnapshot, window: LimitWindow,
                        threshold: Int, now: Date) -> UserNotice {
-        let title = String(
-            format: NSLocalizedString("%1$@ · %2$d%% used",
-                                      comment: "Usage threshold notification title"),
-            snapshot.displayName, threshold
-        )
+        // A limit that belongs to one model is not the account running out.
+        // "Claude · 85% used" would say the subscription is nearly spent when
+        // in fact one model's weekly allowance is, and everything else on that
+        // account still works. The body already names the window; the title is
+        // the half that was overclaiming.
+        let title: String
+        if let model = window.modelName, !model.isEmpty {
+            title = String(
+                format: NSLocalizedString("%1$@ · %2$@ %3$d%% used",
+                                          comment: "Usage threshold title for one model's limit"),
+                snapshot.displayName, model, threshold
+            )
+        } else {
+            title = String(
+                format: NSLocalizedString("%1$@ · %2$d%% used",
+                                          comment: "Usage threshold notification title"),
+                snapshot.displayName, threshold
+            )
+        }
         var body = String(
             format: NSLocalizedString("%1$@ · %2$d%% left.",
                                       comment: "Usage threshold notification body"),

@@ -56,13 +56,14 @@ enum ClaudeAccountUsage {
                              ("seven_day_sonnet", "Sonnet weekly limit")] {
             guard let value = rates[key], !(value is NSNull) else { continue }
             guard let row = value as? [String: Any] else { throw ManagedAccountError.invalidResponse }
-            state.windows.append(try window(row, id: key, label: label, percentage: "utilization"))
+            let model = ["seven_day_opus": "Opus", "seven_day_sonnet": "Sonnet"][key]
+            state.windows.append(try window(row, id: key, label: label, percentage: "utilization", modelName: model))
         }
         if let raw = rates["model_scoped"], !(raw is NSNull) {
             guard let models = raw as? [[String: Any]], models.count <= 50 else { throw ManagedAccountError.invalidResponse }
             for (index, row) in models.enumerated() {
                 guard let name = text(row["display_name"]) else { throw ManagedAccountError.invalidResponse }
-                state.windows.append(try window(row, id: "model-\(index)", label: "\(name) weekly limit", percentage: "utilization"))
+                state.windows.append(try window(row, id: "model-\(index)", label: "\(name) weekly limit", percentage: "utilization", modelName: name))
             }
         }
         let knownKeys: Set<String> = ["five_hour", "seven_day", "seven_day_oauth_apps", "seven_day_opus", "seven_day_sonnet", "model_scoped", "limits", "extra_usage"]
@@ -85,7 +86,8 @@ enum ClaudeAccountUsage {
                 let scope = row["scope"] as? [String: Any]
                 let model = (scope?["model"] as? [String: Any]).flatMap { text($0["display_name"]) }
                 let label = kind == "session" ? "5h limit" : kind == "weekly_all" ? "Weekly limit" : model.map { "\($0) weekly limit" } ?? "Additional subscription limit"
-                let item = try window(row, id: "limit-\(index)", label: label, percentage: "percent")
+                let item = try window(row, id: "limit-\(index)", label: label, percentage: "percent",
+                                      modelName: kind == "session" || kind == "weekly_all" ? nil : model)
                 // is_active describes applicability to a selected model, not the
                 // existence of a limit. All subscription constraints remain visible.
                 if !state.windows.contains(where: { $0.label == item.label && $0.usedFraction == item.usedFraction }) { state.windows.append(item) }
@@ -97,8 +99,27 @@ enum ClaudeAccountUsage {
         guard !state.windows.isEmpty else { return state }
         let known = state.windows.allSatisfy { $0.usedFraction != nil }
         state.refreshedAt = known ? now : nil
-        state.message = !known ? unavailable : blocking ? "Claude reports a subscription restriction. Choose an account manually or refresh its usage." : nil
+        state.message = !known ? unavailable : blocking ? restriction(state, now: now) : nil
         return state
+    }
+
+    /// What the restriction actually is. "Claude reports a subscription
+    /// restriction" is true of everything and useful for nothing: a spent
+    /// per-model weekly allowance is a specific, temporary and understandable
+    /// thing, and the person is entitled to be told which model and until when.
+    /// The account stays out of rotation either way, but for a reason they can read.
+    static func restriction(_ state: ManagedAccountState, now: Date) -> String {
+        let spent = state.windows.filter { ($0.usedFraction ?? 0) >= 1 }
+        if let model = spent.first(where: { $0.isModelSpecific }), spent.allSatisfy(\.isModelSpecific) {
+            let reset = model.resetsAt.map { " " + ResetCopy.text(for: $0, now: now, derived: model.isResetDerived) + "." } ?? ""
+            return String(format: NSLocalizedString("%1$@ is used up.%2$@ Your other models still work.", comment: "Model limit reached"),
+                          model.label, reset)
+        }
+        if let window = spent.first {
+            let reset = window.resetsAt.map { " " + ResetCopy.text(for: $0, now: now, derived: window.isResetDerived) + "." } ?? ""
+            return String(format: NSLocalizedString("%1$@ is used up.%2$@", comment: "Limit reached"), window.label, reset)
+        }
+        return NSLocalizedString("Claude reports a subscription restriction. Choose an account manually or refresh its usage.", comment: "Generic restriction")
     }
 
     private static func containsLock(_ value: Any) -> Bool {
@@ -111,7 +132,8 @@ enum ClaudeAccountUsage {
         return row.values.contains(where: containsLock)
     }
 
-    private static func window(_ row: [String: Any], id: String, label: String, percentage: String) throws -> LimitWindow {
+    private static func window(_ row: [String: Any], id: String, label: String, percentage: String,
+                               modelName: String? = nil) throws -> LimitWindow {
         let fraction: Double?
         if let raw = row[percentage], !(raw is NSNull) {
             guard let value = raw as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(),
@@ -120,7 +142,7 @@ enum ClaudeAccountUsage {
         } else { fraction = nil }
         let reset = AccountQuotas.date(row["resets_at"])
         if let raw = row["resets_at"], !(raw is NSNull), reset == nil { throw ManagedAccountError.invalidResponse }
-        return LimitWindow(id: id, label: label, usedFraction: fraction, resetsAt: reset)
+        return LimitWindow(id: id, label: label, usedFraction: fraction, resetsAt: reset, modelName: modelName)
     }
     private static func boolean(_ raw: Any?) -> Bool? {
         guard let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }

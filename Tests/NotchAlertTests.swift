@@ -493,6 +493,28 @@ final class UsageThresholdNotifierTests: XCTestCase {
         XCTAssertTrue(notifier.posted[0].title.contains("75"))
     }
 
+    /// One model's weekly allowance running out is not the subscription running
+    /// out. The title has to say which, or it claims the account is nearly
+    /// spent when everything except that one model still works.
+    func testAModelSpecificLimitNamesTheModelRatherThanTheAccount() {
+        let account = makeSnapshot(id: "a", used: 0.86, name: "Claude")
+        let whole = UsageThresholdNotifier.notice(
+            snapshot: account,
+            window: LimitWindow(id: "weekly", label: "Weekly limit", usedFraction: 0.86),
+            threshold: 85, now: now)
+        let oneModel = UsageThresholdNotifier.notice(
+            snapshot: account,
+            window: LimitWindow(id: "weekly", label: "Fable weekly limit",
+                                usedFraction: 0.86, modelName: "Fable"),
+            threshold: 85, now: now)
+
+        XCTAssertFalse(whole.title.contains("Fable"))
+        XCTAssertTrue(oneModel.title.contains("Fable"),
+                      "A model's limit was reported as the whole account's")
+        XCTAssertTrue(oneModel.title.contains("Claude"))
+        XCTAssertTrue(oneModel.title.contains("85"))
+    }
+
     func testAWindowWithNoDenominatorIsNeverGuessedAt() {
         let notifier = RecordingNotifier()
         let thresholds = UsageThresholdNotifier(notifier: notifier)

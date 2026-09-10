@@ -295,7 +295,9 @@ final class ClaudeSystemRotationTests: XCTestCase {
         XCTAssertEqual(empty.accountID, accounts[0].id)
         XCTAssertEqual(empty.actionTitle, NSLocalizedString("Add account", comment: ""))
         XCTAssertFalse(manager.health.isSwitchReady)
-        XCTAssertEqual(manager.health.reason, NSLocalizedString("No other account has usage left.", comment: ""))
+        // Naming the account and the limit that stopped it beats a blanket
+        // "nothing left", which the person cannot act on.
+        XCTAssertEqual(manager.health.reason, "B is next in your order, but its 5h limit is used up.")
     }
 
     func testExhaustedMiddleAccountContinuesAfterItsOriginalPosition() {

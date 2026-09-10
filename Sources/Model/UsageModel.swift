@@ -48,10 +48,17 @@ struct LimitWindow: Identifiable, Codable, Equatable {
     /// its server only ever says "resets in 2d 6h 36m".
     let derivedReset: Bool?
     var isResetDerived: Bool { derivedReset == true }
+    /// The model this limit applies to, when it applies to only one. Spending a
+    /// per-model weekly allowance is not the same as running out of the
+    /// subscription, and saying so is the difference between a person
+    /// understanding their account and distrusting the app. Optional so older
+    /// archives decode unchanged.
+    let modelName: String?
+    var isModelSpecific: Bool { modelName != nil }
 
     init(id: String, label: String, usedFraction: Double? = nil,
          remaining: Int? = nil, used: Int? = nil, resetsAt: Date? = nil,
-         derivedReset: Bool? = nil) {
+         derivedReset: Bool? = nil, modelName: String? = nil) {
         self.id = id
         self.label = label
         self.usedFraction = usedFraction
@@ -59,6 +66,7 @@ struct LimitWindow: Identifiable, Codable, Equatable {
         self.used = used
         self.resetsAt = resetsAt
         self.derivedReset = derivedReset
+        self.modelName = modelName
     }
 
     /// What the tooltip says on the line under the bar.
