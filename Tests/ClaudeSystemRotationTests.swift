@@ -24,6 +24,9 @@ final class ClaudeSystemRotationTests: XCTestCase {
     private final class Runner: AccountCommandRunning, ClaudeAccountReading {
         var used: [String: Double] = ["A": 99, "B": 0]
         var failUsage = false
+        /// Accounts whose saved credential is gone or unusable, the way a revoked
+        /// refresh token or a half-written Keychain item reads.
+        var missingLogin: Set<String> = []
         /// Reads run concurrently across accounts; the log must be thread-safe.
         private let lock = NSLock()
         private var recorded: [URL] = []
@@ -36,7 +39,8 @@ final class ClaudeSystemRotationTests: XCTestCase {
             record(location.directory)
             if failUsage { throw ManagedAccountError.timedOut }
             let config = try JSONSerialization.jsonObject(with: Data(contentsOf: location.configURL)) as! [String: Any]
-            let identity = config["oauthAccount"] as! [String: String]
+            guard let identity = config["oauthAccount"] as? [String: String] else { throw ClaudeSystemCredentialError.missingLogin }
+            if missingLogin.contains(identity["accountUuid"]!) { throw ClaudeSystemCredentialError.missingLogin }
             return ManagedAccountState(isConnected: true, email: identity["emailAddress"], plan: "max",
                 windows: [LimitWindow(id: "five_hour", label: "5h limit", usedFraction: used[identity["accountUuid"]!]! / 100)], refreshedAt: Date())
         }
@@ -147,6 +151,83 @@ final class ClaudeSystemRotationTests: XCTestCase {
         XCTAssertEqual(try credentials.identity(at: system)?.accountID, "B")
         XCTAssertNil(manager.automaticSwitch)
         XCTAssertEqual(opened(), 0)
+    }
+
+    @MainActor
+    func testAnIdentityWithNoUsableCredentialAsksForANewSignIn() async throws {
+        let (manager, runner, keychain, _, _, accounts, _) = try fixture()
+        // Signed in once, so the profile still carries its identity. The saved
+        // credential is now incomplete: no refresh token, and expired. Exactly
+        // the shape that sat silent until a rotation needed the account.
+        let saved = ClaudeCredentialLocation(directory: manager.configurationDirectory(for: accounts[1]), isDefault: false)
+        keychain.items[saved.service] = ClaudeCredentialSnapshot(reference: Data(saved.service.utf8),
+            data: try JSONSerialization.data(withJSONObject: ["claudeAiOauth": ["accessToken": "fake-B",
+                "expiresAt": Date().addingTimeInterval(-3600).timeIntervalSince1970 * 1000]]))
+        runner.missingLogin.insert("B")
+        runner.used["A"] = 40
+        manager.automaticSelection = true
+        await manager.refreshAll()
+
+        XCTAssertTrue(manager.state(for: accounts[1]).requiresSignIn, "An identity with no usable credential is a lost sign-in")
+        let attention = try XCTUnwrap(manager.attention, "A revoked queued account must not sit silent")
+        XCTAssertEqual(attention.kind, .reconnect)
+        XCTAssertEqual(attention.accountID, accounts[1].id)
+        XCTAssertEqual(attention.actionTitle, NSLocalizedString("Reconnect", comment: ""))
+    }
+
+    @MainActor
+    func testAProfileThatWasNeverSignedInIsNotAFault() async throws {
+        let (manager, runner, _, _, _, accounts, _) = try fixture()
+        // No identity in the profile at all: this account was added and left.
+        let empty = ClaudeCredentialLocation(directory: manager.configurationDirectory(for: accounts[1]), isDefault: false)
+        try AccountStorage.write(JSONSerialization.data(withJSONObject: ["projects": ["keep": true]]), to: empty.configURL)
+        runner.used["A"] = 40
+        manager.automaticSelection = true
+        await manager.refreshAll()
+
+        XCTAssertFalse(manager.state(for: accounts[1]).requiresSignIn, "Never set up is a task, not a fault")
+        // It is still the next account in the queue and still cannot take a
+        // session, so the queue rule reports it and should. What it must not be
+        // is counted as a sign-in that was lost, which is the rule that used to
+        // keep a dormant account red forever.
+        XCTAssertEqual(manager.attention?.accountID, accounts[1].id)
+    }
+
+    @MainActor
+    func testALoginChangedOutsideTheAppIsAdoptedRatherThanIgnored() async throws {
+        let (manager, runner, keychain, credentials, system, accounts, _) = try fixture()
+        runner.used = ["A": 40, "B": 40]
+        manager.automaticSelection = true
+        await manager.refreshAll()
+        XCTAssertEqual(manager.systemClaudeAccountID, accounts[0].id)
+        XCTAssertEqual(manager.selectedAccount(for: .claude)?.id, accounts[0].id)
+
+        // Someone runs `claude /login` and signs the Mac into B behind our back.
+        let source = ClaudeCredentialLocation(directory: manager.configurationDirectory(for: accounts[1]), isDefault: false)
+        try AccountStorage.write(Data(contentsOf: source.configURL), to: system.configURL)
+        keychain.items[system.service] = ClaudeCredentialSnapshot(reference: Data(system.service.utf8),
+            data: try XCTUnwrap(keychain.items[source.service]?.data))
+        await manager.refreshAll()
+
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "B")
+        XCTAssertEqual(manager.systemClaudeAccountID, accounts[1].id)
+        XCTAssertEqual(manager.selectedAccount(for: .claude)?.id, accounts[1].id,
+                       "The catalog must never point at an account the Mac stopped using")
+        XCTAssertEqual(manager.health.currentName, "B")
+        let resolved = try XCTUnwrap(manager.resolvedAttention)
+        XCTAssertEqual(resolved.accountID, accounts[1].id)
+        XCTAssertTrue(resolved.title.contains("B"), "kind=\(resolved.kind) title=\(resolved.title)")
+    }
+
+    @MainActor
+    func testAnInAppSwitchAlwaysLeavesTheCatalogAgreeingWithTheMac() async throws {
+        let (manager, _, _, _, _, accounts, _) = try fixture()
+        manager.automaticSelection = true
+        await manager.refreshAll()
+        XCTAssertEqual(manager.systemClaudeAccountID, accounts[1].id)
+        XCTAssertEqual(manager.selectedAccount(for: .claude)?.id, manager.systemClaudeAccountID)
+        await manager.launch(accounts[0], project: FileManager.default.temporaryDirectory)
+        XCTAssertEqual(manager.selectedAccount(for: .claude)?.id, manager.systemClaudeAccountID)
     }
 
     @MainActor

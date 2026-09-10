@@ -12,6 +12,11 @@ struct AccountCatalog: Codable {
     /// How much notice a forecast switch takes, in minutes. Optional for the
     /// same reason as the fields above: older catalogs must decode untouched.
     var switchAheadMinutes: Double? = nil
+    /// The account this app last saw the Mac actually logged in to. Kept apart
+    /// from `selected`, which is the account queued *next* and is allowed to
+    /// differ. Comparing the two is how a login changed outside the app is told
+    /// from a next-account the person queued on purpose.
+    var systemClaudeAccountID: UUID? = nil
 }
 
 struct AccountStorage {

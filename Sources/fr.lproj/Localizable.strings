@@ -204,3 +204,8 @@
 "Automatic switching resumed" = "Bascule reprise";
 "An account is available again" = "Un compte est de nouveau disponible";
 "Switched to %@" = "Passé sur %@";
+
+/* A login changed outside the app */
+"Claude now uses %@ on this Mac. That change was made outside Builder Nutch." = "Claude utilise maintenant %@ sur ce Mac. Ce changement a été fait en dehors de Builder Nutch.";
+"Claude now uses %@ (changed outside the app)" = "Claude utilise maintenant %@ (changé hors de l’app)";
+"Checking the other accounts…" = "Vérification des autres comptes…";

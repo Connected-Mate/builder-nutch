@@ -57,6 +57,10 @@ final class AccountManager: ObservableObject {
     @Published private(set) var resolvedAttention: AccountResolution?
     /// Burn-rate history per account. In memory only; never persisted.
     private(set) var usageForecasts: [UUID: UsageForecast] = [:]
+    /// The login this app last saw on the Mac. Not the same question as which
+    /// account is queued next, and conflating the two would let a manual "Set
+    /// next" look identical to someone running `claude /login` behind our back.
+    private var lastKnownSystemClaude: UUID?
     private var lastQueueAudit: Date?
     /// A queued account that quietly expired has to be found long before a
     /// rotation needs it, so the whole queue is rechecked on this cadence.
@@ -111,6 +115,9 @@ final class AccountManager: ObservableObject {
             rotationOrder = catalog.rotationOrder ?? [:]
             switchThresholdPercent = catalog.switchThresholdPercent ?? 15
             switchAheadMinutes = catalog.switchAheadMinutes ?? 20
+            // No record yet means this catalog predates the field. Assume the
+            // Mac was on the queued account, so only a real divergence adopts.
+            lastKnownSystemClaude = catalog.systemClaudeAccountID ?? catalog.selected[.claude]
             normalizeRotationOrder()
             states = Dictionary(uniqueKeysWithValues: accounts.map {
                 ($0.id, $0.isBrowserOnly ? Self.browserState($0) : ManagedAccountState(message: "Refresh to check this account."))
@@ -165,7 +172,7 @@ final class AccountManager: ObservableObject {
         try usableStorage().save(AccountCatalog(accounts: accounts, selected: selected,
             automaticSelection: automaticSelection, ignoredExistingProfiles: ignoredExistingProfiles,
             rotationOrder: rotationOrder, switchThresholdPercent: switchThresholdPercent,
-            switchAheadMinutes: switchAheadMinutes))
+            switchAheadMinutes: switchAheadMinutes, systemClaudeAccountID: lastKnownSystemClaude))
     }
 
     @discardableResult
@@ -344,6 +351,36 @@ final class AccountManager: ObservableObject {
                 account.provider == .claude && (try? credentials.identity(at: credentialLocation(for: account))) == current
             }?.id
         }
+        adoptSystemClaudeLogin()
+    }
+
+    /// The Mac's login is the truth; the catalog is only this app's record of it.
+    /// Someone can run `claude /login` themselves, and this app used to follow
+    /// that in `systemClaudeAccountID` while leaving `selected` pointing at an
+    /// account that had not been in use for hours. Everything downstream — which
+    /// account is "next", what the notch calls current, where a rotation starts —
+    /// reads one or the other, so the two must never disagree.
+    private func adoptSystemClaudeLogin() {
+        guard !isSwitchingClaude, let currentID = systemClaudeAccountID,
+              currentID != lastKnownSystemClaude,
+              let account = accounts.first(where: { $0.id == currentID }) else { return }
+        // Nothing to compare a first sighting against. Record it rather than
+        // announce a change nobody made, which is what a brand-new catalog and
+        // an app that has just been given its first account both look like.
+        let firstSighting = lastKnownSystemClaude == nil
+        lastKnownSystemClaude = currentID
+        guard !firstSighting, selected[.claude] != currentID else {
+            try? persist(accounts: accounts, selected: selected)
+            return
+        }
+        var updated = selected
+        updated[.claude] = currentID
+        do { try persist(accounts: accounts, selected: updated) } catch { return }
+        selected = updated
+        notice = String(format: NSLocalizedString("Claude now uses %@ on this Mac. That change was made outside Builder Nutch.", comment: "External login adopted"), account.label)
+        resolvedAttention = AccountResolution(kind: .switched, accountID: currentID,
+            title: String(format: NSLocalizedString("Claude now uses %@ (changed outside the app)", comment: "External login adopted"), account.label),
+            resolvedAt: Date())
     }
 
     /// Preserve the outgoing subscription before replacing the shared login.
@@ -428,6 +465,10 @@ final class AccountManager: ObservableObject {
         }
         selected = updated
         systemClaudeAccountID = target.id
+        // Record that this app made the change, so the next launch does not read
+        // its own switch as someone signing in behind its back.
+        lastKnownSystemClaude = target.id
+        try? persist(accounts: accounts, selected: selected)
         guard !hasShutDown else { return }
         ClaudeCredentials.forgetCached()
         // The switch itself is the good news, whether the person asked for it or
@@ -697,8 +738,7 @@ final class AccountManager: ObservableObject {
             state.requiresKeychainAccess = (error as? ClaudeSystemCredentialError)?.requiresAccess == true
             // A revoked or expired saved login is not a transient failure. Say so
             // now, so the person signs in before a rotation needs this account.
-            if case ClaudeSystemCredentialError.expiredLogin = error { state.requiresSignIn = true }
-            else { state.requiresSignIn = false }
+            state.requiresSignIn = lostItsSignIn(account, error: error)
             if account.provider == .claude, claudeReader != nil, !state.requiresKeychainAccess {
                 externalRetryAfter[account.id] = Date().addingTimeInterval(60)
             } else { pausedRefreshIDs.insert(account.id) }
@@ -1164,7 +1204,7 @@ final class AccountManager: ObservableObject {
             return AccountResolution(kind: .switchResumed, accountID: previous.accountID,
                 title: NSLocalizedString("Automatic switching resumed", comment: "Resolution"), resolvedAt: now)
         case .queueEmpty:
-            guard let current = claudeQueue().first,
+            guard let current = claudeQueue().first, !claudeCandidateIsBusy(excluding: current.id),
                   AccountSelection.rotating(provider: .claude, accounts: accounts, states: states,
                     order: rotationOrder[.claude] ?? [], currentID: current.id,
                     thresholdPercent: switchThresholdPercent, keepCurrent: false, now: now) != nil else { return nil }
@@ -1175,6 +1215,39 @@ final class AccountManager: ObservableObject {
 
     private func label(_ account: ManagedAccount) -> String {
         account.emoji.map { "\($0) \(account.label)" } ?? account.label
+    }
+
+    /// A profile that carries an identity has been signed in at least once. That
+    /// is the only thing that separates "you never set this up" from "your
+    /// sign-in is gone": the account name survives in the profile long after the
+    /// credential behind it stops working.
+    private func hasSavedIdentity(_ account: ManagedAccount) -> Bool {
+        guard account.provider == .claude, let credentials = systemCredentials else { return false }
+        let location = systemClaudeAccountID == account.id ? systemClaudeLocation : credentialLocation(for: account)
+        return ((try? credentials.identity(at: location)) ?? nil) != nil
+    }
+
+    /// Whether this failure means the person has to sign in again.
+    ///
+    /// Expired or revoked says so outright. Missing or unreadable is the harder
+    /// case: it is a lost sign-in on a profile that has an identity, and merely
+    /// an empty profile on one that does not. Reading the second as a fault is
+    /// what kept a dormant account red; reading the first as empty is what let a
+    /// revoked account sit silent until a rotation needed it.
+    private func lostItsSignIn(_ account: ManagedAccount, error: Error) -> Bool {
+        guard let failure = error as? ClaudeSystemCredentialError, !failure.requiresAccess else { return false }
+        switch failure {
+        case .expiredLogin: return true
+        case .missingLogin, .malformedData, .fallbackCredentials: return hasSavedIdentity(account)
+        default: return false
+        }
+    }
+
+    /// True while another Claude account is mid-refresh. A reading in flight is
+    /// not an empty queue: without this, an ordinary refresh flashed "no account
+    /// left to switch to" and then announced its own recovery a second later.
+    private func claudeCandidateIsBusy(excluding currentID: UUID) -> Bool {
+        accounts.contains { $0.provider == .claude && $0.id != currentID && states[$0.id]?.isBusy == true }
     }
 
     private func needsSignIn(_ account: ManagedAccount) -> Bool {
@@ -1228,6 +1301,7 @@ final class AccountManager: ObservableObject {
                 raisedAt: now)
         }
         if automaticSelection, systemCredentials != nil, let current,
+           !claudeCandidateIsBusy(excluding: current.id),
            AccountSelection.rotating(provider: .claude, accounts: accounts, states: states,
                 order: rotationOrder[.claude] ?? [], currentID: current.id,
                 thresholdPercent: switchThresholdPercent, keepCurrent: false, now: now) == nil {
@@ -1268,8 +1342,10 @@ final class AccountManager: ObservableObject {
             health.reason = String(format: NSLocalizedString("%@ is waiting for your permission.", comment: "Health reason"), label(next))
         } else if let next, needsSignIn(next) {
             health.reason = String(format: NSLocalizedString("%@ needs a new sign-in.", comment: "Health reason"), label(next))
-        } else if ready == nil {
+        } else if ready == nil, !claudeCandidateIsBusy(excluding: current.id) {
             health.reason = NSLocalizedString("No other account has usage left.", comment: "Health reason")
+        } else if ready == nil {
+            health.reason = NSLocalizedString("Checking the other accounts…", comment: "Health reason")
         } else {
             health.isSwitchReady = true
         }

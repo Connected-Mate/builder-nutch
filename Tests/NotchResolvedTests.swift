@@ -339,6 +339,26 @@ final class ResolutionHoldTests: XCTestCase {
                        "Claude 3 had 12% left on its Weekly limit.")
     }
 
+    /// Someone signs the Mac in outside Builder Nutch and the app adopts it.
+    /// There is no switch event behind that, so no reason to show — and nobody
+    /// here knows why the person signed in elsewhere, so inventing one would be
+    /// worse than a bare title.
+    func testASwitchMadeOutsideTheAppIsTitleOnly() {
+        let controller = controller(hold: 0.25)
+        controller.show()
+        defer { controller.apply(.hidden); controller.stop() }
+
+        controller.presentResolution(resolution(
+            id: "switched-external", title: "Claude now uses Claude 4", detail: ""))
+        XCTAssertEqual(controller.model.skin, .resolved)
+        XCTAssertEqual(controller.model.status?.detail, "")
+        // The card shrinks to its header rather than reserving an empty
+        // paragraph where a sentence would have gone.
+        XCTAssertLessThan(
+            NotchLayout.statusCardHeight(detail: "", showsHint: false),
+            NotchLayout.statusCardHeight(detail: "Some reason.", showsHint: false))
+    }
+
     /// Auto-hide has to peek for the green too, or the recovery is painted onto
     /// a panel nobody can see.
     func testAutoHideShowsTheHandleForTheGreenAsWell() throws {
