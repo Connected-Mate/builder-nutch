@@ -605,7 +605,7 @@ final class AccountManager: ObservableObject {
     private func saveSystemClaudeLogin(_ current: ManagedAccount, identity: ClaudeCredentialIdentity) async throws -> ManagedAccount {
         guard let credentials = systemCredentials else { throw ManagedAccountError.unavailable }
         var carried = identity.minimalOAuthAccount
-        if current.existingProfile?.usesDefaultClaudeHome != true, profileIdentity(current) == identity,
+        if profileIdentity(current) == identity,
            let own = (try? credentials.oauthAccount(at: credentialLocation(for: current))) ?? nil {
             carried = own
         }
@@ -664,6 +664,10 @@ final class AccountManager: ObservableObject {
         guard !hasShutDown, !isSwitchingClaude, !busyIDs.contains(target.id), !authenticationInProgress else { throw ManagedAccountError.busy }
         updateSystemClaudeIdentity()
         guard profileHoldsAnotherLogin(target) == nil else { throw ManagedAccountError.notConnected }
+        // The Mac is signed in to someone this catalog has never met — a
+        // `claude /login` done by hand. There is no row to save that login
+        // into, so moving off it would lose it; say so instead.
+        if systemClaudeAccountID == nil, let macLogin { throw ManagedAccountError.unknownMacLogin(macLogin.identity.email) }
         guard let currentID = systemClaudeAccountID,
               let current = accounts.first(where: { $0.id == currentID }),
               !busyIDs.contains(currentID),
@@ -737,13 +741,17 @@ final class AccountManager: ObservableObject {
 
     private func reconcileSystemClaudeSelection() async {
         defer { updateHealth() }
-        guard systemCredentials != nil, !systemSwitchPaused, !isSwitchingClaude, !hasShutDown else { return }
+        guard systemCredentials != nil, !isSwitchingClaude, !hasShutDown else { return }
         updateSystemClaudeIdentity()
+        // A restore waits for nobody: paused or not, the displaced login is
+        // either put back or adopted, so the app's record never sits at odds
+        // with the Mac for longer than one cycle.
         if pendingRestore != nil {
             await restoreSystemClaudeChoice()
-            guard !hasShutDown, !isSwitchingClaude, !systemSwitchPaused else { return }
+            guard !hasShutDown, !isSwitchingClaude else { return }
             updateSystemClaudeIdentity()
         }
+        guard !systemSwitchPaused else { return }
         guard automaticSelection, !authenticationInProgress,
               let currentID = systemClaudeAccountID,
               let decision = AccountSelection.systemClaudeDecision(accounts: accounts, states: states,
@@ -762,6 +770,9 @@ final class AccountManager: ObservableObject {
 
     /// True while automatic switching has stopped and will not resume on its own.
     var isSystemSwitchPaused: Bool { systemSwitchPaused }
+
+    /// Whether this build can move the Mac's Claude login at all.
+    var canSwitchClaudeLogin: Bool { systemCredentials != nil }
 
     /// Clears a pause and gives the switch another go. This is the Retry action
     /// behind the accounts banner; it never opens a browser or a Terminal.

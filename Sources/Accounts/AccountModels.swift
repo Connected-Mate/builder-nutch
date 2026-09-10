@@ -178,8 +178,12 @@ struct ManagedAccountState {
 enum ManagedAccountError: LocalizedError {
     case invalidLabel, invalidEmail, invalidEmoji, unsafePath, corruptCatalog, missingCLI(AccountProvider), missingBrowser
     case busy, cancelled, timedOut, commandFailed(Int32), invalidResponse, notConnected, unavailable
+    /// The Mac's Claude login belongs to an account this catalog does not have.
+    case unknownMacLogin(String)
     var errorDescription: String? {
         switch self {
+        case .unknownMacLogin(let email):
+            return String(format: NSLocalizedString("This Mac is signed in to %@, which is not in your list. Add it as an account first so its login is kept, or sign in to a listed account.", comment: "Switch refused: unknown Mac login"), email)
         case .invalidLabel: return "Choose a name between 1 and 80 characters."
         case .invalidEmoji: return "Choose one emoji, or leave it empty."
         case .missingBrowser: return "Install Google Chrome, Brave or Microsoft Edge to keep each web account separate, then try again."

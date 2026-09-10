@@ -97,11 +97,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 controller?.model.accountPicker = self?.accountPicker(for: provider)
             }
         }
+        // Picking an account in the notch means "use this one", not "queue it".
+        // Set-next lived here before, and a person who chose an account while
+        // the running one was still healthy saw nothing happen at all — the
+        // rotation only honours "next" once the current account is spent. The
+        // Mac login moves now; the receipt says so. Providers the app cannot
+        // switch keep the old meaning, and a broken account opens the window
+        // where it can be fixed rather than failing quietly.
         controller.model.onChooseNextAccount = { [weak self, weak manager, weak controller] id in
-            guard let account = manager?.accounts.first(where: { $0.id == id }) else { return }
-            do { try manager?.setNext(account) }
-            catch { manager?.notice = error.localizedDescription }
-            controller?.model.accountPicker = self?.accountPicker(for: account.provider)
+            guard let self, let manager, let account = manager.accounts.first(where: { $0.id == id }) else { return }
+            if manager.state(for: account).needsAttention {
+                self.openAccounts()
+                return
+            }
+            if account.provider == .claude, manager.canSwitchClaudeLogin {
+                Task { @MainActor in
+                    await manager.launch(account, project: FileManager.default.homeDirectoryForCurrentUser)
+                    controller?.model.accountPicker = self.accountPicker(for: account.provider)
+                }
+                return
+            }
+            do { try manager.setNext(account) }
+            catch { manager.notice = error.localizedDescription }
+            controller?.model.accountPicker = self.accountPicker(for: account.provider)
         }
         let item = StatusItemController { [weak self] in self?.openAccounts() }
         self.statusItem = item

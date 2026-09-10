@@ -249,6 +249,19 @@ final class ClaudeLoginIdentityTests: XCTestCase {
         XCTAssertEqual(try Self.name(at: f.location(f.accounts["C"]!)), "C")
     }
 
+    @MainActor
+    func testASwitchOffAnUnknownMacLoginSaysWhoIsThereInsteadOfLosingIt() async throws {
+        let f = try fixture()
+        let b = try XCTUnwrap(f.accounts["B"])
+        await f.manager.refreshAll()
+        // `claude /login` by hand, to an account the catalog has never met.
+        try Self.seed(f.mac, name: "Z", token: "Z", keychain: f.keychain)
+        await f.manager.launch(b, project: URL(fileURLWithPath: "/tmp"))
+        XCTAssertEqual(f.keychain.token(f.mac.service), "fake-Z", "The stranger's login was not thrown away")
+        XCTAssertTrue(f.manager.notice?.contains("Z@example.test") == true, "Says who is there: \(f.manager.notice ?? "-")")
+        XCTAssertNil(f.manager.systemClaudeAccountID)
+    }
+
     // MARK: - The resolver
 
     private final class Transport: URLProtocol {
