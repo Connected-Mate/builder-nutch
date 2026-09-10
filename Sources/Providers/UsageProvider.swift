@@ -43,7 +43,7 @@ protocol UsageProvider {
     func forgetCachedCredential()
 }
 
-enum UsageProviderError: Error {
+enum UsageProviderError: LocalizedError {
     /// No usable credential — the user has to sign in again.
     case needsAuth
     /// The credential is there, and macOS refused to hand it over — the
@@ -63,4 +63,33 @@ enum UsageProviderError: Error {
     /// Cursor's free plan reports an included limit of zero. Not an error, and
     /// it must not be shown as one.
     case nothingMetered(String)
+
+    /// Every one of these can reach a person, so none of them may arrive as
+    /// "error 1". A usage check that failed is a temporary state of this app,
+    /// not a verdict on their subscription, and it has to read that way.
+    var errorDescription: String? {
+        switch self {
+        case .needsAuth:
+            return NSLocalizedString("Sign in to this account again.", comment: "Usage error")
+        case .accessDenied:
+            return NSLocalizedString("macOS did not allow access to this login. Choose Allow access for this account.", comment: "Usage error")
+        case .credentialExpired:
+            return NSLocalizedString("This login is being renewed. The last reading is still shown.", comment: "Usage error")
+        case .badResponse(let status):
+            return String(format: NSLocalizedString("The usage service answered unexpectedly (%d). The last reading is still shown.", comment: "Usage error"), status)
+        case .rateLimited:
+            return NSLocalizedString("The usage service asked us to slow down. Checking again shortly.", comment: "Usage error")
+        case .nothingMetered(let plan):
+            return String(format: NSLocalizedString("%@ does not meter usage, so there is nothing to show.", comment: "Usage error"), plan)
+        }
+    }
+
+    /// How long to wait before asking this endpoint again.
+    var retryDelay: TimeInterval {
+        switch self {
+        case .rateLimited(let after): return max(60, after)
+        case .badResponse: return 300
+        default: return 60
+        }
+    }
 }

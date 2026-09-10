@@ -266,13 +266,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mode = preferences?.usageDisplayMode ?? .remaining
         let ordered = manager.rotationAccounts(for: provider)
         let selectedID = manager.selectedAccount(for: provider)?.id
+        // One source of truth for NOW and NEXT.
+        //
+        // The notch used to answer "what is next" by counting one place along
+        // the person's order, without asking whether that account could take a
+        // session. That named a spent account as NEXT while healthy ones sat
+        // behind it, and disagreed with the accounts window — in the same app —
+        // about which subscription was about to be used.
+        //
+        // `nextUsableAccount(for:)` is the same walk the rotation itself uses,
+        // so the badge, the accounts window and the switch cannot now give
+        // three answers. It covers every provider, and returns nil for a
+        // browser profile, where there is nothing to hand over.
+        let nextUsableID = manager.nextUsableAccount(for: provider)?.id
+        // NOW still comes from `health` for Claude, which is the only provider
+        // health describes; elsewhere the account in use is the selected one.
+        let health = manager.health
         let currentID = provider == .claude
-            ? manager.systemClaudeAccountID ?? AccountActivitySelection.currentID(accounts: ordered, selectedID: selectedID,
-                sessions: notchController?.model.sessions ?? [:])
+            ? (health.currentID ?? manager.systemClaudeAccountID
+                ?? AccountActivitySelection.currentID(
+                    accounts: ordered, selectedID: selectedID,
+                    sessions: notchController?.model.sessions ?? [:]))
             : selectedID
-        let displayed = AccountActivitySelection.queue(accounts: ordered,
-            currentID: currentID, selectedID: selectedID)
-        let accounts = displayed.enumerated().map { index, account in
+        // The row is ordered around the same answer the badge gives.
+        //
+        // Ordering alone would be a layout question, but this view draws a
+        // connector between the first two cells and a rule after the second —
+        // the visible "NOW hands over to NEXT" — so a badge that sat anywhere
+        // but second would leave that path pointing at an account with no
+        // badge on it. Promoting it keeps the drawing and the claim agreeing.
+        let displayed = AccountActivitySelection.queue(
+            accounts: ordered, currentID: currentID, selectedID: selectedID,
+            next: .decided(nextUsableID))
+        // Read off the resolved row rather than off a position, so a row with
+        // nobody able to take over carries a NOW and no NEXT at all instead of
+        // badging whoever happens to be drawn second.
+        let currentBadge = displayed.first?.id
+        let nextBadge = nextUsableID.flatMap { id in
+            displayed.first { $0.id == id && $0.id != currentBadge }?.id
+        }
+        let accounts = displayed.map { account in
             let state = manager.state(for: account)
             let usage: String
             if let remaining = state.remainingPercent {
@@ -287,8 +320,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 subtitle: hideDetails ? nil : (state.email ?? account.emailHint),
                 usage: usage,
                 usedFraction: state.windows.first?.usedFraction,
-                isCurrent: index == 0,
-                isNext: index == 1,
+                isCurrent: account.id == currentBadge,
+                isNext: nextBadge != nil && account.id == nextBadge,
                 // `needsAttention`, not "has no reading". An account that is
                 // connected and simply has not been used yet is unknown, not
                 // broken, and painting its mark red would be crying wolf on a
@@ -388,13 +421,29 @@ enum AccountActivitySelection {
         }.max { $0.1 < $1.1 }?.0 ?? selectedID
     }
 
+    /// Who takes over next, and how that was decided.
+    enum NextAccount: Equatable {
+        /// Work it out from the person's order. Correct where nothing else
+        /// knows better — a provider with no automatic rotation to disagree.
+        case byOrder
+        /// Told by the account layer, which walks the queue and skips accounts
+        /// that could not take a session. `nil` is a real answer: nobody can
+        /// take over at all, and the row then has a NOW and no NEXT.
+        case decided(UUID?)
+    }
+
     /// NOW is first. When automatic rotation already chose another account,
     /// that prepared account is NEXT; otherwise NEXT follows the user's order.
-    static func queue(accounts: [ManagedAccount], currentID: UUID?, selectedID: UUID?) -> [ManagedAccount] {
+    static func queue(accounts: [ManagedAccount], currentID: UUID?, selectedID: UUID?,
+                      next decision: NextAccount = .byOrder) -> [ManagedAccount] {
         guard !accounts.isEmpty else { return [] }
         let current = accounts.first { $0.id == currentID } ?? accounts[0]
         let next: ManagedAccount?
-        if selectedID != current.id {
+        if case .decided(let id) = decision {
+            // Told, not worked out. Walking the order here is what used to name
+            // a spent account as next while two healthy ones sat behind it.
+            next = id.flatMap { id in accounts.first { $0.id == id && $0.id != current.id } }
+        } else if selectedID != current.id {
             next = accounts.first { $0.id == selectedID }
         } else if let index = accounts.firstIndex(where: { $0.id == current.id }), accounts.count > 1 {
             next = accounts[(index + 1) % accounts.count]

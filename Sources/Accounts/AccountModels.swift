@@ -395,6 +395,18 @@ extension AccountAttention {
     }
 }
 
+/// The last automatic handoff, kept across launches. Without a record, a switch
+/// that happened while nobody was watching is unexplainable afterwards, which is
+/// exactly when someone wants to know why their account changed.
+struct RecordedAccountSwitch: Codable, Equatable {
+    let fromID: UUID?
+    let fromName: String
+    let toID: UUID?
+    let toName: String
+    let reason: String
+    let date: Date
+}
+
 /// Something that *was* wrong and now is not. Published alongside `attention`
 /// so the app can say so once, in green, instead of a red banner simply
 /// vanishing and leaving the person unsure whether they fixed it.

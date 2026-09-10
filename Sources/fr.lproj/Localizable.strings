@@ -218,3 +218,13 @@
 "%1$@ is next in your order, but %2$@" = "%1$@ est le suivant dans votre ordre, mais %2$@";
 "its %1$@ is used up.%2$@" = "sa %1$@ est épuisée.%2$@";
 "it has no usage left." = "il n’a plus de quota.";
+
+/* The usage endpoint asked us to slow down */
+"Usage check paused — retrying at %@" = "Vérification en pause — nouvel essai à %@";
+"Usage check paused." = "Vérification des quotas en pause.";
+"Sign in to this account again." = "Reconnectez-vous à ce compte.";
+"macOS did not allow access to this login. Choose Allow access for this account." = "macOS n’a pas autorisé l’accès à cette connexion. Choisissez Autoriser l’accès pour ce compte.";
+"This login is being renewed. The last reading is still shown." = "Cette connexion est en cours de renouvellement. Le dernier relevé reste affiché.";
+"The usage service answered unexpectedly (%d). The last reading is still shown." = "Le service de quotas a répondu de façon inattendue (%d). Le dernier relevé reste affiché.";
+"The usage service asked us to slow down. Checking again shortly." = "Le service de quotas demande de ralentir. Nouvelle vérification sous peu.";
+"%@ does not meter usage, so there is nothing to show." = "%@ ne comptabilise pas d’usage, il n’y a donc rien à afficher.";

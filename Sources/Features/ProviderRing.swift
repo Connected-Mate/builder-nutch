@@ -268,9 +268,28 @@ struct InlineAccountRotation: View {
     let displayMode: UsageDisplayMode
     let onChooseNext: (UUID) -> Void
 
+    /// Whether anybody can actually take over.
+    ///
+    /// Everything that draws the handover reads this, not just the badge. The
+    /// connector and the rule are claims in their own right — a line drawn from
+    /// the first cell to the second says *that* account hands over to *this*
+    /// one — so during a spell when nobody can take over they have to go too.
+    /// Leaving them up would point the picture at an account carrying no badge,
+    /// which is the exact contradiction the badge was fixed to remove.
+    ///
+    /// Nil used to be rare. It is not: a rate-limited or stale reading counts
+    /// as unknown rather than exhausted, so there are now ordinary minutes with
+    /// no usable successor at all.
+    private var hasNext: Bool { Self.drawsHandover(picker.accounts) }
+
+    /// The rule itself, so it can be stated without a renderer.
+    static func drawsHandover(_ accounts: [NotchAccountItem]) -> Bool {
+        accounts.contains { $0.isNext }
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if picker.accounts.count > 2 {
+            if picker.accounts.count > 2, hasNext {
                 queueDivider
             }
             if edge.isVertical {
@@ -321,7 +340,7 @@ struct InlineAccountRotation: View {
         ForEach(Array(picker.accounts.enumerated()), id: \.element.id) { index, account in
             accountCell(account)
             if index < picker.accounts.count - 1 {
-                ZStack { if index == 0 { handoffConnector } }
+                ZStack { if index == 0, hasNext { handoffConnector } }
                     .frame(height: NotchLayout.cellSpacing)
             }
         }
@@ -332,7 +351,7 @@ struct InlineAccountRotation: View {
             accountCell(account)
                 .frame(width: NotchLayout.cellAlong(for: edge))
             if index < picker.accounts.count - 1 {
-                ZStack { if index == 0 { handoffConnector } }
+                ZStack { if index == 0, hasNext { handoffConnector } }
                     .frame(width: NotchLayout.cellSpacing)
             }
         }

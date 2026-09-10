@@ -57,6 +57,11 @@ final class AccountManager: ObservableObject {
     @Published private(set) var resolvedAttention: AccountResolution?
     /// Burn-rate history per account. In memory only; never persisted.
     private(set) var usageForecasts: [UUID: UsageForecast] = [:]
+    /// The last handoff this app made by itself, kept across launches.
+    @Published private(set) var lastAutomaticSwitch: RecordedAccountSwitch?
+    /// When each account's usage was last read, so the endpoint is not asked the
+    /// same question twice in a minute by a timer, an audit and a person at once.
+    private var lastReadAt: [UUID: Date] = [:]
     /// The login this app last saw on the Mac. Not the same question as which
     /// account is queued next, and conflating the two would let a manual "Set
     /// next" look identical to someone running `claude /login` behind our back.
@@ -118,6 +123,7 @@ final class AccountManager: ObservableObject {
             // No record yet means this catalog predates the field. Assume the
             // Mac was on the queued account, so only a real divergence adopts.
             lastKnownSystemClaude = catalog.systemClaudeAccountID ?? catalog.selected[.claude]
+            lastAutomaticSwitch = catalog.lastAutomaticSwitch
             normalizeRotationOrder()
             states = Dictionary(uniqueKeysWithValues: accounts.map {
                 ($0.id, $0.isBrowserOnly ? Self.browserState($0) : ManagedAccountState(message: "Refresh to check this account."))
@@ -172,7 +178,8 @@ final class AccountManager: ObservableObject {
         try usableStorage().save(AccountCatalog(accounts: accounts, selected: selected,
             automaticSelection: automaticSelection, ignoredExistingProfiles: ignoredExistingProfiles,
             rotationOrder: rotationOrder, switchThresholdPercent: switchThresholdPercent,
-            switchAheadMinutes: switchAheadMinutes, systemClaudeAccountID: lastKnownSystemClaude))
+            switchAheadMinutes: switchAheadMinutes, systemClaudeAccountID: lastKnownSystemClaude,
+            lastAutomaticSwitch: lastAutomaticSwitch))
     }
 
     @discardableResult
@@ -482,6 +489,9 @@ final class AccountManager: ObservableObject {
         if automatic {
             automaticSwitch = AutomaticAccountSwitch(provider: .claude, fromID: current.id,
                 fromName: current.label, toID: target.id, toName: target.label, reason: reason)
+            lastAutomaticSwitch = RecordedAccountSwitch(fromID: current.id, fromName: current.label,
+                toID: target.id, toName: target.label, reason: reason, date: Date())
+            try? persist(accounts: accounts, selected: selected)
         }
     }
 
@@ -728,21 +738,38 @@ final class AccountManager: ObservableObject {
                 pausedRefreshIDs.remove(account.id)
             } else { pausedRefreshIDs.insert(account.id) }
             recordUsage(for: account)
+            lastReadAt[account.id] = Date()
         }
         catch {
             guard !hasShutDown, !cancellation.isCancelled else { return }
             var state = states[account.id] ?? ManagedAccountState()
-            state.message = error.localizedDescription
             // Retain the last displayed quotas, but never use a failed refresh for automation.
             state.refreshedAt = nil
             state.requiresKeychainAccess = (error as? ClaudeSystemCredentialError)?.requiresAccess == true
             // A revoked or expired saved login is not a transient failure. Say so
             // now, so the person signs in before a rotation needs this account.
             state.requiresSignIn = lostItsSignIn(account, error: error)
+            lastReadAt[account.id] = Date()
+            let retryAt = Date().addingTimeInterval(retryDelay(for: error))
+            if Self.isUsageCheckFailure(error) {
+                // The endpoint was unreachable or asked us to slow down. That says
+                // nothing about whether the person is signed in, and presenting it
+                // as a disconnection made four working accounts look dead.
+                state.requiresSignIn = false
+                state.requiresKeychainAccess = false
+                if !state.isConnected, let identity = savedIdentity(account) {
+                    state.isConnected = true
+                    state.email = state.email ?? identity.email
+                }
+                state.message = String(format: NSLocalizedString("Usage check paused — retrying at %@", comment: "Rate limited"),
+                                       Self.clock.string(from: retryAt))
+            } else {
+                state.message = error.localizedDescription
+            }
             if account.provider == .claude, claudeReader != nil, !state.requiresKeychainAccess {
-                externalRetryAfter[account.id] = Date().addingTimeInterval(60)
+                externalRetryAfter[account.id] = retryAt
             } else { pausedRefreshIDs.insert(account.id) }
-            if account.existingProfile != nil {
+            if account.existingProfile != nil, !Self.isUsageCheckFailure(error) {
                 state.isConnected = false
                 externalRetryAfter[account.id] = Date().addingTimeInterval(900)
             }
@@ -750,12 +777,55 @@ final class AccountManager: ObservableObject {
         }
     }
 
+    static let clock: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.setLocalizedDateFormatFromTemplate("j:mm")
+        return formatter
+    }()
+
+    /// A failure of the usage *check*, as opposed to a verdict on the account.
+    /// Rate limits, timeouts and unreachable networks all belong here: none of
+    /// them means the person has been signed out, and none may look like it.
+    static func isUsageCheckFailure(_ error: Error) -> Bool {
+        if let usage = error as? UsageProviderError {
+            switch usage {
+            case .needsAuth, .accessDenied: return false
+            default: return true
+            }
+        }
+        if let managed = error as? ManagedAccountError {
+            switch managed {
+            case .timedOut, .invalidResponse, .commandFailed: return true
+            default: return false
+            }
+        }
+        return error is URLError
+    }
+
+    private func retryDelay(for error: Error) -> TimeInterval {
+        (error as? UsageProviderError)?.retryDelay ?? 60
+    }
+
+    private func savedIdentity(_ account: ManagedAccount) -> ClaudeCredentialIdentity? {
+        guard account.provider == .claude, let credentials = systemCredentials else { return nil }
+        let location = systemClaudeAccountID == account.id ? systemClaudeLocation : credentialLocation(for: account)
+        return (try? credentials.identity(at: location)) ?? nil
+    }
+
     func refreshAll() async {
         guard !hasShutDown, !authenticationInProgress else { return }
         recoverClaudeCacheMarkers()
         updateSystemClaudeIdentity()
-        auditQueueIfDue()
-        await refreshAccounts(accounts.filter { !pausedRefreshIDs.contains($0.id) && externalRetryAfter[$0.id].map { $0 > Date() } != true })
+        let audit = auditQueueIfDue()
+        await refreshAccounts(accounts.filter {
+            !pausedRefreshIDs.contains($0.id)
+                && externalRetryAfter[$0.id].map { $0 > Date() } != true
+                && readingIsDue($0)
+        })
+        // The queue sweep is what turns one refresh into six. Spread it out: the
+        // endpoint that rate-limited us does not care that the reads were ours.
+        if audit { await sweepInactiveAccounts() }
         guard !hasShutDown, !Task.isCancelled else { return }
         if automaticDiscovery { await discoverExistingAccounts() }
         mergeDuplicateAccounts()
@@ -769,8 +839,9 @@ final class AccountManager: ObservableObject {
     /// too late to do anything about it. Runs once at launch and every 30 minutes.
     /// Accounts waiting for the person's Keychain permission are left alone —
     /// retrying those would be a prompt they did not ask for.
-    private func auditQueueIfDue(now: Date = Date()) {
-        guard lastQueueAudit.map({ now.timeIntervalSince($0) >= Self.queueAuditInterval }) ?? true else { return }
+    @discardableResult
+    private func auditQueueIfDue(now: Date = Date()) -> Bool {
+        guard lastQueueAudit.map({ now.timeIntervalSince($0) >= Self.queueAuditInterval }) ?? true else { return false }
         lastQueueAudit = now
         // Cursor never rotates, but it does go quiet when the editor is signed
         // out, and it has to be able to come back on its own once it is not.
@@ -778,6 +849,36 @@ final class AccountManager: ObservableObject {
             guard states[account.id]?.requiresKeychainAccess != true else { continue }
             pausedRefreshIDs.remove(account.id)
             externalRetryAfter.removeValue(forKey: account.id)
+        }
+        return true
+    }
+
+    /// How often one account may be asked. The account in use is worth a reading
+    /// a minute; the rest are not, and asking for six at once is what earned the
+    /// rate limit in the first place.
+    private func readInterval(for account: ManagedAccount) -> TimeInterval {
+        let active = systemClaudeAccountID == account.id || selected[account.provider] == account.id
+        return active ? 60 : 300
+    }
+
+    /// A few seconds of tolerance, so a one-minute timer does not miss its own
+    /// window and quietly halve the refresh rate.
+    private func readingIsDue(_ account: ManagedAccount, now: Date = Date()) -> Bool {
+        guard let last = lastReadAt[account.id] else { return true }
+        return now.timeIntervalSince(last) >= readInterval(for: account) - 5
+    }
+
+    /// Re-reads the queued accounts one at a time, spaced out, so a queue audit
+    /// never arrives at the endpoint as a burst.
+    private func sweepInactiveAccounts() async {
+        let queued = accounts.filter {
+            $0.provider.supportsAutomaticSelection && $0.id != systemClaudeAccountID
+                && states[$0.id]?.requiresKeychainAccess != true && readingIsDue($0)
+        }
+        for account in queued {
+            guard !hasShutDown, !Task.isCancelled, !authenticationInProgress else { return }
+            await refresh(account)
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
         }
     }
 
@@ -1207,7 +1308,7 @@ final class AccountManager: ObservableObject {
             guard let current = claudeQueue().first, !claudeCandidateIsBusy(excluding: current.id),
                   AccountSelection.rotating(provider: .claude, accounts: accounts, states: states,
                     order: rotationOrder[.claude] ?? [], currentID: current.id,
-                    thresholdPercent: switchThresholdPercent, keepCurrent: false, now: now) != nil else { return nil }
+                    thresholdPercent: 0, keepCurrent: false, now: now) != nil else { return nil }
             return AccountResolution(kind: .switchResumed, accountID: current.id,
                 title: NSLocalizedString("An account is available again", comment: "Resolution"), resolvedAt: now)
         }
@@ -1243,6 +1344,30 @@ final class AccountManager: ObservableObject {
         }
     }
 
+    /// Why this account cannot take over the Mac right now, in the exact order
+    /// the selector tests it, or nil when it could. Every rejection the rotation
+    /// makes has a name here, so "nothing can take over" is never a dead end the
+    /// person or a maintainer has to guess at.
+    func unavailability(_ account: ManagedAccount, now: Date = Date()) -> String? {
+        guard account.provider.supportsAutomaticSelection else { return "not a switchable provider" }
+        guard let state = states[account.id] else { return "no reading yet" }
+        if state.isBusy { return "being refreshed right now" }
+        if !state.isConnected { return "not connected" }
+        if state.requiresKeychainAccess { return "waiting for Keychain permission" }
+        if state.requiresSignIn { return "sign-in lost" }
+        if let message = state.message, !message.isEmpty { return "message: \(message)" }
+        if state.windows.isEmpty { return "no usage windows reported" }
+        if !state.isFresh(at: now) {
+            return "reading is stale (refreshedAt=\(state.refreshedAt.map(String.init(describing:)) ?? "nil"))"
+        }
+        for window in state.windows {
+            guard let fraction = window.usedFraction else { return "\(window.label) has no percentage" }
+            guard fraction.isFinite, fraction >= 0, fraction < 1 else { return "\(window.label) is used up" }
+            if let reset = window.resetsAt, reset <= now { return "\(window.label) reset time is in the past" }
+        }
+        return nil
+    }
+
     /// Why this account could not take a session, in the person's words. Nil when
     /// nothing is wrong with it.
     private func blockedReason(_ account: ManagedAccount) -> String? {
@@ -1254,6 +1379,38 @@ final class AccountManager: ObservableObject {
         if let message = state.message, !message.isEmpty { return message }
         if state.remainingPercent == 0 { return NSLocalizedString("it has no usage left.", comment: "Health reason") }
         return nil
+    }
+
+    /// Who would take over for this provider if the account in use had to hand
+    /// over this minute, or nil when nobody could.
+    ///
+    /// This is the one answer to "what is next", so the notch badge, the accounts
+    /// window and the rotation itself cannot disagree. Position in the person's
+    /// order decides ties and nothing else: an account that cannot take a session
+    /// is not next, however near the top of the list it sits. The threshold is
+    /// deliberately not applied — the question is who *could* take over, not
+    /// whether it is time to move.
+    func nextUsableAccount(for provider: AccountProvider, now: Date = Date()) -> ManagedAccount? {
+        guard provider.supportsAutomaticSelection else { return nil }
+        let currentID = provider == .claude ? (systemClaudeAccountID ?? selected[provider]) : selected[provider]
+        guard let currentID else { return nil }
+        return AccountSelection.rotating(provider: provider, accounts: accounts, states: states,
+            order: rotationOrder[provider] ?? [], currentID: currentID,
+            thresholdPercent: 0, keepCurrent: false, now: now)
+    }
+
+    /// True when at least one usage check is deliberately waiting out a rate
+    /// limit. Nothing is known about those accounts, and "unknown" must never be
+    /// reported as "empty".
+    var usageChecksArePaused: Bool { externalRetryAfter.contains { $0.value > Date() } }
+
+    /// True when another Claude account's reading is simply out of date. A stale
+    /// reading is an absence of information, not an exhausted account.
+    private func anotherClaudeReadingIsUnknown(excluding currentID: UUID, now: Date) -> Bool {
+        accounts.contains { account in
+            guard account.provider == .claude, account.id != currentID, let state = states[account.id] else { return false }
+            return state.isConnected && !state.isFresh(at: now) && !state.requiresSignIn && !state.requiresKeychainAccess
+        }
     }
 
     /// True while another Claude account is mid-refresh. A reading in flight is
@@ -1313,11 +1470,16 @@ final class AccountManager: ObservableObject {
                 detail: NSLocalizedString("Its saved sign-in expired. Sign in again to put this account back in the rotation.", comment: "Attention detail"),
                 raisedAt: now)
         }
+        // The same walk health uses, and with the same threshold of zero: the
+        // question is whether anyone could take over at all, not whether it is
+        // time to move. Asking it two different ways let the banner and the
+        // status line disagree about the same accounts.
         if automaticSelection, systemCredentials != nil, let current,
-           !claudeCandidateIsBusy(excluding: current.id),
+           !claudeCandidateIsBusy(excluding: current.id), !usageChecksArePaused,
+           !anotherClaudeReadingIsUnknown(excluding: current.id, now: now),
            AccountSelection.rotating(provider: .claude, accounts: accounts, states: states,
                 order: rotationOrder[.claude] ?? [], currentID: current.id,
-                thresholdPercent: switchThresholdPercent, keepCurrent: false, now: now) == nil {
+                thresholdPercent: 0, keepCurrent: false, now: now) == nil {
             return AccountAttention(kind: .queueEmpty, accountID: current.id,
                 title: NSLocalizedString("No account left to switch to", comment: "Attention title"),
                 detail: String(format: NSLocalizedString("When %@ runs out there is nothing to move to. Add another subscription to keep working.", comment: "Attention detail"), label(current)),
@@ -1342,9 +1504,7 @@ final class AccountManager: ObservableObject {
         // time to move" but "if we moved now, who could take it". Answering that
         // with the raw order neighbour told the person an exhausted account was
         // next while two healthy ones sat behind it.
-        let ready = AccountSelection.rotating(provider: .claude, accounts: accounts, states: states,
-            order: rotationOrder[.claude] ?? [], currentID: current.id,
-            thresholdPercent: 0, keepCurrent: false, now: now)
+        let ready = nextUsableAccount(for: .claude, now: now)
         health.currentID = current.id
         health.currentName = label(current)
         health.currentRemainingPercent = states[current.id]?.remainingPercent
@@ -1364,6 +1524,8 @@ final class AccountManager: ObservableObject {
             health.reason = String(format: NSLocalizedString("%@ is waiting for your permission.", comment: "Health reason"), label(next))
         } else if let next, needsSignIn(next) {
             health.reason = String(format: NSLocalizedString("%@ needs a new sign-in.", comment: "Health reason"), label(next))
+        } else if ready == nil, usageChecksArePaused || anotherClaudeReadingIsUnknown(excluding: current.id, now: now) {
+            health.reason = NSLocalizedString("Usage check paused.", comment: "Health reason")
         } else if ready == nil, !claudeCandidateIsBusy(excluding: current.id) {
             // Name the account that was supposed to be next and what stopped it,
             // rather than a blanket "nothing left" the person cannot act on.

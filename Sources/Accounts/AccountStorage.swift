@@ -17,6 +17,9 @@ struct AccountCatalog: Codable {
     /// differ. Comparing the two is how a login changed outside the app is told
     /// from a next-account the person queued on purpose.
     var systemClaudeAccountID: UUID? = nil
+    /// The last handoff this app made on its own, so it can still be explained
+    /// after a relaunch.
+    var lastAutomaticSwitch: RecordedAccountSwitch? = nil
 }
 
 struct AccountStorage {

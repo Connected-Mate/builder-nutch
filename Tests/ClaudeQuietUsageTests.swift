@@ -204,10 +204,13 @@ final class ClaudeQuietUsageTests: XCTestCase {
         await manager.refresh(account)
         XCTAssertTrue(manager.state(for: account).isFresh())
         await manager.refreshAll()
-        XCTAssertEqual(reader.reads, 3)
+        // A reading taken a moment ago is not asked for again. The usage endpoint
+        // is shared across every account and it rate-limits: a sweep that re-reads
+        // what it just read is what earned the 429s.
+        XCTAssertEqual(reader.reads, 2, "A fresh reading must not be re-fetched by the next sweep")
         manager.shutdown()
         await manager.refresh(account)
         await manager.refreshAll()
-        XCTAssertEqual(reader.reads, 3)
+        XCTAssertEqual(reader.reads, 2)
     }
 }

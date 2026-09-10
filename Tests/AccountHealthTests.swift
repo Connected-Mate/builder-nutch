@@ -275,6 +275,10 @@ final class AccountHealthTests: XCTestCase {
         XCTAssertEqual(manager.health.currentName, "Claude 6")
         XCTAssertEqual(manager.health.nextName, "Claude 3", "The fullest usable account, not the order neighbour")
         XCTAssertEqual(manager.health.nextRemainingPercent ?? -1, 72, accuracy: 0.001)
+        // One answer to "what is next", so the notch badge and this cannot differ.
+        XCTAssertEqual(manager.nextUsableAccount(for: .claude)?.label, "Claude 3")
+        XCTAssertEqual(manager.nextUsableAccount(for: .claude)?.id, manager.health.nextID)
+        XCTAssertNil(manager.nextUsableAccount(for: .grok), "A browser profile has nothing to hand over")
         XCTAssertNotEqual(manager.health.nextName, "Claude 1")
     }
 
@@ -290,6 +294,128 @@ final class AccountHealthTests: XCTestCase {
         let plain = ClaudeAccountUsage.restriction(ManagedAccountState(isConnected: true, windows: [weekly]), now: now)
         XCTAssertTrue(plain.contains("Weekly limit"), plain)
         XCTAssertFalse(plain.lowercased().contains("other models"), plain)
+    }
+
+    /// The exact live shape: order 4, 2, 3, 5, 6, 1, running on 6, with three
+    /// different kinds of unavailable account standing between 6 and the healthy
+    /// ones. The walk has to step over all three and wrap.
+    private func liveShape(at now: Date) -> (accounts: [ManagedAccount], states: [UUID: ManagedAccountState], order: [UUID]) {
+        func state(remaining: Double) -> ManagedAccountState {
+            ManagedAccountState(isConnected: true,
+                windows: [LimitWindow(id: "five_hour", label: "5h limit", usedFraction: 1 - remaining / 100,
+                                      resetsAt: now.addingTimeInterval(3600))], refreshedAt: now)
+        }
+        func account(_ name: String, _ index: Int) -> ManagedAccount {
+            ManagedAccount(id: UUID(), provider: .claude, label: name, createdAt: now.addingTimeInterval(Double(index)))
+        }
+        let four = account("Claude 4", 0), two = account("Claude 2", 1), three = account("Claude 3", 2)
+        let five = account("Claude 5", 3), six = account("Claude 6", 4), one = account("Claude 1", 5)
+        var states: [UUID: ManagedAccountState] = [
+            four.id: state(remaining: 15),
+            three.id: state(remaining: 72),
+            five.id: state(remaining: 70),
+            six.id: state(remaining: 87)
+        ]
+        // Lost its sign-in: connected is false and the credential is gone.
+        states[two.id] = ManagedAccountState(message: "expired", requiresSignIn: true)
+        // Spent one model's weekly allowance; the subscription itself is fine.
+        var blocked = ManagedAccountState(isConnected: true, windows: [
+            LimitWindow(id: "five_hour", label: "5h limit", usedFraction: 0.1, resetsAt: now.addingTimeInterval(3600)),
+            LimitWindow(id: "model-0", label: "Fable weekly limit", usedFraction: 1,
+                        resetsAt: now.addingTimeInterval(7200), modelName: "Fable")
+        ], refreshedAt: now)
+        blocked.message = ClaudeAccountUsage.restriction(blocked, now: now)
+        states[one.id] = blocked
+        let ordered = [four, two, three, five, six, one]
+        return (ordered, states, ordered.map(\.id))
+    }
+
+    func testTheWalkStepsOverEveryUnavailableAccountAndWraps() throws {
+        let (accounts, states, order) = liveShape(at: now)
+        let six = try XCTUnwrap(accounts.first { $0.label == "Claude 6" })
+        let three = try XCTUnwrap(accounts.first { $0.label == "Claude 3" })
+
+        // "If we had to move now, who?" — steps over 1 (model limit spent),
+        // 4 (at the threshold) and 2 (sign-in lost), and wraps to reach 3 and 5.
+        XCTAssertEqual(AccountSelection.rotating(provider: .claude, accounts: accounts, states: states,
+            order: order, currentID: six.id, thresholdPercent: 0, keepCurrent: false, now: now)?.label,
+            "Claude 3", "The fullest reachable account, not the first neighbour")
+
+        // And the real switch, with Claude 6 now at the floor.
+        var spent = states
+        spent[six.id] = state(remaining: 10)
+        let decision = AccountSelection.systemClaudeDecision(accounts: accounts, states: spent,
+            order: order, currentID: six.id, preferredID: six.id, thresholdPercent: 15, now: now)
+        XCTAssertEqual(decision?.target.label, "Claude 3")
+        XCTAssertNotEqual(decision?.target.label, "Claude 1")
+    }
+
+    @MainActor
+    func testHealthReportsAReachableAccountRatherThanGivingUp() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("walk-\(UUID().uuidString)")
+        try AccountStorage.privateDirectory(root)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let manager = AccountManager(rootURL: root)
+        let (accounts, states, _) = liveShape(at: Date())
+        var made: [String: UUID] = [:]
+        for account in accounts { made[account.label] = try manager.add(provider: .claude, label: account.label, emailHint: nil).id }
+        for account in accounts {
+            let source = states[account.id]!
+            manager.applyState({ $0 = source }, to: made[account.label]!)
+        }
+        try manager.select(accounts.first { $0.label == "Claude 6" }.map { made[$0.label]! }
+            .flatMap { id in manager.accounts.first { $0.id == id } }!)
+        manager.automaticSelection = true
+
+        XCTAssertEqual(manager.health.currentName, "Claude 6")
+        XCTAssertEqual(manager.health.nextName, "Claude 3")
+        XCTAssertEqual(manager.health.nextRemainingPercent ?? -1, 72, accuracy: 0.001)
+        // Every rejection the walk makes has a name, so a live dump can say why.
+        XCTAssertEqual(manager.unavailability(manager.accounts.first { $0.label == "Claude 3" }!, now: Date()), nil)
+        XCTAssertNotNil(manager.unavailability(manager.accounts.first { $0.label == "Claude 2" }!, now: Date()))
+        XCTAssertNotNil(manager.unavailability(manager.accounts.first { $0.label == "Claude 1" }!, now: Date()))
+    }
+
+    @MainActor
+    func testABurstOfRateLimitsChangesNothingAndDisconnectsNobody() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("throttled-\(UUID().uuidString)")
+        try AccountStorage.privateDirectory(root)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let reader = ThrottledReader()
+        let manager = AccountManager(rootURL: root, runner: ThrottledReader.Runner(),
+            executable: { _ in URL(fileURLWithPath: "/fake/claude") }, claudeReader: reader)
+        var made: [ManagedAccount] = []
+        for index in 1...4 { made.append(try manager.add(provider: .claude, label: "Claude \(index)", emailHint: nil)) }
+        for account in made {
+            manager.applyState({ $0.isConnected = true; $0.plan = "max"; $0.email = "person@example.test"
+                $0.windows = [LimitWindow(id: "five_hour", label: "5h limit", usedFraction: 0.3,
+                                          resetsAt: Date().addingTimeInterval(3600))]
+                $0.refreshedAt = Date() }, to: account.id)
+        }
+        manager.automaticSelection = true
+        XCTAssertNil(manager.attention)
+
+        // Every read comes back rate-limited, the way the endpoint answered today.
+        reader.throttled = true
+        for account in made { await manager.refresh(account) }
+
+        for account in made {
+            let state = manager.state(for: account)
+            XCTAssertTrue(state.isConnected, "A rate limit says nothing about being signed in")
+            XCTAssertEqual(state.plan, "max", "The last good reading is kept")
+            XCTAssertFalse(state.requiresSignIn)
+            XCTAssertFalse(state.isFresh(), "It is stale, and automation must treat it as unknown")
+            let message = try XCTUnwrap(state.message)
+            XCTAssertFalse(message.contains("error 1"), message)
+            XCTAssertTrue(message.contains("—") || message.lowercased().contains("paus"), message)
+        }
+        XCTAssertTrue(manager.usageChecksArePaused)
+        XCTAssertNil(manager.attention, "Unknown is not the same as an empty queue")
+        // The reason must never claim the queue is empty when it is merely unknown.
+        // (This manager has no system credentials, so the reason it reports is the
+        // build-level one; the paused wording is exercised through the guard order.)
+        XCTAssertNotEqual(manager.health.reason, NSLocalizedString("No other account has usage left.", comment: ""))
+        XCTAssertFalse(manager.health.isSwitchReady)
     }
 
     @MainActor
@@ -326,3 +452,16 @@ final class AccountHealthTests: XCTestCase {
     }
 }
 
+/// Answers every usage read with the endpoint's own "slow down".
+private final class ThrottledReader: ClaudeAccountReading, @unchecked Sendable {
+    var throttled = false
+    func read(_ location: ClaudeCredentialLocation, cancellation: AccountCancellation) async throws -> ManagedAccountState {
+        if throttled { throw UsageProviderError.rateLimited(retryAfter: 120) }
+        return ManagedAccountState(isConnected: true, refreshedAt: Date())
+    }
+    struct Runner: AccountCommandRunning {
+        func run(_ command: AccountCommand, cancellation: AccountCancellation) async throws -> Data {
+            throw ManagedAccountError.unavailable
+        }
+    }
+}
