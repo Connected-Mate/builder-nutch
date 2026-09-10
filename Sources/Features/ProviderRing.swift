@@ -28,6 +28,14 @@ struct ProviderRing: View {
     /// Names a problem this ring's account has just recovered from. One soft
     /// swell, against the green skin.
     var resolvedPulse: String? = nil
+    /// This account cannot take a session as it stands — an expired login, a
+    /// blocked Keychain, a profile that is simply not connected.
+    ///
+    /// The ring then stops being a measurement and becomes a symptom: the mark
+    /// goes red, the track dims and the arc is not drawn at all. Whatever this
+    /// account last reported is no longer true of it, and a percentage that is
+    /// no longer true is worse than no percentage.
+    var needsAttention: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var spin: Double = 0
@@ -49,8 +57,9 @@ struct ProviderRing: View {
             ZStack {
                 Circle()
                     .strokeBorder(Palette.ringTrack, lineWidth: NotchLayout.trackStroke)
+                    .opacity(needsAttention ? 0.5 : 1)
 
-                if usedFraction != nil {
+                if usedFraction != nil, !needsAttention {
                     Circle()
                         .inset(by: NotchLayout.trackStroke / 2)
                         .trim(from: 0, to: sweep)
@@ -70,7 +79,11 @@ struct ProviderRing: View {
                 }
 
                 ProviderGlyphView(glyph: glyph)
-                    .foregroundStyle(Palette.textPrimary)
+                    // The whole message, in one mark. The brand logos render in
+                    // their own colours, so this has to be a tint rather than a
+                    // foreground style the image is free to ignore.
+                    .foregroundStyle(needsAttention ? Palette.alert : Palette.textPrimary)
+                    .modifier(BrokenGlyphTint(active: needsAttention))
                     // A spent limit dims its glyph so the ring reads as "waiting".
                     .opacity(band == .exhausted ? 0.35 : 1)
                     // The flash goes on the glyph alone, not on the ring: the
@@ -107,6 +120,25 @@ struct ProviderRing: View {
             withAnimation(.timingCurve(0.32, 0, 0.14, 1, duration: 0.95)) {
                 spin += 360
             }
+        }
+    }
+}
+
+/// Forces a brand mark to the alert colour.
+///
+/// `foregroundStyle` alone is not enough. The provider marks are the real
+/// service logos and render `.original`, which is the whole point of them —
+/// they keep their own colours and ignore a tint. A broken account has to read
+/// as broken whichever logo it wears, so the mark is used as a mask and the
+/// colour is drawn through it.
+private struct BrokenGlyphTint: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        if active {
+            Palette.alert.mask(content)
+        } else {
+            content
         }
     }
 }
@@ -180,11 +212,17 @@ struct ProviderCell: View {
     /// Passed straight through to the ring's glyph — see `ProviderRing`.
     var attentionFlash: String? = nil
     var resolvedPulse: String? = nil
+    var needsAttention: Bool = false
 
-    /// A dash, not "0%": nothing read is not the same as nothing used.
+    /// A dash, not "0%": nothing read is not the same as nothing used. Nothing
+    /// at all when the account is broken — see `ProviderRing.needsAttention`.
     private var percentText: String {
-        snapshot.hasReading ? snapshot.headlineText(for: displayMode) : "—"
+        if needsAttention { return "" }
+        return snapshot.hasReading ? snapshot.headlineText(for: displayMode) : "—"
     }
+
+    /// The label as drawn, so a test can state the rule without a renderer.
+    var percentTextForTesting: String { percentText }
 
     var body: some View {
         VStack(spacing: NotchLayout.ringLabelGap) {
@@ -197,8 +235,13 @@ struct ProviderCell: View {
                 activity: activity,
                 isRefreshing: isRefreshing,
                 attentionFlash: attentionFlash,
-                resolvedPulse: resolvedPulse
+                resolvedPulse: resolvedPulse,
+                needsAttention: needsAttention
             )
+            // Kept even when empty. The stack's geometry is measured in
+            // `NotchLayout`, and a cell that quietly lost a line would slide
+            // its ring off the centres every hover band and tooltip tail is
+            // aimed at.
             Text(percentText)
                 .font(Typography.percent)
                 .foregroundStyle(Palette.textPrimary)
@@ -295,13 +338,24 @@ struct InlineAccountRotation: View {
         }
     }
 
+    /// Only ever a percentage, or nothing.
+    ///
+    /// A number's width is bounded by construction — four characters at the
+    /// most. A status word's is bounded by nothing, and the one that shipped
+    /// ran past the edge of the notch and onto the desktop.
+    static func label(for account: NotchAccountItem) -> String {
+        guard account.usage != "—" else { return "" }
+        return account.usage.components(separatedBy: " ").first ?? ""
+    }
+
     private func accountCell(_ account: NotchAccountItem) -> some View {
         VStack(spacing: NotchLayout.ringLabelGap) {
             ProviderRing(
                 usedFraction: account.usedFraction,
                 glyph: picker.provider.glyph,
                 displayMode: displayMode,
-                isStale: account.usedFraction == nil
+                isStale: account.usedFraction == nil,
+                needsAttention: account.needsAttention
             )
             .overlay(alignment: .bottom) {
                 if account.isCurrent || account.isNext {
@@ -315,9 +369,13 @@ struct InlineAccountRotation: View {
                         .offset(y: Design.px(11))
                 }
             }
-            Text(account.usage == "—"
-                 ? NSLocalizedString("Usage unavailable short", comment: "Compact unavailable usage")
-                 : account.usage.components(separatedBy: " ").first ?? account.usage)
+            // No word here, ever. The cell is only as wide as the ring, and a
+            // status word is as long as whatever language it is written in —
+            // "Usage unavailable short" ran clean out of the notch and over the
+            // desktop. A percentage fits by construction; nothing else does, so
+            // nothing else is drawn. The reason lives in the hover card, which
+            // has room for a sentence.
+            Text(Self.label(for: account))
                 .font(Typography.percent)
                 .foregroundStyle(account.isCurrent ? Palette.textPrimary : Palette.textSecondary)
                 .fixedSize(horizontal: true, vertical: false)

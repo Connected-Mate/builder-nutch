@@ -100,6 +100,17 @@ final class NotchViewModel: ObservableObject {
         attentionFlash = attention.id
     }
 
+    /// Whether this cell is the account the standing problem actually names.
+    ///
+    /// Deliberately stricter than `NotchAlert.concerns`, which answers true for
+    /// every cell when the problem belongs to no single account. That is right
+    /// for a flash, which is over in a second; it would be wrong here, where
+    /// every logo in the notch would sit permanently red because one unrelated
+    /// thing needs doing.
+    func needsAttention(snapshotID id: String) -> Bool {
+        attention?.snapshotID == id
+    }
+
     /// The flash this cell should carry: only the ring being complained about,
     /// or every ring when the problem belongs to no single account.
     func attentionFlash(forSnapshot id: String) -> String? {
@@ -546,4 +557,7 @@ struct NotchAccountItem: Identifiable, Equatable {
     let usedFraction: Double?
     let isCurrent: Bool
     let isNext: Bool
+    /// This account cannot take a session as it stands. Drawn as a red mark
+    /// rather than written as a word — see `ProviderRing.needsAttention`.
+    var needsAttention: Bool = false
 }

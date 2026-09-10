@@ -205,7 +205,8 @@ struct NotchRootView: View {
                         isRefreshing: model.refreshing.contains(snapshot.id),
                         displayMode: model.usageDisplayMode,
                         attentionFlash: model.attentionFlash(forSnapshot: snapshot.id),
-                        resolvedPulse: model.resolutionPulse(forSnapshot: snapshot.id)
+                        resolvedPulse: model.resolutionPulse(forSnapshot: snapshot.id),
+                        needsAttention: model.needsAttention(snapshotID: snapshot.id)
                     )
                 // Pinned to what the cell claims along the stack, or the drawn
                 // rings stop lining up with the centres `ringCenter` hands to

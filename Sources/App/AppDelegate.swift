@@ -288,7 +288,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 usage: usage,
                 usedFraction: state.windows.first?.usedFraction,
                 isCurrent: index == 0,
-                isNext: index == 1
+                isNext: index == 1,
+                // `needsAttention`, not "has no reading". An account that is
+                // connected and simply has not been used yet is unknown, not
+                // broken, and painting its mark red would be crying wolf on a
+                // brand-new profile.
+                needsAttention: state.needsAttention
             )
         }
         let title = String(format: NSLocalizedString("%@ accounts", comment: "Account picker title"), provider.title)
