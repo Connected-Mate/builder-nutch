@@ -243,3 +243,27 @@
 "A notification each time Builder Nutch moves the Mac to another account. The notch shows the handoff either way." = "Une notification à chaque fois que Builder Nutch fait passer le Mac sur un autre compte. L’encoche affiche le passage de toute façon.";
 "Claude now uses %@" = "Claude utilise maintenant %@";
 "%@ handed over." = "%@ a passé la main.";
+
+/* Consumption screen (2026-09-11) */
+"Consumption" = "Consommation";
+"Where your quota went, project by project, from the sessions on this Mac." = "Où est passé votre quota, projet par projet, d’après les sessions de ce Mac.";
+"Read the sessions again" = "Relire les sessions";
+"Nothing to show yet." = "Rien à montrer pour l’instant.";
+"Consumption is read from the Claude Code sessions on this Mac. Once you have worked with Claude Code, the projects that used your quota appear here." = "La consommation est lue dans les sessions Claude Code de ce Mac. Dès que vous aurez travaillé avec Claude Code, les projets qui ont utilisé votre quota apparaîtront ici.";
+"%d sessions" = "%d sessions";
+"%@ messages · last %d days" = "%@ messages · %d derniers jours";
+"7 days" = "7 jours";
+"30 days" = "30 jours";
+"PROJECT" = "PROJET";
+"SHARE" = "PART";
+"SESSIONS" = "SESSIONS";
+"PAID BY" = "PAYÉ PAR";
+"HOW WE KNOW" = "COMMENT ON LE SAIT";
+"Its own sessions" = "Ses propres sessions";
+"Deduced from the time" = "Déduit de l’heure";
+"Not known" = "Inconnu";
+"Unknown account" = "Compte inconnu";
+"Read from the Claude Code sessions on this Mac. Nothing leaves it." = "Lu dans les sessions Claude Code de ce Mac. Rien n’en sort.";
+"Shares are estimates that rank sessions against each other. The percentage left on each account comes from Claude itself." = "Les parts sont des estimations qui classent les sessions entre elles. Le pourcentage restant de chaque compte vient de Claude lui-même.";
+"The reading stopped early to keep the app quick, so these figures are a floor." = "La lecture s’est arrêtée tôt pour garder l’app rapide : ces chiffres sont un minimum.";
+"next: %1$@ (%2$@)" = "ensuite : %1$@ (%2$@)";

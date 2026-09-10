@@ -416,6 +416,10 @@ final class AccountManager: ObservableObject {
         adoptSystemClaudeLogin()
     }
 
+    /// The vendor's own id for the person behind a row, as its saved profile
+    /// names it. What a transcript records when it records an account at all.
+    func vendorAccountID(of account: ManagedAccount) -> String? { profileIdentity(account)?.accountID }
+
     /// The name on a saved profile, or nil when it was never signed in.
     private func profileIdentity(_ account: ManagedAccount) -> ClaudeCredentialIdentity? {
         guard let credentials = systemCredentials, account.provider == .claude else { return nil }
@@ -1869,10 +1873,12 @@ final class AccountManager: ObservableObject {
             : (health.reason ?? NSLocalizedString("Switching unavailable", comment: "Health status"))]
         parts.append(String(format: NSLocalizedString("%@ now", comment: "Account in use"), current))
         if let next = health.nextName {
-            let headroom = health.nextMinutesRemaining.flatMap(UsageForecast.headroom(minutes:))
-                ?? health.nextRemainingPercent.map { String(format: NSLocalizedString("%d%% left", comment: "Remaining quota"), Int($0.rounded())) }
-            if let headroom {
+            if let minutes = health.nextMinutesRemaining, let headroom = UsageForecast.headroom(minutes: minutes) {
                 parts.append(String(format: NSLocalizedString("next: %1$@ (≈ %2$@ left)", comment: "Next account with headroom"), next, headroom))
+            } else if let remaining = health.nextRemainingPercent {
+                // "63% left", once: the percentage phrase already says "left".
+                parts.append(String(format: NSLocalizedString("next: %1$@ (%2$@)", comment: "Next account with remaining quota"), next,
+                                    String(format: NSLocalizedString("%d%% left", comment: "Remaining quota"), Int(remaining.rounded()))))
             } else {
                 parts.append(String(format: NSLocalizedString("next: %@", comment: "Next account"), next))
             }

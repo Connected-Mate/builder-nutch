@@ -18,6 +18,8 @@ struct AccountsView: View {
     let onOpenSettings: (() -> Void)?
     @State private var filter: AccountProvider?
     @State private var showingAdd = false
+    @State private var showingUsage = false
+    @StateObject private var usage = UsageInsightsModel()
     @State private var connecting: ManagedAccount?
     @State private var personalizing: ManagedAccount?
     @State private var showingRotation = false
@@ -60,6 +62,8 @@ struct AccountsView: View {
                 }
                 if showingAdd {
                     providerCatalog
+                } else if showingUsage {
+                    UsageInsightsView(manager: manager, model: usage, hidePersonalDetails: hidePersonalDetails)
                 } else {
                     assistantList
                     if !manager.accounts.isEmpty { automaticSelectionBar }
@@ -142,6 +146,7 @@ struct AccountsView: View {
             ScrollView {
                 VStack(spacing: 5) {
                     ForEach(providers) { filterButton($0) }
+                    usageButton
                     Button {
                         showingAdd = true
                     } label: {
@@ -190,10 +195,29 @@ struct AccountsView: View {
         .overlay(alignment: .trailing) { Rectangle().fill(AppTheme.line).frame(width: 1) }
     }
 
+    /// Where the week went, beside the assistants it was spent with.
+    private var usageButton: some View {
+        let active = showingUsage && !showingAdd
+        return Button { showingUsage = true; showingAdd = false } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "chart.bar").font(.system(size: 15, weight: .medium)).frame(width: 24, height: 24)
+                Text("Consumption")
+                    .font(AppTheme.font(size: 13, weightValue: active ? 600 : 400)).lineLimit(1)
+                Spacer(minLength: 4)
+            }
+            .padding(.horizontal, 12).frame(height: 48)
+            .background(active ? AppTheme.selected : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(active ? AppTheme.line : Color.clear))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(WorkspaceQuietButtonStyle())
+        .accessibilityAddTraits(active ? .isSelected : [])
+    }
+
     private func filterButton(_ provider: AccountProvider) -> some View {
-        let active = filter == provider && !showingAdd
+        let active = filter == provider && !showingAdd && !showingUsage
         let count = manager.accounts.filter { $0.provider == provider }.count
-        return Button { filter = provider; showingAdd = false } label: {
+        return Button { filter = provider; showingAdd = false; showingUsage = false } label: {
             HStack(spacing: 12) {
                 ProviderGlyphView(glyph: provider.glyph, size: 24).frame(width: 24, height: 24)
                 Text(provider.workspaceTitle)
@@ -215,13 +239,14 @@ struct AccountsView: View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    if !showingAdd, let filter {
+                    if !showingAdd, !showingUsage, let filter {
                         ProviderGlyphView(glyph: filter.glyph, size: 25).accessibilityHidden(true)
                     }
-                    Text(showingAdd ? "Add an assistant" : filter?.workspaceTitle ?? "All accounts")
+                    Text(showingAdd ? "Add an assistant" : showingUsage ? "Consumption" : filter?.workspaceTitle ?? "All accounts")
                         .font(AppTheme.font(size: 19, weightValue: 650)).tracking(-0.55)
                 }
                 Text(showingAdd ? "Choose a service. Sign in on its official page." :
+                        showingUsage ? "Where your quota went, project by project, from the sessions on this Mac." :
                         visibleAccounts.isEmpty ? "Your next idea starts with an assistant." :
                         filter == .claude ? "Your subscriptions. One Claude login on this Mac." : "Your accounts. For your next session.")
                     .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
@@ -236,6 +261,14 @@ struct AccountsView: View {
             .accessibilityLabel(hidePersonalDetails ? "Show personal details" : "Hide personal details")
             if showingAdd {
                 Button("Back") { showingAdd = false }.buttonStyle(WorkspaceSelectionStyle())
+            } else if showingUsage {
+                Button { Task { await usage.refresh() } } label: {
+                    Image(systemName: "arrow.clockwise").frame(width: 28, height: 32)
+                }
+                .buttonStyle(WorkspaceQuietButtonStyle()).help("Read the sessions again")
+                .accessibilityLabel("Read the sessions again")
+                .disabled(usage.isLoading)
+                .keyboardShortcut("r", modifiers: .command)
             } else {
                 Text("\(visibleAccounts.count) account\(visibleAccounts.count == 1 ? "" : "s")")
                     .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
