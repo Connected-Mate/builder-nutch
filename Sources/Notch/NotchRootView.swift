@@ -62,10 +62,10 @@ struct NotchRootView: View {
 
                 // Stands down as soon as a provider's own details are opened,
                 // so the two cards never contest the same space.
-                if model.showsAttentionCard, let alert = model.attention,
-                   let index = model.attentionIndex {
-                    AttentionCard(alert: alert, direction: model.edge.tooltipDirection)
-                        .position(attentionCentre(place, index: index, alert: alert))
+                if model.showsStatusCard, let status = model.status,
+                   let index = model.statusIndex {
+                    NotchStatusCard(status: status, direction: model.edge.tooltipDirection)
+                        .position(statusCentre(place, index: index, status: status))
                         .transition(.opacity.combined(with: .offset(
                             x: model.edge.outward.x * Design.px(24),
                             y: model.edge.outward.y * Design.px(24)
@@ -75,7 +75,7 @@ struct NotchRootView: View {
             .frame(width: proxy.size.width, height: proxy.size.height)
             // Swapping cards is a movement like any other here.
             .animation(motion(NotchMotion.glide), value: model.selectedIndex)
-            .animation(motion(NotchMotion.glide), value: model.attention?.id)
+            .animation(motion(NotchMotion.glide), value: model.status?.title)
         }
         .animation(motion(NotchMotion.unfold), value: model.isExpanded)
         .environment(\.colorScheme, .dark)
@@ -106,14 +106,15 @@ struct NotchRootView: View {
         return parts.joined(separator: ". ") + "."
     }
 
-    /// Where the alert card sits: on the ring it concerns, the same way a
+    /// Where the status card sits: on the ring it concerns, the same way a
     /// usage card sits on the ring it belongs to.
-    private func attentionCentre(
-        _ place: NotchPlacement, index: Int, alert: NotchAlert
+    private func statusCentre(
+        _ place: NotchPlacement, index: Int, status: NotchStatus
     ) -> CGPoint {
         let card = model.edge.isVertical
             ? NotchLayout.cardWidth
-            : NotchLayout.attentionCardHeight(detail: alert.detail)
+            : NotchLayout.statusCardHeight(detail: status.detail,
+                                           showsHint: status.tone == .alert)
         return place.point(
             along: model.slack + model.ringCenter(index: index),
             across: model.tooltipInset + (NotchLayout.tailLength + card) / 2
@@ -135,16 +136,29 @@ struct NotchRootView: View {
         return shape
             .fill(Palette.notch)
             .frame(width: model.notchSize.width, height: model.notchSize.height)
-            // The alert skin is a second fill over the black rather than a
-            // swapped one. Two shape styles cannot be interpolated between, so
-            // exchanging them would make the notch change colour in a single
-            // frame; laid over the top, it is one opacity and the red grows in.
+            // Each skin is a fill laid over the black rather than a swapped
+            // one. Two shape styles cannot be interpolated between, so
+            // exchanging them would change the notch's colour in a single
+            // frame; layered, it is one opacity and the colour grows in.
             // Geometry is untouched — same shape, same frame, same clip.
+            //
+            // Two skins rather than one that changes stops, because a gradient
+            // cannot be interpolated between colour sets any more than two
+            // shape styles can. Layered, red over green, the transitions are
+            // all crossfades and the precedence is structural: even if both
+            // were somehow lit, the red is the one you would see.
             .overlay {
                 shape
-                    .fill(NotchAlertSkin.gradient(for: model.edge))
-                    .opacity(model.attention == nil ? 0 : 1)
-                    .animation(motion(NotchMotion.alertRaise), value: model.attention == nil)
+                    .fill(NotchAlertSkin.gradient(for: model.edge, skin: .resolved))
+                    .opacity(model.skin == .resolved ? 1 : 0)
+                    .animation(motion(skinMotion(for: .resolved)), value: model.skin)
+                    .accessibilityHidden(true)
+            }
+            .overlay {
+                shape
+                    .fill(NotchAlertSkin.gradient(for: model.edge, skin: .alert))
+                    .opacity(model.skin == .alert ? 1 : 0)
+                    .animation(motion(skinMotion(for: .alert)), value: model.skin)
                     .accessibilityHidden(true)
             }
             // Aligned to the corner where the stack starts *and* the bezel is,
@@ -190,7 +204,8 @@ struct NotchRootView: View {
                         activity: model.activity(for: snapshot.id),
                         isRefreshing: model.refreshing.contains(snapshot.id),
                         displayMode: model.usageDisplayMode,
-                        attentionFlash: model.attentionFlash(forSnapshot: snapshot.id)
+                        attentionFlash: model.attentionFlash(forSnapshot: snapshot.id),
+                        resolvedPulse: model.resolutionPulse(forSnapshot: snapshot.id)
                     )
                 // Pinned to what the cell claims along the stack, or the drawn
                 // rings stop lining up with the centres `ringCenter` hands to
@@ -279,6 +294,17 @@ struct NotchRootView: View {
 
     private func motion(_ animation: Animation) -> Animation? {
         NotchMotion.respectingReduceMotion(animation, reduceMotion)
+    }
+
+    /// Coming on or going off, for one of the two skins.
+    ///
+    /// Arriving is quicker than leaving, which is the opposite of the usual
+    /// rule and deliberate. A colour that means something has changed should be
+    /// there by the time you look across; a colour that is finished with should
+    /// leave slowly enough that you register it ending rather than find it
+    /// simply gone.
+    private func skinMotion(for skin: NotchSkin) -> Animation {
+        model.skin == skin ? NotchMotion.skinRaise : NotchMotion.skinClear
     }
 
     /// The orb sits on the flare's own centre of curvature, one radius in from

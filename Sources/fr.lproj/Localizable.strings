@@ -198,3 +198,10 @@
 "%1$@ was about %2$@ from running out at its current pace." = "À ce rythme, %1$@ était à environ %2$@ de l’épuisement.";
 "The account you chose is available again, so %1$@ handed back." = "Le compte que vous aviez choisi est de nouveau disponible : %1$@ lui rend la main.";
 "usage limit" = "limite d’usage";
+
+/* Resolved attention: the green confirmation */
+"Access allowed for %@" = "Accès autorisé pour %@";
+"%@ is signed in again" = "%@ est reconnecté";
+"Automatic switching resumed" = "Bascule reprise";
+"An account is available again" = "Un compte est de nouveau disponible";
+"Switched to %@" = "Passé sur %@";

@@ -539,50 +539,61 @@ struct TooltipCard: View {
     }
 }
 
-/// What the notch says when it has gone red.
+/// What the notch says when it has changed colour.
 ///
 /// The one card this app volunteers. Everywhere else the notch shows details
 /// only when a provider is explicitly clicked, on purpose — hovering the edge
-/// of the screen should not throw a panel at you. An alert is the exception it
-/// exists for: the point of the red edge is that the problem finds you, and a
-/// red shape that will not say what is wrong until you guess where to click is
-/// a worse thing than no red shape at all.
+/// of the screen should not throw a panel at you. A change of state is the
+/// exception it exists for: the point of the red edge is that the problem finds
+/// you, and a red shape that will not say what is wrong until you guess where
+/// to click is a worse thing than no red shape at all. The green half is the
+/// same bargain kept in the other direction — it says which problem ended.
 ///
 /// It leaves the moment a provider's own details are opened, so the two never
 /// argue over the same space.
-struct AttentionCard: View {
-    let alert: NotchAlert
+struct NotchStatusCard: View {
+    let status: NotchStatus
     var direction: NotchEdge.TooltipDirection = .leading
 
-    /// The same figure the layout uses, so what is drawn and what is reachable
-    /// cannot drift apart.
-    private var height: CGFloat {
-        NotchLayout.attentionCardHeight(detail: alert.detail)
-    }
+    /// Only the red card offers this. While something is broken the whole notch
+    /// is a button to it, and that is worth saying because nothing about a
+    /// black bar announces it. Nothing is broken behind the green card, so the
+    /// notch is an ordinary notch again and the line would be a lie.
+    private var showsHint: Bool { status.tone == .alert }
 
-    /// Said plainly, because the click is not otherwise discoverable: the whole
-    /// notch becomes one button while this is up, and nothing about a black bar
-    /// announces that.
     private static let hint = NSLocalizedString(
         "Click the notch to open Builder Nutch.",
         comment: "What clicking the alerted notch does"
     )
 
+    /// The same figure the layout uses, so what is drawn and what is reachable
+    /// cannot drift apart.
+    private var height: CGFloat {
+        NotchLayout.statusCardHeight(detail: status.detail, showsHint: showsHint)
+    }
+
+    private var mark: (symbol: String, colour: Color) {
+        status.tone == .resolved
+            ? ("checkmark.circle.fill", Palette.resolved)
+            : ("exclamationmark.circle.fill", Palette.alert)
+    }
+
     var body: some View {
         TooltipShell(height: height, direction: direction,
-                     tailStyle: AnyShapeStyle(NotchAlertSkin.tailGradient(for: direction))) {
+                     tailStyle: AnyShapeStyle(
+                        NotchAlertSkin.tailGradient(for: direction, skin: status.tone))) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: NotchLayout.headerGap) {
                     // Sized into the same box a provider mark occupies, not by
                     // point size: a symbol set to 17pt draws to its cap height
                     // and comes out visibly smaller than the 17pt glyph beside
                     // it on every other card.
-                    Image(systemName: "exclamationmark.circle.fill")
+                    Image(systemName: mark.symbol)
                         .resizable()
                         .scaledToFit()
                         .frame(width: NotchLayout.glyphSize, height: NotchLayout.glyphSize)
-                        .foregroundStyle(Palette.alert)
-                    Text(alert.title)
+                        .foregroundStyle(mark.colour)
+                    Text(status.title)
                         .font(Typography.cardTitle)
                         .foregroundStyle(Palette.textPrimary)
                         .lineLimit(1)
@@ -590,24 +601,31 @@ struct AttentionCard: View {
                     Spacer(minLength: 0)
                 }
 
-                Text(alert.detail)
-                    .font(Typography.cardBody)
-                    .foregroundStyle(Palette.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .lineLimit(Int(NotchLayout.attentionDetailLines))
-                    .padding(.top, NotchLayout.headerToBlock)
+                // An automatic handoff sometimes has nothing to add beyond the
+                // fact that it happened, and an empty paragraph is worse than
+                // no paragraph.
+                if !status.detail.isEmpty {
+                    Text(status.detail)
+                        .font(Typography.cardBody)
+                        .foregroundStyle(Palette.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(Int(NotchLayout.statusDetailLines))
+                        .padding(.top, NotchLayout.headerToBlock)
+                }
 
-                Text(Self.hint)
-                    .font(Typography.cardBody)
-                    .foregroundStyle(Palette.textSecondary)
-                    .lineLimit(1)
-                    .padding(.top, NotchLayout.sessionRowGap)
+                if showsHint {
+                    Text(Self.hint)
+                        .font(Typography.cardBody)
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineLimit(1)
+                        .padding(.top, NotchLayout.sessionRowGap)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(alert.title)
-        .accessibilityValue(alert.detail)
-        .accessibilityHint(Self.hint)
+        .accessibilityLabel(status.title)
+        .accessibilityValue(status.detail)
+        .accessibilityHint(showsHint ? Self.hint : "")
     }
 }

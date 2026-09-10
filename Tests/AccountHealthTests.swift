@@ -171,6 +171,74 @@ final class AccountHealthTests: XCTestCase {
     }
 
     @MainActor
+    func testADormantAccountNeverPinsTheBannerRed() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("dormant-\(UUID().uuidString)")
+        try AccountStorage.privateDirectory(root)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let manager = AccountManager(rootURL: root)
+        let first = try manager.add(provider: .claude, label: "Claude 1", emailHint: nil)
+        let second = try manager.add(provider: .claude, label: "Claude 2", emailHint: nil)
+        // Never signed in, and the person is in no hurry to. This is the shape
+        // that kept the banner red no matter what they did to the live account.
+        _ = try manager.add(provider: .codex, label: "Codex 1", emailHint: nil)
+        for account in [first, second] {
+            manager.applyState({ $0.isConnected = true
+                $0.windows = [LimitWindow(id: "five_hour", label: "5h limit", usedFraction: 0.3, resetsAt: self.now.addingTimeInterval(3600))]
+                $0.refreshedAt = Date() }, to: account.id)
+        }
+        XCTAssertNil(manager.attention, "A setup task is not an incident")
+        XCTAssertEqual(manager.health.currentName, "Claude 1")
+        XCTAssertEqual(manager.health.nextName, "Claude 2")
+    }
+
+    @MainActor
+    func testFixingTheQueuedAccountClearsTheRedAndSaysSo() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("clears-\(UUID().uuidString)")
+        try AccountStorage.privateDirectory(root)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let manager = AccountManager(rootURL: root)
+        let first = try manager.add(provider: .claude, label: "Claude 1", emailHint: nil)
+        let second = try manager.add(provider: .claude, label: "Claude 2", emailHint: nil)
+        func connect(_ id: UUID) {
+            manager.applyState({ $0.isConnected = true; $0.requiresSignIn = false
+                $0.windows = [LimitWindow(id: "five_hour", label: "5h limit", usedFraction: 0.3, resetsAt: self.now.addingTimeInterval(3600))]
+                $0.refreshedAt = Date() }, to: id)
+        }
+        connect(first.id)
+        // Claude 2 is next in line and its saved login was revoked: a real fault.
+        manager.applyState({ $0.requiresSignIn = true; $0.message = "expired" }, to: second.id)
+        let raised = try XCTUnwrap(manager.attention)
+        XCTAssertEqual(raised.kind, .reconnect)
+        XCTAssertEqual(raised.accountID, second.id)
+
+        connect(second.id)
+        XCTAssertNil(manager.attention, "Fixing the problem must clear the red")
+        let resolved = try XCTUnwrap(manager.resolvedAttention)
+        XCTAssertEqual(resolved.kind, .reconnected)
+        XCTAssertEqual(resolved.accountID, second.id)
+        XCTAssertTrue(resolved.title.contains("Claude 2"))
+    }
+
+    @MainActor
+    func testRemovingTheBrokenAccountIsNotReportedAsFixed() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("removed-\(UUID().uuidString)")
+        try AccountStorage.privateDirectory(root)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let manager = AccountManager(rootURL: root)
+        let first = try manager.add(provider: .claude, label: "Claude 1", emailHint: nil)
+        let second = try manager.add(provider: .claude, label: "Claude 2", emailHint: nil)
+        manager.applyState({ $0.isConnected = true
+            $0.windows = [LimitWindow(id: "five_hour", label: "5h limit", usedFraction: 0.3, resetsAt: self.now.addingTimeInterval(3600))]
+            $0.refreshedAt = Date() }, to: first.id)
+        manager.applyState({ $0.requiresSignIn = true }, to: second.id)
+        XCTAssertEqual(manager.attention?.kind, .reconnect)
+
+        try manager.remove(second)
+        XCTAssertNil(manager.attention)
+        XCTAssertNil(manager.resolvedAttention, "Deleting a problem is not solving it")
+    }
+
+    @MainActor
     func testTheQueuedAccountThatNeedsSigningInIsTheOneReported() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("health-\(UUID().uuidString)")
         try AccountStorage.privateDirectory(root)

@@ -39,6 +39,56 @@ struct NotchAlert: Equatable, Identifiable {
     }
 }
 
+/// A problem that has just been fixed.
+///
+/// Deliberately a separate type from `NotchAlert` rather than a flag on it. An
+/// alert is a state that lasts until somebody acts; this is an event that is
+/// over the moment it is shown, and giving them one type would mean every place
+/// that asks "is something wrong" having to also ask "or was it".
+struct NotchResolution: Equatable, Identifiable {
+    /// Stable per event, so the same recovery is never shown twice.
+    let id: String
+    let title: String
+    /// May be empty — an automatic handoff sometimes has nothing to add beyond
+    /// the fact that it happened.
+    let detail: String
+    /// The account that recovered, when there is one.
+    let accountID: UUID?
+
+    init(id: String, title: String, detail: String = "", accountID: UUID? = nil) {
+        self.id = id
+        self.title = title
+        self.detail = detail
+        self.accountID = accountID
+    }
+
+    var snapshotID: String? { accountID?.uuidString }
+
+    func concerns(snapshotID id: String) -> Bool {
+        snapshotID.map { $0 == id } ?? true
+    }
+}
+
+/// What the notch is wearing.
+///
+/// One value rather than two booleans, because the precedence between them is a
+/// rule the product has — red wins — and a rule expressed as two independent
+/// flags is a rule that eventually gets read in the wrong order somewhere.
+enum NotchSkin: Equatable {
+    case calm
+    case alert
+    case resolved
+}
+
+/// What the hover card says, in whichever state the notch is in.
+struct NotchStatus: Equatable {
+    let title: String
+    let detail: String
+    let tone: NotchSkin
+    /// The account concerned, in the notch's own id space.
+    let snapshotID: String?
+}
+
 /// The notch's alert skin: black where it touches the bezel, hot at the inner
 /// lip.
 ///
@@ -65,6 +115,20 @@ enum NotchAlertSkin {
         Gradient.Stop(color: Palette.alert,      location: 1.00)
     ]
 
+    /// The answering ramp, at the same locations and the same three lightness
+    /// steps. Identical construction is the point: the notch changes hue when a
+    /// problem is fixed, and changes nothing else.
+    static let resolvedStops: [Gradient.Stop] = [
+        Gradient.Stop(color: Palette.notch,         location: 0.00),
+        Gradient.Stop(color: Palette.resolvedMoss,  location: 0.52),
+        Gradient.Stop(color: Palette.resolvedGrove, location: 0.84),
+        Gradient.Stop(color: Palette.resolved,      location: 1.00)
+    ]
+
+    static func stops(for skin: NotchSkin) -> [Gradient.Stop] {
+        skin == .resolved ? resolvedStops : stops
+    }
+
     /// Bezel first, inside last — for whichever edge the notch is welded to.
     ///
     /// Read off `NotchEdge.outward`, which already names the direction of the
@@ -79,9 +143,10 @@ enum NotchAlertSkin {
         }
     }
 
-    static func gradient(for edge: NotchEdge) -> LinearGradient {
+    static func gradient(for edge: NotchEdge, skin: NotchSkin = .alert) -> LinearGradient {
         let points = unitPoints(for: edge)
-        return LinearGradient(stops: stops, startPoint: points.start, endPoint: points.end)
+        return LinearGradient(stops: stops(for: skin),
+                              startPoint: points.start, endPoint: points.end)
     }
 
     /// The tail that joins the alert card to the notch: hot at the tip, where
@@ -107,10 +172,18 @@ enum NotchAlertSkin {
 
     static func tailGradient(for direction: NotchEdge.TooltipDirection) -> LinearGradient {
         let (tip, base) = tailUnitPoints(for: direction)
+        return tailGradient(for: direction, skin: .alert)
+    }
+
+    static func tailGradient(for direction: NotchEdge.TooltipDirection,
+                             skin: NotchSkin) -> LinearGradient {
+        let (tip, base) = tailUnitPoints(for: direction)
+        let hot = skin == .resolved ? Palette.resolved : Palette.alert
+        let warm = skin == .resolved ? Palette.resolvedMoss : Palette.alertEmber
         return LinearGradient(
             stops: [
-                Gradient.Stop(color: Palette.alert, location: 0),
-                Gradient.Stop(color: Palette.alertEmber, location: 0.55),
+                Gradient.Stop(color: hot, location: 0),
+                Gradient.Stop(color: warm, location: 0.55),
                 Gradient.Stop(color: Palette.card, location: 1)
             ],
             startPoint: tip, endPoint: base
@@ -154,6 +227,22 @@ enum NotchPulse {
         startControlPoint: UnitPoint(x: 0.4, y: 0),
         endControlPoint: UnitPoint(x: 1, y: 1)
     )
+
+    // MARK: - Resolved
+
+    // One beat, and a gentler one. Three sharp beats mean "look at this now";
+    // a single soft swell means "that's done" — the difference has to be
+    // audible at a glance or the green just reads as another alarm.
+
+    /// Slower on the way up than the alert's strike: nothing is urgent here.
+    static let resolvedRise: TimeInterval = 0.22
+    static let resolvedFall: TimeInterval = 0.38
+    static var resolvedDuration: TimeInterval { resolvedRise + resolvedFall }
+
+    /// Brighter rather than dimmer. The alert flash *takes* light away, which
+    /// reads as something failing; this gives a little, which reads as
+    /// something completing.
+    static let resolvedSwell: Double = 1.10
 }
 
 /// The two things the flash moves, in one animatable value.
@@ -206,9 +295,55 @@ struct AttentionFlash: ViewModifier {
     }
 }
 
+/// One soft swell, when a problem has just been fixed.
+///
+/// Written out separately from `AttentionFlash` rather than sharing a
+/// beat-count parameter. A keyframe track has to be spelled literally, so a
+/// variable count would mean generating keyframes in a loop inside a result
+/// builder for the sake of removing six lines — and the two are not the same
+/// gesture anyway. One takes light away three times, the other gives a little
+/// back once.
+struct ResolvedPulse: ViewModifier {
+    let trigger: String?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        if trigger == nil || reduceMotion {
+            content
+        } else {
+            KeyframeAnimator(initialValue: AttentionPulseValues(), trigger: trigger) { values in
+                content
+                    .opacity(values.opacity)
+                    .scaleEffect(values.scale)
+            } keyframes: { _ in
+                KeyframeTrack(\AttentionPulseValues.scale) {
+                    LinearKeyframe(NotchPulse.resolvedSwell,
+                                   duration: NotchPulse.resolvedRise,
+                                   timingCurve: NotchPulse.settle)
+                    LinearKeyframe(1,
+                                   duration: NotchPulse.resolvedFall,
+                                   timingCurve: NotchPulse.settle)
+                }
+                // Opacity is held flat on purpose. The alert flash dims, and a
+                // green that also dimmed would borrow the one signal that is
+                // supposed to mean something is wrong.
+                KeyframeTrack(\AttentionPulseValues.opacity) {
+                    LinearKeyframe(1, duration: NotchPulse.resolvedDuration)
+                }
+            }
+        }
+    }
+}
+
 extension View {
     /// Flash three times, once, when `trigger` names a newly raised problem.
     func attentionFlash(trigger: String?) -> some View {
         modifier(AttentionFlash(trigger: trigger))
+    }
+
+    /// Swell once, when `trigger` names a problem that has just been fixed.
+    func resolvedPulse(trigger: String?) -> some View {
+        modifier(ResolvedPulse(trigger: trigger))
     }
 }

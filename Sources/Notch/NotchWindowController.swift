@@ -21,6 +21,7 @@ final class NotchWindowController {
 
     private let cursorLocation: () -> CGPoint
     private let automaticSwitchDuration: TimeInterval
+    private let resolutionHold: TimeInterval
     private var visibility: NotchVisibility = .onHover
     private var visibilityChange = 0
 
@@ -38,7 +39,10 @@ final class NotchWindowController {
     private var restingIsVisible: Bool {
         switch visibility {
         case .alwaysShow, .onHover: return true
-        case .autoHide:             return model.attention != nil
+        // The green is as much a reason to be on screen as the red: an
+        // auto-hidden notch that stayed hidden through the recovery would
+        // never tell anybody the problem had ended.
+        case .autoHide:             return model.skin != .calm
         case .hidden:               return false
         }
     }
@@ -47,9 +51,11 @@ final class NotchWindowController {
     private var wantsPanelOnScreen: Bool { restingIsVisible || model.isExpanded }
 
     init(cursorLocation: @escaping () -> CGPoint = { NSEvent.mouseLocation },
-         automaticSwitchDuration: TimeInterval = 4.5) {
+         automaticSwitchDuration: TimeInterval = 4.5,
+         resolutionHold: TimeInterval = NotchWindowController.defaultResolutionHold) {
         self.cursorLocation = cursorLocation
         self.automaticSwitchDuration = automaticSwitchDuration
+        self.resolutionHold = resolutionHold
     }
 
     /// Hooked up by the app delegate; drives the menu's "Refresh now".
@@ -73,6 +79,7 @@ final class NotchWindowController {
     private let foldGrace: TimeInterval = 0.45
     private var foldWork: DispatchWorkItem?
     private var automaticSwitchWork: DispatchWorkItem?
+    private var resolutionWork: DispatchWorkItem?
     private var accountDrag: (source: UUID, target: UUID)?
     /// Whether we have pushed the pointing hand onto the cursor stack.
     private var isPointing = false
@@ -149,6 +156,11 @@ final class NotchWindowController {
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         guard let self else { return }
+                        // A problem arriving during the green ends the green's
+                        // hold as well as its colour, or the work item would
+                        // fire later and clear a resolution that had already
+                        // been replaced.
+                        if self.model.attention != nil { self.clearResolution() }
                         self.applyRestingVisibility()
                         self.updateInteractiveRects()
                     }
@@ -176,6 +188,7 @@ final class NotchWindowController {
         setPointing(false)
         foldWork?.cancel()
         automaticSwitchWork?.cancel()
+        resolutionWork?.cancel()
         cursorTimer?.invalidate()
         cursorTimer = nil
         clockTimer?.invalidate()
@@ -358,11 +371,12 @@ final class NotchWindowController {
         )
     }
 
-    /// The alert card's own region, on the same terms as `tooltipRect` — the
+    /// The status card's own region, on the same terms as `tooltipRect` — the
     /// card, its tail, and the gap the pointer has to cross to reach it.
-    private func attentionRect(index: Int, alert: NotchAlert) -> CGRect? {
+    private func statusRect(index: Int, status: NotchStatus) -> CGRect? {
         guard model.snapshots.indices.contains(index) else { return nil }
-        let cardHeight = NotchLayout.attentionCardHeight(detail: alert.detail)
+        let cardHeight = NotchLayout.statusCardHeight(detail: status.detail,
+                                                      showsHint: status.tone == .alert)
         let cardAcross = model.edge.isVertical ? NotchLayout.cardWidth : cardHeight
         let cardAlong = model.edge.isVertical ? cardHeight : NotchLayout.cardWidth
         let centre = model.slack + model.ringCenter(index: index)
@@ -384,12 +398,12 @@ final class NotchWindowController {
         if model.isExpanded, let index = model.selectedIndex, let card = tooltipRect(index: index) {
             rects.append(card)
         }
-        // The alert card is shown without being asked for, so it also has to
+        // The status card is shown without being asked for, so it also has to
         // be reachable without being asked for: sliding onto it must not fold
         // the notch out from under the pointer.
-        if model.showsAttentionCard, let alert = model.attention,
-           let index = model.attentionIndex,
-           let card = attentionRect(index: index, alert: alert) {
+        if model.showsStatusCard, let status = model.status,
+           let index = model.statusIndex,
+           let card = statusRect(index: index, status: status) {
             rects.append(card)
         }
         hostingView?.interactiveRects = rects
@@ -549,9 +563,9 @@ final class NotchWindowController {
         // been near the notch — which under Always show is a panel arriving
         // from nowhere in the middle of the screen.
         let overAlert: Bool = {
-            guard model.showsAttentionCard, let alert = model.attention,
-                  let index = model.attentionIndex,
-                  let rect = attentionRect(index: index, alert: alert) else { return false }
+            guard model.showsStatusCard, let status = model.status,
+                  let index = model.statusIndex,
+                  let rect = statusRect(index: index, status: status) else { return false }
             return rect.contains(local)
         }()
         let overNotch = liveRect.contains(local)
@@ -745,6 +759,51 @@ final class NotchWindowController {
         }
         automaticSwitchWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + automaticSwitchDuration, execute: work)
+    }
+
+    /// Show the green for a few seconds, then let it go.
+    ///
+    /// How long is a judgement about attention rather than about animation.
+    /// Long enough that somebody who was not looking at the notch when they
+    /// clicked Reconnect still catches it out of the corner of an eye; short
+    /// enough that it is gone before it becomes another thing on screen. It
+    /// matches the automatic-handoff receipt, which is the same kind of claim.
+    static let defaultResolutionHold: TimeInterval = 4
+
+    func presentResolution(_ resolution: NotchResolution) {
+        // Red wins. Fixing one of two problems has not made the notch safe to
+        // look away from, so the green is not shown at all rather than shown
+        // and then contradicted.
+        guard visibility != .hidden, model.attention == nil else { return }
+        guard model.resolution?.id != resolution.id else { return }
+
+        resolutionWork?.cancel()
+        withAnimation(NotchMotion.skinRaise) { model.resolution = resolution }
+        applyRestingVisibility()
+        updateInteractiveRects()
+
+        let id = resolution.id
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.model.resolution?.id == id else { return }
+                self.resolutionWork = nil
+                withAnimation(NotchMotion.skinClear) { self.model.resolution = nil }
+                self.applyRestingVisibility()
+                self.updateInteractiveRects()
+            }
+        }
+        resolutionWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + resolutionHold, execute: work)
+    }
+
+    /// Take the green down now, without waiting out its hold.
+    func clearResolution() {
+        resolutionWork?.cancel()
+        resolutionWork = nil
+        guard model.resolution != nil else { return }
+        model.resolution = nil
+        applyRestingVisibility()
+        updateInteractiveRects()
     }
 
     /// Dismiss without consuming the click intended for another application.

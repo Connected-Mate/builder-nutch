@@ -52,6 +52,9 @@ final class AccountManager: ObservableObject {
     @Published private(set) var attention: AccountAttention?
     /// What is true right now, whether or not anything needs fixing.
     @Published private(set) var health = AccountHealth()
+    /// The last thing that stopped being a problem. Set only when something was
+    /// actually fixed, never when a row simply went away.
+    @Published private(set) var resolvedAttention: AccountResolution?
     /// Burn-rate history per account. In memory only; never persisted.
     private(set) var usageForecasts: [UUID: UsageForecast] = [:]
     private var lastQueueAudit: Date?
@@ -66,6 +69,10 @@ final class AccountManager: ObservableObject {
     private let openBrowser: (URL, URL, String?) async throws -> String
     private let readKimi: (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState
     private let readExistingKimi: (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState
+    /// Reads the Cursor desktop editor's own login. Takes only a directory:
+    /// nothing is launched, nothing is written, and no environment is prepared,
+    /// because Cursor owns its session and this only ever looks at it.
+    private let readCursor: (URL, AccountCancellation) async throws -> ManagedAccountState
     private var browserOpenedIDs: Set<UUID> = []
     private var operations: [UUID: AccountCancellation] = [:]
     private var loaded = false
@@ -82,6 +89,7 @@ final class AccountManager: ObservableObject {
          openBrowser: @escaping (URL, URL, String?) async throws -> String = AccountBrowser.open,
          readKimi: @escaping (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState = KimiAccountIntegration.read,
          readExistingKimi: @escaping (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState = KimiAccountIntegration.readExisting,
+         readCursor: @escaping (URL, AccountCancellation) async throws -> ManagedAccountState = CursorAccountIntegration.read,
          systemCredentials: ClaudeSystemCredentials? = nil,
          systemClaudeDirectory: URL? = nil,
          claudeReader: (any ClaudeAccountReading)? = nil) {
@@ -91,6 +99,7 @@ final class AccountManager: ObservableObject {
         self.systemClaudeLocation = ClaudeCredentialLocation(directory: systemClaudeDirectory ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude"), isDefault: true)
         self.runner = runner; self.resolveExecutable = executable; self.openTerminal = openTerminal
         self.openBrowser = openBrowser; self.readKimi = readKimi; self.readExistingKimi = readExistingKimi
+        self.readCursor = readCursor
         let root = rootURL ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Codenotch Accounts", isDirectory: true)
         do {
@@ -104,7 +113,7 @@ final class AccountManager: ObservableObject {
             switchAheadMinutes = catalog.switchAheadMinutes ?? 20
             normalizeRotationOrder()
             states = Dictionary(uniqueKeysWithValues: accounts.map {
-                ($0.id, $0.provider.isBrowserProfile ? Self.browserState($0) : ManagedAccountState(message: "Refresh to check this account."))
+                ($0.id, $0.isBrowserOnly ? Self.browserState($0) : ManagedAccountState(message: "Refresh to check this account."))
             })
         } catch {
             self.storage = nil; catalogError = error; notice = error.localizedDescription
@@ -195,11 +204,11 @@ final class AccountManager: ObservableObject {
     }
 
     func canConfirmBrowserConnection(_ account: ManagedAccount) -> Bool {
-        account.provider.isBrowserProfile && browserOpenedIDs.contains(account.id) && !busyIDs.contains(account.id)
+        account.isBrowserOnly && browserOpenedIDs.contains(account.id) && !busyIDs.contains(account.id)
     }
 
     func confirmBrowserConnection(_ account: ManagedAccount) throws {
-        guard account.provider.isBrowserProfile, browserOpenedIDs.contains(account.id),
+        guard account.isBrowserOnly, browserOpenedIDs.contains(account.id),
               let index = accounts.firstIndex(where: { $0.id == account.id }) else { throw ManagedAccountError.notConnected }
         var updated = accounts
         updated[index].browserConfirmedAt = Date()
@@ -207,12 +216,15 @@ final class AccountManager: ObservableObject {
         accounts = updated
         states[account.id] = Self.browserState(updated[index])
         browserOpenedIDs.remove(account.id)
+        updateHealth()
         notice = "Browser profile saved. Your sign-in stays in its browser; usage is shown on the website."
     }
 
     private func showBrowser(_ account: ManagedAccount, signingIn: Bool = false) async throws {
         guard let current = accounts.first(where: { $0.id == account.id && $0.provider == account.provider }),
-              current.provider.isBrowserProfile else { throw ManagedAccountError.unavailable }
+              current.isBrowserOnly, current.existingProfile == nil else { throw ManagedAccountError.unavailable }
+        // Never an existing profile: the browser directory is *created* below,
+        // and a vendor's own folder is read-only to this app in every case.
         let profile = try usableStorage().profile(current).appendingPathComponent("browser", isDirectory: true)
         try AccountStorage.privateDirectory(profile)
         let identifier = try await openBrowser(profile, signingIn ? current.provider.signInWebsite : current.provider.website, current.browserBundleIdentifier)
@@ -228,7 +240,8 @@ final class AccountManager: ObservableObject {
         guard accounts.contains(where: { $0.id == account.id && $0.provider == account.provider }) else { throw ManagedAccountError.unavailable }
         var updated = selected; updated[account.provider] = account.id
         try persist(accounts: accounts, selected: updated); selected = updated
-        notice = account.provider.isBrowserProfile ? "\(account.label) is selected. Open it to use its separate browser profile." : "\(account.label) is selected for future sessions. Existing sessions keep their account."
+        updateHealth()
+        notice = account.isBrowserOnly ? "\(account.label) is selected. Open it to use its separate browser profile." : "\(account.label) is selected for future sessions. Existing sessions keep their account."
     }
 
     func rotationAccounts(for provider: AccountProvider) -> [ManagedAccount] {
@@ -245,6 +258,7 @@ final class AccountManager: ObservableObject {
         ids.remove(at: index); ids.insert(account.id, at: destination)
         rotationOrder[account.provider] = ids
         try persist(accounts: accounts, selected: selected)
+        updateHealth()
     }
 
     /// Moves one account directly onto another account's position. This is the
@@ -263,6 +277,7 @@ final class AccountManager: ObservableObject {
         ids.insert(accountID, at: min(destination, ids.count))
         rotationOrder[account.provider] = ids
         try persist(accounts: accounts, selected: selected)
+        updateHealth()
     }
 
     func setNext(_ account: ManagedAccount) throws {
@@ -389,7 +404,16 @@ final class AccountManager: ObservableObject {
         else { throw ManagedAccountError.notConnected }
         guard currentID != target.id else { return }
         isSwitchingClaude = true
-        defer { isSwitchingClaude = false; finish(current.id); finish(target.id) }
+        var switchedTo: ManagedAccount?
+        defer {
+            isSwitchingClaude = false; finish(current.id); finish(target.id)
+            updateHealth()
+            if let switchedTo {
+                resolvedAttention = AccountResolution(kind: .switched, accountID: switchedTo.id,
+                    title: String(format: NSLocalizedString("Switched to %@", comment: "Resolution"), switchedTo.label),
+                    resolvedAt: Date())
+            }
+        }
         markBusy(current.id, cancellation: AccountCancellation())
         markBusy(target.id, cancellation: AccountCancellation())
         let saved = try await saveSystemClaudeLogin(current, identity: currentIdentity)
@@ -406,6 +430,11 @@ final class AccountManager: ObservableObject {
         systemClaudeAccountID = target.id
         guard !hasShutDown else { return }
         ClaudeCredentials.forgetCached()
+        // The switch itself is the good news, whether the person asked for it or
+        // the app did it for them. Recomputing attention here is what stops a red
+        // banner outliving the problem it was describing, and the handoff is
+        // announced after that so it wins over the generic "something improved".
+        switchedTo = target
         let reason = cause.map { switchReason($0, from: current) } ?? ""
         notice = "Claude now uses \(target.label) on this Mac. Sessions using the Mac login pick up this account on their next request."
         if !reason.isEmpty { notice = reason + " " + (notice ?? "") }
@@ -453,6 +482,7 @@ final class AccountManager: ObservableObject {
         guard !hasShutDown else { return }
         systemSwitchPaused = false
         notice = nil
+        updateHealth()
         await refreshAll()
     }
 
@@ -499,7 +529,7 @@ final class AccountManager: ObservableObject {
         states[account.id]?.message = "Complete sign-in in your browser. Only this profile will be connected."
         defer { loginAccountID = nil; finish(account.id); updateHealth() }
         do {
-            if account.provider.isBrowserProfile {
+            if account.isBrowserOnly {
                 try await showBrowser(account, signingIn: true)
                 states[account.id]?.message = "Finish signing in on the website, then choose ‘I’ve signed in’ here."
                 notice = "\(account.provider.title) opened in its own browser profile."
@@ -585,7 +615,12 @@ final class AccountManager: ObservableObject {
 
     private func read(_ account: ManagedAccount, cancellation: AccountCancellation) async throws -> ManagedAccountState {
         guard !hasShutDown else { throw ManagedAccountError.cancelled }
-        if account.provider.isBrowserProfile {
+        // Cursor's editor owns its login, so this row is a reading and nothing
+        // else: no executable to resolve, no profile to prepare, no environment.
+        if account.readsDesktopUsage, let source = account.existingProfile {
+            return try await readCursor(try source.validatedDirectory(), cancellation)
+        }
+        if account.isBrowserOnly {
             guard let current = accounts.first(where: { $0.id == account.id }) else { throw ManagedAccountError.unavailable }
             return Self.browserState(current)
         }
@@ -647,7 +682,7 @@ final class AccountManager: ObservableObject {
         do {
             states[account.id] = try await read(account, cancellation: cancellation)
             guard !hasShutDown, !cancellation.isCancelled else { return }
-            if states[account.id]?.isFresh() == true || account.provider.isBrowserProfile {
+            if states[account.id]?.isFresh() == true || account.isBrowserOnly {
                 externalRetryAfter.removeValue(forKey: account.id)
                 pausedRefreshIDs.remove(account.id)
             } else { pausedRefreshIDs.insert(account.id) }
@@ -697,7 +732,9 @@ final class AccountManager: ObservableObject {
     private func auditQueueIfDue(now: Date = Date()) {
         guard lastQueueAudit.map({ now.timeIntervalSince($0) >= Self.queueAuditInterval }) ?? true else { return }
         lastQueueAudit = now
-        for account in accounts where account.provider.supportsAutomaticSelection {
+        // Cursor never rotates, but it does go quiet when the editor is signed
+        // out, and it has to be able to come back on its own once it is not.
+        for account in accounts where account.provider.supportsAutomaticSelection || account.readsDesktopUsage {
             guard states[account.id]?.requiresKeychainAccess != true else { continue }
             pausedRefreshIDs.remove(account.id)
             externalRetryAfter.removeValue(forKey: account.id)
@@ -719,19 +756,21 @@ final class AccountManager: ObservableObject {
         guard !hasShutDown, !authenticationInProgress, !discovering, catalogError == nil else { return }
         discovering = true
         defer { discovering = false }
-        pruneSignedOutKimiProfiles()
+        pruneSignedOutExistingProfiles()
         var found = 0
         for candidate in candidates ?? ExistingAccountDiscovery.candidates() {
             guard !hasShutDown, !Task.isCancelled else { break }
             let key = candidate.source.key(provider: candidate.provider)
-            guard !candidate.provider.isBrowserProfile,
+            guard !candidate.provider.isBrowserProfile || candidate.provider.readsDesktopUsage,
                   !ignoredExistingProfiles.contains(key),
                   !accounts.contains(where: { configurationDirectory(for: $0).standardizedFileURL.path == candidate.source.directory }),
                   storage.map({ !candidate.source.directory.hasPrefix($0.root.path + "/") }) ?? false,
                   !accounts.contains(where: { $0.existingProfile?.key(provider: $0.provider) == key }),
                   discoveryAttempts[key].map({ now.timeIntervalSince($0) >= 900 }) ?? true,
-                  let executable = resolveExecutable(candidate.provider),
                   let directory = try? candidate.source.validatedDirectory() else { continue }
+            // Cursor is read straight from the editor's own store; every other
+            // provider still needs its official command-line app present.
+            guard candidate.provider.readsDesktopUsage || resolveExecutable(candidate.provider) != nil else { continue }
             discoveryAttempts[key] = now
             let environment = candidate.source.environment(provider: candidate.provider, inherited: ProcessInfo.processInfo.environment)
             let cancellation = AccountCancellation()
@@ -745,9 +784,13 @@ final class AccountManager: ObservableObject {
                         guard let identity = try systemCredentials?.identity(at: location) else { continue }
                         state = ManagedAccountState(email: identity.email, message: error.localizedDescription, requiresKeychainAccess: true)
                     }
+                } else if candidate.provider.readsDesktopUsage {
+                    state = try await readCursor(directory, cancellation)
                 } else if candidate.provider == .kimi {
+                    guard let executable = resolveExecutable(candidate.provider) else { continue }
                     state = Self.stampKimiIdentity(try await readExistingKimi(executable, directory, environment, cancellation), profile: directory)
                 } else {
+                    guard let executable = resolveExecutable(candidate.provider) else { continue }
                     let codex = candidate.provider == .codex
                     let data = try await runner.run(AccountCommand(executable: executable,
                         arguments: codex ? ["app-server"] : ["auth", "status", "--json"],
@@ -913,24 +956,34 @@ final class AccountManager: ObservableObject {
         return dropped
     }
 
-    /// Older builds could save Kimi's logged-out default profile as an account.
-    /// Remove that stale row without ignoring the path, so a later real login is
-    /// discovered normally.
-    private func pruneSignedOutKimiProfiles() {
+    /// A discovered row whose vendor app has since been signed out.
+    ///
+    /// Kimi leaves its profile directory behind after logout, and older builds
+    /// could save that empty shell as an account. Cursor is the same shape: the
+    /// editor keeps its state store and simply drops the token. Either way the
+    /// row can never say anything again, so it goes — without ignoring the path,
+    /// so a later real sign-in is discovered normally.
+    private func pruneSignedOutExistingProfiles() {
         let stale = Set(accounts.compactMap { account -> UUID? in
-            guard account.provider == .kimi, let source = account.existingProfile,
-                  source.kimiAuthenticationStatus() == .signedOut else { return nil }
-            return account.id
+            guard let source = account.existingProfile else { return nil }
+            if account.provider == .kimi, source.kimiAuthenticationStatus() == .signedOut { return account.id }
+            if account.readsDesktopUsage,
+               !CursorAccountIntegration.isSignedIn(directory: URL(fileURLWithPath: source.directory, isDirectory: true)) {
+                return account.id
+            }
+            return nil
         })
         guard !stale.isEmpty else { return }
         let updatedAccounts = accounts.filter { !stale.contains($0.id) }
         var updatedSelected = selected
-        if let id = selected[.kimi], stale.contains(id) {
-            updatedSelected[.kimi] = updatedAccounts.first { $0.provider == .kimi }?.id
+        for (provider, id) in selected where stale.contains(id) {
+            updatedSelected[provider] = updatedAccounts.first { $0.provider == provider }?.id
         }
         let previousOrder = rotationOrder
         var updatedOrder = rotationOrder
-        updatedOrder[.kimi] = (updatedOrder[.kimi] ?? []).filter { !stale.contains($0) }
+        for provider in updatedOrder.keys {
+            updatedOrder[provider] = (updatedOrder[provider] ?? []).filter { !stale.contains($0) }
+        }
         rotationOrder = updatedOrder
         do { try persist(accounts: updatedAccounts, selected: updatedSelected) }
         catch { rotationOrder = previousOrder; notice = error.localizedDescription; return }
@@ -960,7 +1013,12 @@ final class AccountManager: ObservableObject {
                 systemSwitchPaused = false
                 return
             }
-            if account.provider.isBrowserProfile {
+            if account.readsDesktopUsage {
+                await refresh(account)
+                notice = "The Cursor app keeps this sign-in. Open Cursor to use it — Builder Nutch only reads its usage."
+                return
+            }
+            if account.isBrowserOnly {
                 try await showBrowser(account)
                 try select(account)
                 notice = "Opened \(account.label). Your other browser accounts stay separate."
@@ -989,12 +1047,23 @@ final class AccountManager: ObservableObject {
         } catch { notice = error.localizedDescription }
     }
 
+    /// Which window the ring means. Declared per provider rather than left to
+    /// position, so a window dropping out of a response blanks the cell instead
+    /// of quietly promoting a different one into the headline's place.
+    static func headlineID(for account: ManagedAccount) -> String {
+        if account.provider == .claude { return "five_hour" }
+        // Cursor's dashboard leads with "Your included usage · N% used", and so
+        // does this. `CursorUsage` names that window "included".
+        if account.readsDesktopUsage { return "included" }
+        return "primary"
+    }
+
     func snapshot(for account: ManagedAccount) -> ProviderSnapshot {
         let provider = account.provider
         let state = state(for: account)
         let status: ProviderStatus
         if !state.isConnected { status = .needsAuth }
-        else if provider.isBrowserProfile { status = .unsupported("Open \(provider.title) to see usage. Browser sign-in is kept by the website.") }
+        else if account.isBrowserOnly { status = .unsupported("Open \(provider.title) to see usage. Browser sign-in is kept by the website.") }
         else if !state.windows.isEmpty && !state.isFresh() { status = .stale(since: state.refreshedAt ?? .distantPast) }
         else if let message = state.message { status = .unsupported(message) }
         else { status = .ok }
@@ -1003,9 +1072,9 @@ final class AccountManager: ObservableObject {
             ? nil : (state.email ?? account.emailHint)
         return ProviderSnapshot(id: account.id.uuidString, displayName: account.emoji.map { "\($0) \(account.label)" } ?? account.label,
                                 accountEmail: email,
-                                glyph: provider.glyph, fidelity: provider.isBrowserProfile ? .manual : .official,
+                                glyph: provider.glyph, fidelity: account.isBrowserOnly ? .manual : .official,
                                 status: status, windows: state.windows,
-                                headlineID: provider == .claude ? "five_hour" : "primary",
+                                headlineID: Self.headlineID(for: account),
                                 block: exhausted.map { UsageBlock(reason: "\($0.label) reached", resetsAt: $0.resetsAt) })
     }
 
@@ -1065,7 +1134,43 @@ final class AccountManager: ObservableObject {
         let next = computeAttention(now: now)
         // Keep the original timestamp while the same problem persists: the notch
         // escalates on age, and a recomputation is not a new incident.
-        if next?.id != attention?.id { attention = next }
+        guard next?.id != attention?.id else { return }
+        if let previous = attention, let resolution = resolution(for: previous, now: now) {
+            resolvedAttention = resolution
+        }
+        attention = next
+    }
+
+    /// Whether the problem behind `previous` was actually solved. An account that
+    /// was removed did not get fixed, and saying so would be a lie the person
+    /// would notice; that case deliberately returns nil.
+    private func resolution(for previous: AccountAttention, now: Date) -> AccountResolution? {
+        let account = previous.accountID.flatMap { id in accounts.first { $0.id == id } }
+        if previous.accountID != nil && account == nil { return nil }
+        let name = account.map(label)
+        switch previous.kind {
+        case .keychainAccess:
+            guard let account, states[account.id]?.requiresKeychainAccess != true else { return nil }
+            return AccountResolution(kind: .accessAllowed, accountID: account.id,
+                title: String(format: NSLocalizedString("Access allowed for %@", comment: "Resolution"), name ?? ""),
+                resolvedAt: now)
+        case .reconnect:
+            guard let account, !needsSignIn(account) else { return nil }
+            return AccountResolution(kind: .reconnected, accountID: account.id,
+                title: String(format: NSLocalizedString("%@ is signed in again", comment: "Resolution"), name ?? ""),
+                resolvedAt: now)
+        case .switchPaused:
+            guard !systemSwitchPaused else { return nil }
+            return AccountResolution(kind: .switchResumed, accountID: previous.accountID,
+                title: NSLocalizedString("Automatic switching resumed", comment: "Resolution"), resolvedAt: now)
+        case .queueEmpty:
+            guard let current = claudeQueue().first,
+                  AccountSelection.rotating(provider: .claude, accounts: accounts, states: states,
+                    order: rotationOrder[.claude] ?? [], currentID: current.id,
+                    thresholdPercent: switchThresholdPercent, keepCurrent: false, now: now) != nil else { return nil }
+            return AccountResolution(kind: .switchResumed, accountID: current.id,
+                title: NSLocalizedString("An account is available again", comment: "Resolution"), resolvedAt: now)
+        }
     }
 
     private func label(_ account: ManagedAccount) -> String {
@@ -1073,7 +1178,7 @@ final class AccountManager: ObservableObject {
     }
 
     private func needsSignIn(_ account: ManagedAccount) -> Bool {
-        guard let state = states[account.id], !account.provider.isBrowserProfile else { return false }
+        guard let state = states[account.id], !account.isBrowserOnly else { return false }
         return state.requiresSignIn || (!state.isConnected && !state.isBusy)
     }
 
@@ -1111,7 +1216,12 @@ final class AccountManager: ObservableObject {
                 detail: NSLocalizedString("This is the next account in your queue. Its saved sign-in expired, so the switch would fail. Sign in now and it will be ready.", comment: "Attention detail"),
                 raisedAt: now)
         }
-        if let stale = accounts.first(where: { $0.provider.supportsAutomaticSelection && needsSignIn($0) }) {
+        // Only a login that *lost* its sign-in is an incident. An account that
+        // has simply never been connected is a setup task the person can do when
+        // they like, and treating it as a fault pinned the banner red for good:
+        // one dormant row meant nothing they did to the running account could
+        // ever clear it.
+        if let stale = accounts.first(where: { $0.provider.supportsAutomaticSelection && states[$0.id]?.requiresSignIn == true }) {
             return AccountAttention(kind: .reconnect, accountID: stale.id,
                 title: String(format: NSLocalizedString("%@ needs a new sign-in", comment: "Attention title"), label(stale)),
                 detail: NSLocalizedString("Its saved sign-in expired. Sign in again to put this account back in the rotation.", comment: "Attention detail"),

@@ -194,11 +194,11 @@ final class NotchAlertRenderTests: XCTestCase {
     /// for the whole hour.
     func testTheAlertCardIsOnlyThereWhileThePointerIs() throws {
         let unattended = model(edge: .right, alert: makeAlert(), hovering: false)
-        XCTAssertFalse(unattended.showsAttentionCard)
+        XCTAssertFalse(unattended.showsStatusCard)
         let quiet = try XCTUnwrap(render(unattended))
 
         let hovered = model(edge: .right, alert: makeAlert(), hovering: true)
-        XCTAssertTrue(hovered.showsAttentionCard)
+        XCTAssertTrue(hovered.showsStatusCard)
         let loud = try XCTUnwrap(render(hovered))
 
         XCTAssertGreaterThan(inkedFraction(loud), inkedFraction(quiet) * 1.2,
@@ -209,9 +209,9 @@ final class NotchAlertRenderTests: XCTestCase {
     /// never contest the same space.
     func testOpeningUsageDetailsStandsTheAlertCardDown() {
         let model = model(edge: .right, alert: makeAlert(), hovering: true)
-        XCTAssertTrue(model.showsAttentionCard)
+        XCTAssertTrue(model.showsStatusCard)
         model.selectedIndex = 0
-        XCTAssertFalse(model.showsAttentionCard)
+        XCTAssertFalse(model.showsStatusCard)
     }
 }
 
@@ -278,13 +278,13 @@ final class NotchAttentionModelTests: XCTestCase {
         model.attention = makeAlert(accountID: account)
         XCTAssertEqual(model.attentionFlash(forSnapshot: account.uuidString), model.attentionFlash)
         XCTAssertNil(model.attentionFlash(forSnapshot: "other"))
-        XCTAssertEqual(model.attentionIndex, 0)
+        XCTAssertEqual(model.statusIndex, 0)
 
         // A problem belonging to no single account belongs to all of them.
         model.attention = makeAlert(id: "switchPaused", accountID: nil)
         XCTAssertNotNil(model.attentionFlash(forSnapshot: account.uuidString))
         XCTAssertNotNil(model.attentionFlash(forSnapshot: "other"))
-        XCTAssertEqual(model.attentionIndex, 0)
+        XCTAssertEqual(model.statusIndex, 0)
     }
 }
 

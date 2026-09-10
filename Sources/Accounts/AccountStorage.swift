@@ -65,7 +65,11 @@ struct AccountStorage {
             let catalog = try JSONDecoder().decode(AccountCatalog.self, from: data)
             guard catalog.version == 1, Set(catalog.accounts.map(\.id)).count == catalog.accounts.count,
                   catalog.accounts.allSatisfy({ account in
-                      if account.existingProfile != nil && account.provider.isBrowserProfile { return false }
+                      // A browser-profile row never references a vendor directory.
+                      // Cursor is the exception: its discovered row points at the
+                      // editor's own state store and reads usage from it.
+                      if account.existingProfile != nil && account.provider.isBrowserProfile
+                          && !account.provider.readsDesktopUsage { return false }
                       do { _ = try Self.validLabel(account.label); _ = try Self.validEmail(account.emailHint); _ = try Self.validEmoji(account.emoji); return true }
                       catch { return false }
                   }),

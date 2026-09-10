@@ -196,6 +196,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let alert = manager.attention.map(NotchAlert.init)
         controller.model.attention = alert
         escalator?.update(alert)
+
+        // The green, when the account layer says a problem ended. Shown once
+        // per event: `presentResolution` ignores a repeat of the same id, which
+        // matters because this method runs on every published change and the
+        // resolution stays set on the manager after it is first announced.
+        if let resolved = manager.resolvedAttention {
+            // `AppDelegate` is the only place where the recovery and the switch
+            // that caused it are both in scope, so the join happens here rather
+            // than either layer reaching into the other.
+            let reason = manager.automaticSwitch.flatMap {
+                $0.toID == resolved.accountID ? $0.reason : nil
+            } ?? ""
+            controller.presentResolution(NotchResolution(resolved, detail: reason))
+        }
         // Thresholds are asked of the snapshots the notch is showing rather
         // than of the manager directly: the notch shows the account that is
         // actually in use, and it is that account's limit somebody is spending.
@@ -339,6 +353,22 @@ extension NotchAlert {
                   detail: attention.detail,
                   raisedAt: attention.raisedAt,
                   accountID: attention.accountID)
+    }
+}
+
+extension NotchResolution {
+    /// The account layer's recovery, in the shape the notch draws.
+    ///
+    /// `AccountResolution` carries a title and no body, which is right for it —
+    /// most recoveries have nothing to add beyond having happened. The one that
+    /// does is an automatic handoff, and the sentence naming the limit that ran
+    /// out lives on the switch event rather than here, so the caller joins the
+    /// two.
+    init(_ resolution: AccountResolution, detail: String = "") {
+        self.init(id: resolution.id,
+                  title: resolution.title,
+                  detail: detail,
+                  accountID: resolution.accountID)
     }
 }
 

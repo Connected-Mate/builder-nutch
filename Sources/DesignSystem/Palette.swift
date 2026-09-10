@@ -39,6 +39,29 @@ enum Palette {
     /// 4.8:1 against white and 4.4:1 against black, so it reads on a pale
     /// wallpaper and a dark one alike.
     static let alert      = Color(hex: 0xDD2729)
+
+    // MARK: - Resolved
+
+    // The answering half of the pair: shown for a few seconds when a problem
+    // has been fixed, then gone. Built at the *same three lightness steps* as
+    // the alert ramp — 0.22, 0.42, 0.58 — so going from red to green changes
+    // the notch's hue and nothing else. A green that also brightened would read
+    // as a second, louder event rather than as the first one ending.
+    //
+    // Hue 150 at deliberately lower chroma than the red. The red can afford
+    // 0.215 because it has to interrupt; the green must not, and a saturated
+    // green on a dark surface is both an AI tell and the exact neon this
+    // product already rejected once.
+
+    /// `oklch(0.22 0.055 150)` — the black's first tint, where the rings sit.
+    static let resolvedMoss  = Color(hex: 0x03210C)
+
+    /// `oklch(0.42 0.110 150)` — the body turning over.
+    static let resolvedGrove = Color(hex: 0x0B5D2A)
+
+    /// `oklch(0.58 0.150 150)` — the inner lip. 4.0:1 against white and 5.3:1
+    /// against black, so like the red it survives either wallpaper.
+    static let resolved      = Color(hex: 0x1B9247)
 }
 
 extension Color {

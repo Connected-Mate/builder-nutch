@@ -150,6 +150,26 @@ final class ClaudeSystemRotationTests: XCTestCase {
     }
 
     @MainActor
+    func testUsingAnotherAccountClearsTheRedAndConfirmsTheSwitch() async throws {
+        let (manager, runner, _, credentials, system, accounts, _) = try fixture()
+        runner.used = ["A": 50, "B": 100]
+        manager.automaticSelection = true
+        await manager.refreshAll()
+        // B is spent, so there is nothing to move to: the banner is red.
+        XCTAssertEqual(manager.attention?.kind, .queueEmpty)
+
+        // The person switches the Mac to B themselves, the way "Use account" does.
+        runner.used["B"] = 10
+        await manager.launch(accounts[1], project: system.directory)
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "B")
+        XCTAssertNil(manager.attention, "A red banner must not outlive the problem it described")
+        let resolved = try XCTUnwrap(manager.resolvedAttention)
+        XCTAssertEqual(resolved.kind, .switched)
+        XCTAssertEqual(resolved.accountID, accounts[1].id)
+        XCTAssertTrue(resolved.title.contains("B"))
+    }
+
+    @MainActor
     func testTheAutomaticSwitchSaysWhyItHappened() async throws {
         let (manager, _, _, _, _, accounts, _) = try fixture()
         manager.automaticSelection = true

@@ -18,6 +18,14 @@ enum AccountProvider: String, Codable, CaseIterable, Identifiable {
         }
     }
     var isBrowserProfile: Bool { self != .claude && self != .codex && self != .kimi }
+    /// True where the vendor's own **desktop app** holds a login on this Mac
+    /// that can be read for usage without opening a browser profile.
+    ///
+    /// Cursor is the only one, and the distinction matters: the editor mints and
+    /// rotates its own session, so there is a real reading to take but nothing
+    /// to switch. That is why this is deliberately *not* wired to
+    /// `supportsAutomaticSelection`, which stays false for Cursor.
+    var readsDesktopUsage: Bool { self == .cursor }
     var supportsAutomaticSelection: Bool { !isBrowserProfile }
     var symbolName: String {
         switch self {
@@ -100,6 +108,16 @@ struct ManagedAccount: Identifiable, Codable, Equatable {
     var browserBundleIdentifier: String? = nil
     /// Reference only; credentials and vendor configuration stay with the official app.
     var existingProfile: ExistingAccountProfile? = nil
+
+    /// A row backed by a vendor desktop app already signed in on this Mac,
+    /// rather than by a browser profile Builder Nutch opened. Only these Cursor
+    /// rows have usage to show; a Cursor row the user created here is still a
+    /// browser profile and still behaves like one.
+    var readsDesktopUsage: Bool { provider.readsDesktopUsage && existingProfile != nil }
+
+    /// A row whose whole content is a separate browser profile: there is no
+    /// quota to read, and the website is the only place the usage exists.
+    var isBrowserOnly: Bool { provider.isBrowserProfile && !readsDesktopUsage }
 }
 
 /// A real automatic rotation, kept separate from manual account selection so
@@ -375,6 +393,28 @@ extension AccountAttention {
         case .keychainAccess: return "lock.circle"
         }
     }
+}
+
+/// Something that *was* wrong and now is not. Published alongside `attention`
+/// so the app can say so once, in green, instead of a red banner simply
+/// vanishing and leaving the person unsure whether they fixed it.
+struct AccountResolution: Equatable, Identifiable {
+    enum Kind: String, Equatable {
+        /// A saved login was signed in again.
+        case reconnected
+        /// Automatic switching started again after a pause.
+        case switchResumed
+        /// macOS access was granted for a login.
+        case accessAllowed
+        /// The Mac moved to another account and that account is working.
+        case switched
+    }
+    let kind: Kind
+    let accountID: UUID?
+    let title: String
+    let resolvedAt: Date
+    /// Distinct per event, so the same good news twice reads as twice.
+    var id: String { kind.rawValue + (accountID?.uuidString ?? "") + String(resolvedAt.timeIntervalSince1970) }
 }
 
 /// A plain-language answer to "is my Mac going to keep working?". Published by

@@ -46,7 +46,18 @@ enum NotchMotion {
     /// makes the red arrive late. Ease-out-quart, so it comes on quickly and
     /// settles — the notch should already be red by the time you have looked
     /// across at it, without anything having flashed on.
-    static let alertRaise = Animation.timingCurve(0.25, 1, 0.5, 1, duration: 0.4)
+    static let skinRaiseDuration: TimeInterval = 0.4
+    static let skinRaise = Animation.timingCurve(0.25, 1, 0.5, 1, duration: skinRaiseDuration)
+
+    /// And leaving it again, a little slower.
+    ///
+    /// The one place in this app where the exit is longer than the entrance.
+    /// Everywhere else an exit is got out of the way; here the fade *is* the
+    /// message — it is how the notch says a thing has finished — and cutting it
+    /// short leaves the user unsure whether the problem was fixed or the app
+    /// simply stopped mentioning it.
+    static let skinClearDuration: TimeInterval = 0.45
+    static let skinClear = Animation.timingCurve(0.25, 1, 0.5, 1, duration: skinClearDuration)
 
     /// Each cell trails the one above it, so the stack unfurls rather than
     /// appearing all at once. Capped so a long list never feels sluggish.

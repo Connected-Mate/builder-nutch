@@ -118,12 +118,12 @@ enum ExistingAccountDiscovery {
     static func candidates(home: URL = FileManager.default.homeDirectoryForCurrentUser,
                            environment: [String: String] = ProcessInfo.processInfo.environment) -> [ExistingAccountCandidate] {
         var result: [ExistingAccountCandidate] = []
-        func append(_ provider: AccountProvider, _ path: URL, defaultClaude: Bool = false) {
+        func append(_ provider: AccountProvider, _ path: URL, defaultClaude: Bool = false, named: String? = nil) {
             let source = ExistingAccountProfile(directory: path.standardizedFileURL.path, usesDefaultClaudeHome: defaultClaude)
             guard (try? source.validatedDirectory()) != nil,
                   !result.contains(where: { $0.source.key(provider: $0.provider) == source.key(provider: provider) }) else { return }
             let base = provider == .kimi ? ".kimi-code" : "." + provider.rawValue
-            let suffix = path.lastPathComponent == base ? "on this Mac" : path.lastPathComponent
+            let suffix = named ?? (path.lastPathComponent == base ? "on this Mac" : path.lastPathComponent)
             result.append(ExistingAccountCandidate(provider: provider, label: "\(provider.title) · \(suffix)", source: source))
         }
         // No recursion, browser-cookie scanning or shell evaluation. For Kimi,
@@ -136,6 +136,11 @@ enum ExistingAccountDiscovery {
         let kimi = home.appendingPathComponent(".kimi-code")
         let kimiSource = ExistingAccountProfile(directory: kimi.standardizedFileURL.path, usesDefaultClaudeHome: false)
         if kimiSource.kimiAuthenticationStatus() != .signedOut { append(.kimi, kimi) }
+        // Cursor's editor keeps its own login. Only offer the row when there is
+        // actually a session to read, the same rule Kimi follows: a signed-out
+        // editor produces no row rather than a row that can never say anything.
+        let cursor = CursorAccountIntegration.globalStorage(home: home)
+        if CursorAccountIntegration.isSignedIn(directory: cursor) { append(.cursor, cursor, named: "on this Mac") }
         for (provider, variable) in [(AccountProvider.claude, "CLAUDE_CONFIG_DIR"), (.codex, "CODEX_HOME"), (.kimi, "KIMI_CODE_HOME")] {
             if let path = environment[variable], path.hasPrefix("/") {
                 let url = URL(fileURLWithPath: path)

@@ -25,6 +25,9 @@ struct ProviderRing: View {
     /// else. Set, the glyph flashes three times and then holds; the red
     /// gradient behind it is what carries the state from there on.
     var attentionFlash: String? = nil
+    /// Names a problem this ring's account has just recovered from. One soft
+    /// swell, against the green skin.
+    var resolvedPulse: String? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var spin: Double = 0
@@ -74,6 +77,7 @@ struct ProviderRing: View {
                     // ring is a measurement, and a measurement that pulses
                     // reads as a number nobody is sure of.
                     .attentionFlash(trigger: attentionFlash)
+                    .resolvedPulse(trigger: resolvedPulse)
             }
             .opacity(isStale ? 0.45 : 1)
 
@@ -175,6 +179,7 @@ struct ProviderCell: View {
     var displayMode: UsageDisplayMode = .used
     /// Passed straight through to the ring's glyph — see `ProviderRing`.
     var attentionFlash: String? = nil
+    var resolvedPulse: String? = nil
 
     /// A dash, not "0%": nothing read is not the same as nothing used.
     private var percentText: String {
@@ -191,7 +196,8 @@ struct ProviderCell: View {
                 isBlocked: snapshot.block != nil,
                 activity: activity,
                 isRefreshing: isRefreshing,
-                attentionFlash: attentionFlash
+                attentionFlash: attentionFlash,
+                resolvedPulse: resolvedPulse
             )
             Text(percentText)
                 .font(Typography.percent)

@@ -54,6 +54,27 @@ enum CursorUsage {
                                       label: "On demand", resetsAt: resetsAt) {
             windows.append(onDemand)
         }
+        // Three buckets a personal free plan never sends. They come from the
+        // response type of the maintained community reader (verified
+        // 10 September 2026, commit 30 August 2026):
+        // https://raw.githubusercontent.com/steipete/CodexBar/main/Sources/CodexBarCore/Providers/Cursor/CursorStatusProbe.swift
+        // Their inner shape has not been seen live here, so they go through the
+        // same all-or-nothing helper as `onDemand`: a bucket that does not carry
+        // `enabled`, `used` and a positive `limit` yields no row at all. A
+        // missing row is honest; a row built on a guessed field name is not.
+        if let overall = spendWindow(usage["overall"], id: "personal_cap",
+                                     label: "Personal cap", resetsAt: resetsAt) {
+            windows.append(overall)
+        }
+        let team = root["teamUsage"] as? [String: Any] ?? [:]
+        if let pooled = spendWindow(team["pooled"], id: "team_pool",
+                                    label: "Team pool", resetsAt: resetsAt) {
+            windows.append(pooled)
+        }
+        if let teamOnDemand = spendWindow(team["onDemand"], id: "team_on_demand",
+                                          label: "Team on demand", resetsAt: resetsAt) {
+            windows.append(teamOnDemand)
+        }
 
         guard windows.isEmpty else { return windows }
 

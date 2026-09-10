@@ -365,7 +365,7 @@ struct AccountsView: View {
         HStack(spacing: 6) {
             Circle().fill(AppTheme.ink).frame(width: 4, height: 4).accessibilityHidden(true)
             if let selectedAccount {
-                if selectedAccount.provider.isBrowserProfile {
+                if selectedAccount.isBrowserOnly {
                     Text("Selected profile:")
                 } else if selectedAccount.provider == .claude {
                     Text("Next account:")
@@ -377,7 +377,7 @@ struct AccountsView: View {
                     Text("· next in rotation").foregroundStyle(AppTheme.muted)
                 }
                 Spacer(minLength: 8)
-                if selectedAccount.provider.isBrowserProfile {
+                if selectedAccount.isBrowserOnly {
                     Button("Open profile") { Task { await manager.launch(selectedAccount, project: projectURL) } }
                         .buttonStyle(WorkspaceSelectionStyle(primary: true))
                         .disabled(!manager.state(for: selectedAccount).isConnected || manager.state(for: selectedAccount).isBusy)
@@ -596,11 +596,11 @@ private struct AssistantRow: View {
                 Menu {
                     Button("Usage details") { showingUsage = true }
                     if state.isConnected {
-                        Button(account.provider.isBrowserProfile ? "Open profile" : "Open with this account") {
+                        Button(account.isBrowserOnly ? "Open profile" : "Open with this account") {
                             Task { await manager.launch(account, project: projectURL) }
                         }.disabled(state.isBusy || loginInProgress)
                     }
-                    if !account.provider.isBrowserProfile {
+                    if !account.isBrowserOnly {
                         Button("Refresh usage") { Task { await manager.refresh(account) } }.disabled(state.isBusy)
                     }
                     Button(hidePersonalDetails ? "Show personal details to rename…" : "Rename & emoji…", action: personalize)
@@ -628,7 +628,7 @@ private struct AssistantRow: View {
     }
 
     private var quotaDescription: String {
-        if account.provider.isBrowserProfile { return "Check usage on the official website" }
+        if account.isBrowserOnly { return "Check usage on the official website" }
         guard let remaining = state.remainingPercent, state.isConnected else { return "Usage unavailable" }
         let value = displayMode == .remaining ? remaining : 100 - remaining
         return "\(Int(value.rounded())) percent \(displayMode.unit)\(state.isFresh() ? "" : ", last known; refresh needed")"
@@ -637,7 +637,7 @@ private struct AssistantRow: View {
     private var quotaRing: some View {
         ZStack {
             Circle().stroke(AppTheme.track, lineWidth: 3)
-            if let remaining = state.remainingPercent, state.isConnected, !account.provider.isBrowserProfile {
+            if let remaining = state.remainingPercent, state.isConnected, !account.isBrowserOnly {
                 let shown = displayMode == .remaining ? remaining : 100 - remaining
                 Circle().trim(from: 0, to: min(max(shown / 100, 0), 1))
                     .stroke(AppTheme.ink.opacity(state.isFresh() ? 1 : 0.45),
@@ -689,7 +689,7 @@ private struct AssistantRow: View {
         if isLoginPending { return "Sign-in in progress" }
         if state.isBusy { return "Checking…" }
         if !state.isConnected { return state.message ?? "Connect this account." }
-        if account.provider.isBrowserProfile { return "Browser profile ready" }
+        if account.isBrowserOnly { return "Browser profile ready" }
         if let message = state.message {
             if account.provider == .claude && state.needsFirstUsage &&
                 message == "Usage appears after the first Claude Code session launched here." {
@@ -717,7 +717,7 @@ private struct AssistantRow: View {
     private var usageDetails: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("\(displayLabel) · Usage").font(AppTheme.font(size: 16, weightValue: 650))
-            if account.provider.isBrowserProfile {
+            if account.isBrowserOnly {
                 Text("Usage stays on \(account.provider.title)’s website.")
             } else if state.windows.isEmpty {
                 Text(LocalizedStringKey(statusDescription))
@@ -1011,7 +1011,7 @@ private struct AddAssistantFlow: View {
                 .frame(width: 76, height: 76)
                 Text(state.message ?? "Continue sign-in in the browser window opened by Builder Nutch.")
                     .font(AppTheme.font(.title3, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
-                if account.provider.isBrowserProfile, state.message?.contains("Install Google Chrome") == true {
+                if account.isBrowserOnly, state.message?.contains("Install Google Chrome") == true {
                     Link("Install Google Chrome", destination: URL(string: "https://www.google.com/chrome/")!)
                         .font(AppTheme.font(.body, weight: .semibold))
                 }
@@ -1022,7 +1022,7 @@ private struct AddAssistantFlow: View {
             HStack {
                 Button("Close") { dismiss() }.buttonStyle(AppButtonStyle())
                 Spacer()
-                if account.provider.isBrowserProfile {
+                if account.isBrowserOnly {
                     Button("Open sign-in again") { Task { await manager.connect(account) } }
                         .buttonStyle(AppButtonStyle()).disabled(state.isBusy || manager.loginAccountID != nil)
                     Button("I've finished signing in") { confirmBrowser(account) }
@@ -1170,7 +1170,7 @@ private struct PersonalizeAssistantView: View {
     private var detail: String {
         let connected = manager.state(for: account).isConnected
         let prefix: String
-        if account.provider.isBrowserProfile && connected { prefix = "Browser profile ready for \(account.provider.title)." }
+        if account.isBrowserOnly && connected { prefix = "Browser profile ready for \(account.provider.title)." }
         else if connected { prefix = "Connected to \(account.provider.title)." }
         else { prefix = "Customize this \(account.provider.title) account." }
         return prefix + " A nickname and emoji are optional and only help you recognise it."

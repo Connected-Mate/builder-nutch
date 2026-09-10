@@ -144,6 +144,79 @@ user already added, instead of only preventing the next one.
 | **2026 risk** | Cursor moved from request counting to token/credit accounting, and on 31 July 2026 zeroed dollar-cost fields on the Usage page for self-serve and Teams plans. The `onDemand` dollar bucket is the exposed part; it fails closed (the parser requires `limit > 0`). Sources disagree on `usage-summary` vs `usage/summary`, so the endpoint name needs a live check before shipping. |
 | **Verdict** | Reading is feasible and mostly written already. **S** to wire the existing adapter into an `AccountProvider.cursor` row; **M** to re-verify the endpoint and field names against a signed-in account. Rotation: **not feasible** — the token is minted and rotated by the editor, and there is no documented way to write a different one back. |
 
+### Wired in, 10 September 2026
+
+Cursor is now a real usage row in the live `AccountManager` stack, alongside Claude,
+Codex and Kimi. The dormant `Sources/Providers/Cursor*` adapter stays where it is; the
+live path reuses its two tested pieces (`CursorCredentials`, `CursorUsage`) rather than
+copying them.
+
+**Re-verified online before wiring.** The endpoint, the cookie and the response shape are
+unchanged from the pinned recording, checked against the maintained community reader
+(source commits dated 30 August 2026):
+
+- <https://raw.githubusercontent.com/steipete/CodexBar/main/Sources/CodexBarCore/Providers/Cursor/CursorStatusProbe.swift>
+- <https://raw.githubusercontent.com/steipete/CodexBar/main/Sources/CodexBarCore/Providers/Cursor/CursorAppAuth.swift>
+
+Two differences were found and handled. That reader no longer reads
+`cursorAuth/stripeMembershipAuthId` at all — it derives the account half of the cookie
+from the access token's own `sub` claim, minus the identity-provider prefix — so
+`CursorCredentials.load` now prefers the stored row and falls back to the claim. And its
+response type also names `individualUsage.overall`, `teamUsage.pooled` and
+`teamUsage.onDemand`, which a personal free plan never sends; those three go through the
+same all-or-nothing helper as `onDemand`, so an unexpected shape yields **no window**
+rather than an invented number. The `individualUsage.plan.*` fields the headline depends
+on are untouched, and `CursorUsageTests` still passes against its original recording.
+
+**What was built.**
+
+| | |
+|---|---|
+| **New** | `Sources/Accounts/CursorAccountIntegration.swift` — reads the editor's login, makes one request, builds a `ManagedAccountState`. Transport is behind `CursorHTTPFetching` so every failure path is testable without a network or a token. |
+| **Model** | `AccountProvider.readsDesktopUsage` (true for Cursor only) plus `ManagedAccount.readsDesktopUsage` / `.isBrowserOnly`. The distinction is per **row**, not per provider: a discovered Cursor row is a reading, a Cursor row the user adds here is still a browser profile. Everything that used to ask `provider.isBrowserProfile` about a row now asks `account.isBrowserOnly`. |
+| **Discovery** | `ExistingAccountDiscovery` offers `Cursor · on this Mac` only while the editor holds a session, and `AccountManager.discoverExistingAccounts` accepts it without resolving an executable, because there is nothing to launch. |
+| **Sign-out** | `pruneSignedOutKimiProfiles` became `pruneSignedOutExistingProfiles` and now covers Cursor on the same rule Kimi already used: the row goes, the path is not ignored, so a later sign-in is rediscovered. |
+| **Ring** | `AccountManager.headlineID(for:)` points the ring at the `included` window — the figure Cursor's own dashboard leads with. |
+| **Rotation** | Deliberately none. `AccountProvider.cursor.supportsAutomaticSelection` stays false, `readsDesktopUsage` is not wired to it, and `launch` on a Cursor row refreshes and says the Cursor app owns the sign-in instead of opening anything. The README's "Usage accuracy" section states this. |
+
+**Security.** The store is opened read-only through the existing `SQLiteStore` (`mode=ro`,
+falling back to `immutable=1`), never written. The token lives only in a local
+`URLRequest` header for the duration of one call — never persisted, never logged, never
+put in a `ManagedAccountState`. The session is ephemeral with no cookie jar, no proxy
+dictionary and no cache; redirects are refused by the delegate and the response host is
+checked, so a borrowed credential cannot be handed to another host; timeouts are 15 s and
+the body is capped at 1 MB. `AccountEnvironment` scrubbing is untouched because no process
+is spawned for Cursor at all.
+
+**Verified on this Mac.** The account is still signed out: the only `cursorAuth*` row in
+the real `state.vscdb` is `stripeMembershipType = "free"`. `CursorCredentials.load` throws
+`needsAuth`, `isSignedIn` is false, discovery produces no candidate, and
+`CursorAccountIntegration.read` returns a not-connected state **without making a request** —
+covered by `testSignedOutEditorYieldsNoRowAndNoRequest` against a fixture store with
+exactly that single row. Reading the real store read-only updates its `-shm` sidecar
+mtime, which is ordinary SQLite WAL behaviour for a read-only open; the database and the
+write-ahead log are untouched.
+
+**How to see it.** Sign in to Cursor in the editor, then refresh in Builder Nutch (or wait
+for the next automatic refresh). A **Cursor · on this Mac** row appears, connected, with
+the plan name and the included-usage percentage, resetting at Cursor's own
+`billingCycleEnd`. Sign out in Cursor and the row disappears on the next discovery pass.
+
+**Antigravity is untouched.** Nothing was built for it and nothing was wired. Its adapter
+is still only reachable from `UsageStore`, which is still never instantiated.
+`readsDesktopUsage` is false for every provider except Cursor, and
+`testOnlySignedInDesktopAppsBecomeCandidates` asserts both that fact and that
+`ExistingAccountDiscovery` yields no Gemini/Antigravity candidate — so installing
+Antigravity later cannot wire it in by accident. To verify: `grep -rn "UsageStore(" Sources/`
+must stay empty, and `AntigravityBridge` must have no caller outside `AntigravityProvider`.
+
+**Tests.** `Tests/CursorAccountTests.swift` — 12 cases: the login pair and the `sub`-claim
+fallback, a signed-out fixture that yields no row and no request, a missing store, the
+cookie and request shape plus the row built from the pinned response, a refused session,
+a server error, "nothing metered", the unverified team buckets failing closed, discovery
+adding the row and refusing rotation, sign-out removing it, and the candidate list. Full
+suite: **778 tests, 2 skipped, 0 failures**.
+
 ## Antigravity (Google)
 
 | | |
@@ -182,7 +255,7 @@ user already added, instead of only preventing the next one.
 | Claude Code | Yes, official | Not re-probed (Keychain) | **Shipped** | **Shipped** (Keychain swap) | — | Low |
 | Codex | Yes, official | Tool present, not probed | Launch-time | No (per-process `CODEX_HOME`) | S | Low |
 | Kimi Code | Yes, official | **Yes — 5h 3/100, weekly 1/100** | Launch-time | No (per-process `KIMI_CODE_HOME`) | S (reset times, dedupe) | Low |
-| Cursor | No | Signed out on this Mac | No | No | S wire-in / M verify | Medium |
+| Cursor | **Yes, official** (desktop login) | Signed out on this Mac | **No, by design** | No | Wired 10 Sep 2026 | Medium |
 | Antigravity | No | App not installed | No | No | M | Medium-high |
 | GLM | No | No credential present | No | No | S | High (undocumented) |
 | Perplexity | No | Not probed | No | No | L | Medium |
@@ -203,13 +276,13 @@ the tree; `nutch-health` reports 753 tests, 2 skipped, 0 failures.
    as approximate, so Kimi is no longer the only provider without a countdown.
 2. **Subscription fingerprint dedupe — shipped, plus an automatic merge of rows that
    already exist.** See the deviation noted above.
-3. **The fate of `Sources/Providers/` — still open, and now the largest loose end.**
-   Roughly 2,600 lines of careful, tested, unreachable code. Either wire Cursor in behind
-   an `AccountProvider.cursor` usage path, since it is the closest to working and the most
-   requested, or move the directory out of the build target and say so. Right now the
-   README's "Usage accuracy" section describes Codex, Claude and Kimi accurately and is
-   silent on Cursor and Antigravity, which is correct but easy to misread as an omission
-   rather than an absence.
+3. **The fate of `Sources/Providers/` — half closed the same day.** Cursor is now wired
+   into the live stack behind an `AccountProvider.cursor` usage row (see *Wired in,
+   10 September 2026* above), reusing the dormant `CursorCredentials` and `CursorUsage`
+   rather than copying them, and the README's "Usage accuracy" section now describes it.
+   What is still open is the rest: Antigravity, GLM and Perplexity remain reachable only
+   from `UsageStore`, which is still never instantiated. Either wire them the same way or
+   move them out of the build target and say so.
 
 ## Method and safety
 

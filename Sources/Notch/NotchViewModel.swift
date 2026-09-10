@@ -37,8 +37,49 @@ final class NotchViewModel: ObservableObject {
             // standing now.
             flashed.removeAll()
             attentionFlash = nil
+            // Red wins, immediately. A problem arriving during the few seconds
+            // of green ends the green there and then rather than queueing
+            // behind it: the green says "that's dealt with", and leaving it up
+            // while something else is broken is the notch telling a lie for
+            // four seconds.
+            if attention != nil, resolution != nil {
+                resolution = nil
+            }
             armAttentionFlash()
         }
+    }
+
+    /// A problem that has just been fixed. Transient — held for a few seconds
+    /// by `NotchWindowController`, then cleared.
+    @Published var resolution: NotchResolution? {
+        didSet {
+            guard resolution?.id != oldValue?.id else { return }
+            resolutionPulse = resolution.map(\.id)
+        }
+    }
+
+    /// Fires the single swell. Unlike the alert flash this does not wait for
+    /// the notch to be open: the green is a receipt with a life of its own, and
+    /// a folded notch simply misses it rather than saving it up for later.
+    @Published private(set) var resolutionPulse: String?
+
+    /// What the notch is wearing right now.
+    ///
+    /// The precedence lives here and nowhere else. Red beats green beats black,
+    /// because a fix that leaves another problem standing has not made the
+    /// notch safe to look away from.
+    var skin: NotchSkin {
+        if attention != nil { return .alert }
+        if resolution != nil { return .resolved }
+        return .calm
+    }
+
+    /// The swell this cell should carry, on the ring that recovered.
+    func resolutionPulse(forSnapshot id: String) -> String? {
+        guard skin == .resolved, let resolutionPulse, let resolution,
+              resolution.id == resolutionPulse,
+              resolution.concerns(snapshotID: id) else { return nil }
+        return resolutionPulse
     }
 
     /// The problem whose flash should be playing, or nil.
@@ -76,23 +117,42 @@ final class NotchViewModel: ObservableObject {
     /// over whatever they were doing.
     @Published var isHoveringNotch = false
 
-    /// Whether the notch is currently volunteering what is wrong.
+    /// What the hover card would say, whichever state the notch is in.
+    ///
+    /// Derived from `skin` rather than assembled separately, so the card and
+    /// the colour can never disagree about which event is current.
+    var status: NotchStatus? {
+        switch skin {
+        case .alert:
+            guard let attention else { return nil }
+            return NotchStatus(title: attention.title, detail: attention.detail,
+                               tone: .alert, snapshotID: attention.snapshotID)
+        case .resolved:
+            guard let resolution else { return nil }
+            return NotchStatus(title: resolution.title, detail: resolution.detail,
+                               tone: .resolved, snapshotID: resolution.snapshotID)
+        case .calm:
+            return nil
+        }
+    }
+
+    /// Whether the notch is currently volunteering what happened.
     ///
     /// The one thing this app shows without being asked, and it is kept to a
     /// hover: a red edge that will not say what it means until you guess where
     /// to click is worse than no red edge, and a card that will not go away is
     /// worse than both.
-    var showsAttentionCard: Bool {
-        attention != nil && isExpanded && isHoveringNotch
+    var showsStatusCard: Bool {
+        status != nil && isExpanded && isHoveringNotch
             && selectedIndex == nil && accountPicker == nil
     }
 
-    /// Which cell the alert card points at. The first one when the problem is
-    /// the app's rather than an account's — the card still has to be anchored
-    /// somewhere, and the head of the stack is where the eye starts.
-    var attentionIndex: Int? {
-        guard attention != nil, !snapshots.isEmpty else { return nil }
-        if let id = attention?.snapshotID,
+    /// Which cell the card points at. The first one when the event belongs to
+    /// no single account — the card still has to be anchored somewhere, and the
+    /// head of the stack is where the eye starts.
+    var statusIndex: Int? {
+        guard let status, !snapshots.isEmpty else { return nil }
+        if let id = status.snapshotID,
            let index = snapshots.firstIndex(where: { $0.id == id }) { return index }
         return 0
     }

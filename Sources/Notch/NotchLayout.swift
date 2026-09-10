@@ -316,22 +316,28 @@ enum NotchLayout {
     /// Worked out here rather than left to SwiftUI for the same reason as
     /// `cardHeight` — the shell is given its height explicitly so the tail
     /// stays welded to it while the card is still gliding into place.
-    static func attentionCardHeight(detail: String) -> CGFloat {
+    static func statusCardHeight(detail: String, showsHint: Bool) -> CGFloat {
         let header = max(glyphSize, cardTitleLineHeight)
-        return 2 * cardPadding + header
-            + headerToBlock + min(bodyTextHeight(detail), attentionDetailLines * cardBodyLineHeight)
-            + sessionRowGap + cardBodyLineHeight
+        var height = 2 * cardPadding + header
+        if !detail.isEmpty {
+            height += headerToBlock
+                + min(bodyTextHeight(detail), statusDetailLines * cardBodyLineHeight)
+        }
+        if showsHint {
+            height += sessionRowGap + cardBodyLineHeight
+        }
+        return height
     }
 
-    /// How much of the detail the alert card will show.
+    /// How much of the detail the status card will show.
     ///
-    /// Capped, unlike the status message on a usage card, because this card has
-    /// a line *after* the detail — the one saying what clicking does. Text is
-    /// measured in the system font and drawn in Bricolage, so a long detail can
-    /// wrap one line further than the budget expected, and what falls off the
-    /// bottom of a clipped card is always the last thing on it. Better a
+    /// Capped, unlike the status message on a usage card, because the red card
+    /// has a line *after* the detail — the one saying what clicking does. Text
+    /// is measured in the system font and drawn in Bricolage, so a long detail
+    /// can wrap one line further than the budget expected, and what falls off
+    /// the bottom of a clipped card is always the last thing on it. Better a
     /// truncated sentence than a missing instruction.
-    static let attentionDetailLines: CGFloat = 3
+    static let statusDetailLines: CGFloat = 3
 
     /// The automatic handoff receipt always has a two-line message: the event
     /// label, followed by the old and new account names.
