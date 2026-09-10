@@ -7,6 +7,11 @@ struct CodenotchMain {
         if CommandLine.arguments.contains("--diagnose-claude-accounts") {
             exit(ClaudeAccountDiagnostics.run())
         }
+        // The usage ledger has no screen yet. Printing it is how its figures get
+        // checked against the transcripts they came from.
+        if CommandLine.arguments.contains(UsageLedgerDump.flag) {
+            exit(UsageLedgerDump.run())
+        }
         CodenotchApplication.main()
     }
 }
