@@ -279,8 +279,8 @@ final class TooltipResizeTests: XCTestCase {
     }
 }
 
-/// The tooltip is one object: a card with a tail welded to its side. What breaks
-/// that illusion is the two halves moving on different schedules.
+/// The tooltip is one object: a card a fixed gap off the notch. What breaks
+/// that illusion is its parts moving on different schedules.
 @MainActor
 final class TooltipCohesionTests: XCTestCase {
     private func snapshot(windows: Int) -> ProviderSnapshot {
@@ -305,24 +305,15 @@ final class TooltipCohesionTests: XCTestCase {
         }
     }
 
-    /// The tail is centred on the card's height, so a height that jumps takes
-    /// the tail with it. Every step between two providers has to be a real
-    /// number for that travel to be smooth.
+    /// The card is centred on its cell, so a height that jumps moves its edge.
+    /// Every step between two providers has to be a real number for that
+    /// travel to be smooth.
     func testHeightIsContinuousAcrossProviderShapes() {
         let heights = (0...3).map { NotchLayout.cardHeight(windowCount: $0) }
         for height in heights {
             XCTAssertTrue(height.isFinite && height > 0)
         }
         XCTAssertEqual(Set(heights).count, heights.count, "each shape has its own height")
-    }
-
-    /// The tail never changes size, whatever the card is doing — it is a fixed
-    /// piece of the silhouette, not something that scales with the contents.
-    func testTheTailIsAFixedSize() {
-        XCTAssertGreaterThan(NotchLayout.tailHeight, 0)
-        XCTAssertGreaterThan(NotchLayout.tailLength, 0)
-        XCTAssertLessThan(NotchLayout.tailHeight, NotchLayout.cardHeight(windowCount: 1),
-                          "the tail must fit inside the shortest card it can point from")
     }
 }
 

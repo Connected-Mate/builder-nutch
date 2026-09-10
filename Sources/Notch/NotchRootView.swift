@@ -117,7 +117,7 @@ struct NotchRootView: View {
                                            showsHint: status.tone == .alert)
         return place.point(
             along: model.slack + model.ringCenter(index: index),
-            across: model.tooltipInset + (NotchLayout.tailLength + card) / 2
+            across: model.tooltipInset + card / 2
         )
     }
 
@@ -337,7 +337,7 @@ struct NotchRootView: View {
                     identitySubtitle: snapshot.accountEmail?.isEmpty == false))
         return place.point(
             along: model.slack + model.ringCenter(index: index),
-            across: model.tooltipInset + (NotchLayout.tailLength + card) / 2
+            across: model.tooltipInset + card / 2
         )
     }
 }

@@ -367,12 +367,12 @@ final class NotchWindowController {
             along: centre - cardAlong / 2,
             across: model.contentInset + NotchLayout.bodyDepth(for: model.edge),
             length: cardAlong,
-            depth: NotchLayout.tailGap + NotchLayout.tailLength + cardAcross
+            depth: NotchLayout.cardGap + cardAcross
         )
     }
 
     /// The status card's own region, on the same terms as `tooltipRect` — the
-    /// card, its tail, and the gap the pointer has to cross to reach it.
+    /// card and the gap the pointer has to cross to reach it.
     private func statusRect(index: Int, status: NotchStatus) -> CGRect? {
         guard model.snapshots.indices.contains(index) else { return nil }
         let cardHeight = NotchLayout.statusCardHeight(detail: status.detail,
@@ -384,7 +384,7 @@ final class NotchWindowController {
             along: centre - cardAlong / 2,
             across: model.contentInset + NotchLayout.bodyDepth(for: model.edge),
             length: cardAlong,
-            depth: NotchLayout.tailGap + NotchLayout.tailLength + cardAcross
+            depth: NotchLayout.cardGap + cardAcross
         )
     }
 

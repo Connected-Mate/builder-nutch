@@ -64,25 +64,6 @@ final class NotchAlertSkinTests: XCTestCase {
         }
     }
 
-    /// The card's tail carries the red at the end that touches the notch, so
-    /// the join is a continuation rather than a black object stuck to a red
-    /// edge. Each direction's hot end must be the end the tip is on.
-    func testTheAlertTailIsHotWhereItMeetsTheNotch() {
-        for edge in NotchEdge.allCases {
-            let direction = edge.tooltipDirection
-            let tail = NotchAlertSkin.tailUnitPoints(for: direction)
-            // Both are the same axis and the same sense — "toward the screen
-            // edge". The tail's point aims back at the notch, and the notch's
-            // gradient starts at the bezel, so the two vectors coincide even
-            // though the colours at that end are opposite: black on the notch,
-            // red on the tail, which is what makes the join continuous.
-            let skin = NotchAlertSkin.unitPoints(for: edge)
-            XCTAssertEqual(tail.tip, skin.start,
-                           "Tail and notch disagree about which end is hot on \(edge)")
-            XCTAssertEqual(tail.base, skin.end)
-        }
-    }
-
     /// The one accent has to survive both wallpapers, so it is checked rather
     /// than trusted.
     func testTheAlertRedCarriesOnLightAndDarkAlike() throws {

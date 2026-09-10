@@ -1,50 +1,8 @@
 import SwiftUI
 
-/// The speech-bubble tail, its point aimed at the hovered cell.
-private struct TooltipTail: Shape {
-    /// Which way the card sits relative to the notch — the tip points back the
-    /// other way, at the cell.
-    let direction: NotchEdge.TooltipDirection
-
-    func path(in rect: CGRect) -> Path {
-        // The tip, and the two corners of the base opposite it.
-        let (tip, a, b): (CGPoint, CGPoint, CGPoint)
-        switch direction {
-        case .leading:   // card on the left, tip to the right
-            tip = CGPoint(x: rect.maxX, y: rect.midY)
-            (a, b) = (CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.minX, y: rect.maxY))
-        case .trailing:  // card on the right, tip to the left
-            tip = CGPoint(x: rect.minX, y: rect.midY)
-            (a, b) = (CGPoint(x: rect.maxX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.maxY))
-        case .down:      // card below, tip upward
-            tip = CGPoint(x: rect.midX, y: rect.minY)
-            (a, b) = (CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY))
-        case .up:        // card above, tip downward
-            tip = CGPoint(x: rect.midX, y: rect.maxY)
-            (a, b) = (CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY))
-        }
-
-        var path = Path()
-        path.move(to: a)
-        path.addLine(to: tip)
-        path.addLine(to: b)
-        path.closeSubpath()
-        return path
-    }
-
-    /// Long in the direction it points, wide across it.
-    static func size(for direction: NotchEdge.TooltipDirection) -> CGSize {
-        switch direction {
-        case .leading, .trailing:
-            return CGSize(width: NotchLayout.tailLength, height: NotchLayout.tailHeight)
-        case .up, .down:
-            return CGSize(width: NotchLayout.tailHeight, height: NotchLayout.tailLength)
-        }
-    }
-}
-
 /// The card chrome every tooltip shares: fixed width, the frame's padding and
-/// corner, and the tail welded on so there is no seam between them.
+/// corner. No tail: the card sits a short, fixed gap off the notch and is
+/// aligned on the cell it belongs to, which says the same thing more quietly.
 private struct TooltipShell<Content: View>: View {
     /// Given explicitly rather than left to the contents.
     ///
@@ -52,12 +10,8 @@ private struct TooltipShell<Content: View>: View {
     /// and the tail, centred on that height, jumps with it while the card's
     /// position is still gliding. The two halves then visibly come apart.
     let height: CGFloat
-    /// Which side of the notch the card is on, so the tail goes on the other one.
+    /// Which side of the notch the card is on.
     let direction: NotchEdge.TooltipDirection
-    /// What the tail is filled with. The card's own black by default; the alert
-    /// card hands in a gradient instead, so the join to a notch that has gone
-    /// red is a continuation rather than a seam.
-    var tailStyle: AnyShapeStyle = AnyShapeStyle(Palette.card)
     @ViewBuilder let content: Content
 
     private var card: some View {
@@ -85,29 +39,7 @@ private struct TooltipShell<Content: View>: View {
         )
     }
 
-    private var tail: some View {
-        let size = TooltipTail.size(for: direction)
-        // The tail is deliberately outside the clip: it is part of the card's
-        // silhouette, not of its contents.
-        return TooltipTail(direction: direction)
-            .fill(tailStyle)
-            .frame(width: size.width, height: size.height)
-    }
-
-    var body: some View {
-        // Card first or tail first, laid out along whichever axis the tail
-        // points. The pair is one silhouette either way.
-        switch direction {
-        case .leading:
-            HStack(spacing: 0) { card; tail }
-        case .trailing:
-            HStack(spacing: 0) { tail; card }
-        case .down:
-            VStack(spacing: 0) { tail; card }
-        case .up:
-            VStack(spacing: 0) { card; tail }
-        }
-    }
+    var body: some View { card }
 }
 
 private struct TooltipHeader<Mark: View>: View {
@@ -579,9 +511,7 @@ struct NotchStatusCard: View {
     }
 
     var body: some View {
-        TooltipShell(height: height, direction: direction,
-                     tailStyle: AnyShapeStyle(
-                        NotchAlertSkin.tailGradient(for: direction, skin: status.tone))) {
+        TooltipShell(height: height, direction: direction) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: NotchLayout.headerGap) {
                     // Sized into the same box a provider mark occupies, not by

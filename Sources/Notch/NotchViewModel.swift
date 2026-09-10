@@ -382,10 +382,10 @@ final class NotchViewModel: ObservableObject {
     }
 
 
-    /// Where the tooltip's tail tip sits, measured in from the bezel: just off
-    /// the inner face of a shape that the extension has made deeper.
+    /// Where the tooltip card's near edge sits, measured in from the bezel:
+    /// just off the inner face of a shape that the extension has made deeper.
     var tooltipInset: CGFloat {
-        contentInset + NotchLayout.bodyDepth(for: edge) + NotchLayout.tailGap
+        contentInset + NotchLayout.bodyDepth(for: edge) + NotchLayout.cardGap
     }
 
     /// The straight part of the shape, flares excluded.
@@ -478,8 +478,7 @@ final class NotchViewModel: ObservableObject {
         return screenUsableSize.height
             - contentInset
             - NotchLayout.bodyDepth(for: edge)
-            - NotchLayout.tailLength
-            - NotchLayout.tailGap
+            - NotchLayout.cardGap
     }
 
     /// The drawn extent of the notch body right now, along the stack.

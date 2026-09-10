@@ -47,7 +47,7 @@ final class NotchClickDetailsTests: XCTestCase {
             XCTAssertEqual(refreshes.count, count + 1, "Closing details should not refresh")
             controller.toggleDetails(index: 0)
             pointer = try globalPoint(controller, index: 0,
-                across: controller.model.contentInset + NotchLayout.bodyDepth(for: edge) + NotchLayout.tailGap + NotchLayout.tailLength + 10)
+                across: controller.model.contentInset + NotchLayout.bodyDepth(for: edge) + NotchLayout.cardGap + 10)
             controller.pollCursorForTesting()
             controller.handleClick()
             XCTAssertEqual(controller.model.selectedIndex, 0, "Card interaction dismissed it")

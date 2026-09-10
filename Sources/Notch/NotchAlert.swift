@@ -148,47 +148,6 @@ enum NotchAlertSkin {
         return LinearGradient(stops: stops(for: skin),
                               startPoint: points.start, endPoint: points.end)
     }
-
-    /// The tail that joins the alert card to the notch: hot at the tip, where
-    /// it meets the shape's inner lip, and back to the card's own black by the
-    /// time it reaches the card.
-    ///
-    /// Without it the red stops dead at the notch and the card hangs off a red
-    /// edge as an unrelated black object — the same seam the notch's flares
-    /// exist to remove, reintroduced two inches away.
-    /// Which end of the tail is the point, and which is the base. Named
-    /// separately from the gradient so it can be checked without unpicking a
-    /// `LinearGradient`.
-    static func tailUnitPoints(
-        for direction: NotchEdge.TooltipDirection
-    ) -> (tip: UnitPoint, base: UnitPoint) {
-        switch direction {
-        case .leading:  return (.trailing, .leading)
-        case .trailing: return (.leading, .trailing)
-        case .down:     return (.top, .bottom)
-        case .up:       return (.bottom, .top)
-        }
-    }
-
-    static func tailGradient(for direction: NotchEdge.TooltipDirection) -> LinearGradient {
-        let (tip, base) = tailUnitPoints(for: direction)
-        return tailGradient(for: direction, skin: .alert)
-    }
-
-    static func tailGradient(for direction: NotchEdge.TooltipDirection,
-                             skin: NotchSkin) -> LinearGradient {
-        let (tip, base) = tailUnitPoints(for: direction)
-        let hot = skin == .resolved ? Palette.resolved : Palette.alert
-        let warm = skin == .resolved ? Palette.resolvedMoss : Palette.alertEmber
-        return LinearGradient(
-            stops: [
-                Gradient.Stop(color: hot, location: 0),
-                Gradient.Stop(color: warm, location: 0.55),
-                Gradient.Stop(color: Palette.card, location: 1)
-            ],
-            startPoint: tip, endPoint: base
-        )
-    }
 }
 
 /// What the glyph does when a new problem is raised.

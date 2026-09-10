@@ -118,9 +118,9 @@ enum NotchLayout {
     static let cardWidth     = Design.px(600)
     static let cardCorner    = Design.px(49.5)
     static let cardPadding   = Design.px(32)
-    static let tailLength    = Design.px(75)
-    static let tailHeight    = Design.px(87)
-    static let tailGap       = Design.px(28)    // tail tip -> notch body edge
+    /// Notch body edge -> card edge. The card has no tail; this is all the
+    /// air between the two.
+    static let cardGap       = Design.px(28)
     static let barHeight     = Design.px(10.5)
     static let headerGap     = Design.px(17)    // glyph -> title
     static let headerToBlock = Design.px(21)
@@ -454,6 +454,6 @@ enum NotchLayout {
     /// below or above it on a horizontal one.
     static func tooltipDepth(for edge: NotchEdge,
                              maxCardHeight: CGFloat = defaultMaxCardHeight) -> CGFloat {
-        (edge.isVertical ? cardWidth : maxCardHeight) + tailLength + tailGap
+        (edge.isVertical ? cardWidth : maxCardHeight) + cardGap
     }
 }
