@@ -19,6 +19,12 @@ struct ClaudeAccountDiagnostics {
         var keychainStatus: Int32?
         var access: String?
         var readableByClaude: Bool?
+        /// With `--verify-owners`: whether the service says the saved token
+        /// belongs to the account the config names, and whether it belongs to
+        /// the same account as the Mac's token. Never who that is.
+        var tokenOwnerStatus: String?
+        var tokenMatchesName: Bool?
+        var tokenMatchesMac: Bool?
     }
     struct Report: Codable {
         let version: Int
@@ -31,11 +37,28 @@ struct ClaudeAccountDiagnostics {
     var readFile: (URL) throws -> Data? = Self.readFileSafely
     var now: () -> Date = Date.init
     var keychainAccount = ClaudeSystemCredentials.keychainAccount()
+    /// Asks the service who each saved token belongs to. Off by default: the
+    /// plain diagnostic never touches the network.
+    var verifyOwners: ((String) throws -> ClaudeCredentialIdentity)?
 
     func collect(home: URL, catalogRoot: URL, onEntry: ((Entry) -> Void)? = nil) -> Report {
         let mac = ClaudeCredentialLocation(directory: home.appendingPathComponent(".claude"), isDefault: true)
         let macIdentity = identity(at: mac)
-        var entries = [entry(id: "mac", label: "Mac", location: mac, identity: macIdentity, macIdentity: macIdentity)]
+        var macOwner: ClaudeCredentialIdentity?
+        func finished(_ built: (Entry, String?), named: ClaudeCredentialIdentity?) -> Entry {
+            var entry = built.0
+            guard let verifyOwners, let token = built.1 else { return entry }
+            do {
+                let owner = try verifyOwners(token)
+                entry.tokenOwnerStatus = "read"
+                entry.tokenMatchesName = named.map { $0 == owner }
+                if entry.id == "mac" { macOwner = owner }
+                entry.tokenMatchesMac = macOwner.map { $0 == owner }
+            } catch ClaudeSystemCredentialError.expiredLogin { entry.tokenOwnerStatus = "refused" }
+            catch { entry.tokenOwnerStatus = "error" }
+            return entry
+        }
+        var entries = [finished(entry(id: "mac", label: "Mac", location: mac, identity: macIdentity, macIdentity: macIdentity), named: macIdentity.1)]
         onEntry?(entries[0])
         var catalogStatus = "missing"
         do {
@@ -57,7 +80,8 @@ struct ClaudeAccountDiagnostics {
                     } else {
                         location = ClaudeCredentialLocation(directory: catalogRoot.appendingPathComponent("profiles/\(account.id.uuidString.lowercased())"), isDefault: false)
                     }
-                    entries.append(entry(id: account.id.uuidString, label: Self.safeLabel(account.label), location: location, identity: identity(at: location), macIdentity: macIdentity))
+                    let named = identity(at: location)
+                    entries.append(finished(entry(id: account.id.uuidString, label: Self.safeLabel(account.label), location: location, identity: named, macIdentity: macIdentity), named: named.1))
                     onEntry?(entries[entries.count - 1])
                 }
             }
@@ -72,12 +96,25 @@ struct ClaudeAccountDiagnostics {
         return try encoder.encode(collect(home: home, catalogRoot: catalogRoot))
     }
 
-    static func run() -> Int32 {
+    static func run(arguments: [String] = CommandLine.arguments) -> Int32 {
         let home = FileManager.default.homeDirectoryForCurrentUser
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
-            let report = Self().collect(home: home, catalogRoot: home.appendingPathComponent("Library/Application Support/Codenotch Accounts")) { entry in
+            var diagnostics = Self()
+            if arguments.contains("--verify-owners") {
+                let resolver = ClaudeTokenIdentityResolver()
+                diagnostics.verifyOwners = { token in
+                    // A command-line report is synchronous; one bounded question per token.
+                    let answer = OwnerAnswer()
+                    Task {
+                        do { answer.settle(.success(try await resolver.identity(forToken: token))) }
+                        catch { answer.settle(.failure(error)) }
+                    }
+                    return try answer.wait(seconds: 25)
+                }
+            }
+            let report = diagnostics.collect(home: home, catalogRoot: home.appendingPathComponent("Library/Application Support/Codenotch Accounts")) { entry in
                 // Flush completed sanitized entries before starting another read.
                 // A watchdog can then identify progress if a native read stalls.
                 guard var line = try? encoder.encode(entry) else { return }
@@ -106,17 +143,20 @@ struct ClaudeAccountDiagnostics {
         } catch { return ("read_error", nil) }
     }
 
+    /// The entry, and the access token it describes — returned only so the
+    /// owner check can ask about it; it is never written anywhere.
     private func entry(id: String, label: String, location: ClaudeCredentialLocation,
-                       identity: (String, ClaudeCredentialIdentity?), macIdentity: (String, ClaudeCredentialIdentity?)) -> Entry {
+                       identity: (String, ClaudeCredentialIdentity?), macIdentity: (String, ClaudeCredentialIdentity?)) -> (Entry, String?) {
         let matches: Bool? = identity.1.flatMap { current in macIdentity.1.map { $0 == current } }
         var result = Entry(id: id, label: label, matchesMac: matches, identityStatus: identity.0, credentialStatus: "missing")
+        var token: String?
         do {
             // The injected gate is also exercised by mock tests. The native reader
             // uses this same recursive gate; every entry explicitly prohibits UI.
             guard let item = try interaction.perform(allowPrompt: false, {
                 try keychain.read(service: location.service, account: keychainAccount)
-            }) else { return result }
-            guard item.data.count <= ClaudeSystemCredentials.maximumBytes else { result.credentialStatus = "invalid"; return result }
+            }) else { return (result, token) }
+            guard item.data.count <= ClaudeSystemCredentials.maximumBytes else { result.credentialStatus = "invalid"; return (result, token) }
             var data = item.data
             var format = data.contains(10) || data.contains(13) ? "json_multiline" : "json_compact"
             if (try? JSONSerialization.jsonObject(with: data)) == nil,
@@ -127,14 +167,15 @@ struct ClaudeAccountDiagnostics {
                 format = "hex_json"
             }
             guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                result.credentialStatus = "invalid"; result.format = "unknown"; return result
+                result.credentialStatus = "invalid"; result.format = "unknown"; return (result, token)
             }
             result.format = format
-            guard let oauth = object["claudeAiOauth"] as? [String: Any] else { result.credentialStatus = "missing_oauth"; return result }
-            result.hasAccess = (oauth["accessToken"] as? String).map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? false
+            guard let oauth = object["claudeAiOauth"] as? [String: Any] else { result.credentialStatus = "missing_oauth"; return (result, token) }
+            token = (oauth["accessToken"] as? String).flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+            result.hasAccess = token != nil
             result.hasRefresh = (oauth["refreshToken"] as? String).map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? false
             guard let expiry = oauth["expiresAt"] as? NSNumber, CFGetTypeID(expiry) != CFBooleanGetTypeID(), expiry.doubleValue.isFinite else {
-                result.credentialStatus = "invalid_expiry"; return result
+                result.credentialStatus = "invalid_expiry"; return (result, token)
             }
             result.expired = expiry.doubleValue / 1000 <= now().timeIntervalSince1970
             result.credentialStatus = result.hasAccess == true && result.hasRefresh == true ? "read" : "incomplete"
@@ -146,7 +187,7 @@ struct ClaudeAccountDiagnostics {
             result.keychainStatus = status
             result.credentialStatus = [errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled].contains(status) ? "denied" : "read_error"
         } catch { result.credentialStatus = "read_error" }
-        return result
+        return (result, token)
     }
 
     private static func safeLabel(_ label: String) -> String {
@@ -163,5 +204,24 @@ struct ClaudeAccountDiagnostics {
               (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == getuid(),
               let size = attributes[.size] as? NSNumber, size.intValue <= 2_000_000 else { throw ManagedAccountError.unsafePath }
         return try Data(contentsOf: url)
+    }
+}
+
+/// One answer handed from a task to the thread that is waiting on it.
+private final class OwnerAnswer: @unchecked Sendable {
+    private let done = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var outcome: Result<ClaudeCredentialIdentity, Error>?
+
+    func settle(_ result: Result<ClaudeCredentialIdentity, Error>) {
+        lock.lock(); outcome = result; lock.unlock()
+        done.signal()
+    }
+
+    func wait(seconds: TimeInterval) throws -> ClaudeCredentialIdentity {
+        guard done.wait(timeout: .now() + seconds) == .success else { throw ManagedAccountError.timedOut }
+        lock.lock(); defer { lock.unlock() }
+        guard let outcome else { throw ManagedAccountError.timedOut }
+        return try outcome.get()
     }
 }

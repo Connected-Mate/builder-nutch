@@ -228,3 +228,10 @@
 "The usage service answered unexpectedly (%d). The last reading is still shown." = "Le service de quotas a répondu de façon inattendue (%d). Le dernier relevé reste affiché.";
 "The usage service asked us to slow down. Checking again shortly." = "Le service de quotas demande de ralentir. Nouvelle vérification sous peu.";
 "%@ does not meter usage, so there is nothing to show." = "%@ ne comptabilise pas d’usage, il n’y a donc rien à afficher.";
+
+/* Login identity — the token is the truth (2026-09-10) */
+"This profile holds the sign-in of %1$@ instead of its own. Sign in to %2$@ again." = "Ce profil contient la connexion de %1$@ au lieu de la sienne. Reconnectez %2$@.";
+"Finish the sign-in that is still open first, then use the account." = "Terminez d’abord la connexion encore ouverte, puis utilisez le compte.";
+"%1$@ was signed in as %2$@, which is already %3$@. The two rows will be merged." = "%1$@ a été connecté avec %2$@, qui est déjà %3$@. Les deux lignes vont être fusionnées.";
+"%1$@ is now signed in as %2$@ (it was %3$@)." = "%1$@ est maintenant connecté avec %2$@ (c’était %3$@).";
+"Something outside Builder Nutch — usually a Claude session still running as %1$@ — put it back on this Mac, so your choice was restored. To use %1$@ instead, choose it here; close and reopen older Claude sessions so they follow." = "Quelque chose hors de Builder Nutch — en général une session Claude encore ouverte avec %1$@ — l’a remis sur ce Mac : votre choix a été rétabli. Pour utiliser %1$@ à la place, choisissez-le ici ; fermez puis rouvrez les anciennes sessions Claude pour qu’elles suivent.";

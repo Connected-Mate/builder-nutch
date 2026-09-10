@@ -66,6 +66,26 @@ final class AccountManager: ObservableObject {
     /// account is queued next, and conflating the two would let a manual "Set
     /// next" look identical to someone running `claude /login` behind our back.
     private var lastKnownSystemClaude: UUID?
+    /// Who a saved token belongs to, from the service that issued it. The name
+    /// in `.claude.json` is what any running Claude session last wrote there and
+    /// is wrong whenever a session outlives a switch; the token is the truth.
+    struct ResolvedLogin: Equatable {
+        let fingerprint: String
+        let identity: ClaudeCredentialIdentity
+    }
+    private var macLogin: ResolvedLogin?
+    private var profileLogins: [UUID: ResolvedLogin] = [:]
+    private var loginIdentityCheckedAt: [UUID: Date] = [:]
+    private let resolveTokenIdentity: (String) async throws -> ClaudeCredentialIdentity
+    /// A login this app set that something else — almost always a Claude session
+    /// started under the previous account, writing its renewed token back — has
+    /// just replaced. Put right by the next reconcile, not by the observer.
+    private var pendingRestore: (displaced: UUID, wanted: UUID)?
+    /// When this app last put its own choice back. Bounded so two writers can
+    /// never fight over the Keychain all afternoon.
+    private var restorations: [Date] = []
+    static let restorationLimit = 3
+    static let restorationWindow: TimeInterval = 3600
     private var lastQueueAudit: Date?
     /// A queued account that quietly expired has to be found long before a
     /// rotation needs it, so the whole queue is rechecked on this cadence.
@@ -101,9 +121,16 @@ final class AccountManager: ObservableObject {
          readCursor: @escaping (URL, AccountCancellation) async throws -> ManagedAccountState = CursorAccountIntegration.read,
          systemCredentials: ClaudeSystemCredentials? = nil,
          systemClaudeDirectory: URL? = nil,
-         claudeReader: (any ClaudeAccountReading)? = nil) {
+         claudeReader: (any ClaudeAccountReading)? = nil,
+         resolveTokenIdentity: ((String) async throws -> ClaudeCredentialIdentity)? = nil) {
         self.automaticDiscovery = rootURL == nil
         self.systemCredentials = systemCredentials ?? (rootURL == nil ? ClaudeSystemCredentials() : nil)
+        self.resolveTokenIdentity = resolveTokenIdentity ?? {
+            // A test catalog never asks the network who a fake token belongs to.
+            guard rootURL == nil else { return { _ in throw ManagedAccountError.unavailable } }
+            let resolver = ClaudeTokenIdentityResolver()
+            return { token in try await resolver.identity(forToken: token) }
+        }()
         self.claudeReader = claudeReader ?? self.systemCredentials.map { ClaudeQuietUsageReader(credentials: $0) }
         self.systemClaudeLocation = ClaudeCredentialLocation(directory: systemClaudeDirectory ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude"), isDefault: true)
         self.runner = runner; self.resolveExecutable = executable; self.openTerminal = openTerminal
@@ -352,7 +379,10 @@ final class AccountManager: ObservableObject {
     /// Identify by both provider account and organization, never a nickname or email hint.
     private func updateSystemClaudeIdentity() {
         guard let credentials = systemCredentials else { return }
-        let identity = try? credentials.identity(at: systemClaudeLocation)
+        // The token's owner when the service has told us; the config's name only
+        // until then. A profile is this app's own file, written at sign-in or by
+        // a copy, so its name is trusted — the Mac's is what any session wrote.
+        let identity = macLogin?.identity ?? ((try? credentials.identity(at: systemClaudeLocation)) ?? nil)
         systemClaudeAccountID = identity.flatMap { current in
             accounts.first { account in
                 account.provider == .claude && (try? credentials.identity(at: credentialLocation(for: account))) == current
@@ -361,16 +391,149 @@ final class AccountManager: ObservableObject {
         adoptSystemClaudeLogin()
     }
 
+    /// The name on a saved profile, or nil when it was never signed in.
+    private func profileIdentity(_ account: ManagedAccount) -> ClaudeCredentialIdentity? {
+        guard let credentials = systemCredentials, account.provider == .claude else { return nil }
+        return (try? credentials.identity(at: credentialLocation(for: account))) ?? nil
+    }
+
+    /// Asks the service who the Mac's token and each saved token belong to, then
+    /// puts right whatever disagrees. Cheap after the first look: a token is
+    /// asked about once, and a profile is only re-read on the usage cadence.
+    ///
+    /// This is where the app stops believing `.claude.json`. Every running Claude
+    /// session rewrites that file with the account it started under, so after a
+    /// switch the Mac's name and secret disagree within minutes, and an app that
+    /// read the name then saved the wrong secret into the wrong profile.
+    func resolveLoginIdentities(force: Bool = false, now: Date = Date()) async {
+        guard let credentials = systemCredentials, !hasShutDown else { return }
+        let mac = systemClaudeLocation
+        macLogin = await resolved(at: mac, previous: macLogin, credentials: credentials)
+        guard !hasShutDown else { return }
+        for account in accounts where account.provider == .claude && account.existingProfile == nil {
+            let due = force || loginIdentityCheckedAt[account.id].map { now.timeIntervalSince($0) >= 300 } ?? true
+            guard due, !hasShutDown else { continue }
+            let location = credentialLocation(for: account)
+            let resolved = await resolved(at: location, previous: profileLogins[account.id], credentials: credentials)
+            guard !hasShutDown else { return }
+            if let resolved { profileLogins[account.id] = resolved } else { profileLogins.removeValue(forKey: account.id) }
+            loginIdentityCheckedAt[account.id] = now
+        }
+        await repairMacIdentity(credentials: credentials)
+        guard !hasShutDown else { return }
+        updateSystemClaudeIdentity()
+        await repairProfileLogins(credentials: credentials)
+    }
+
+    private func resolved(at location: ClaudeCredentialLocation, previous: ResolvedLogin?,
+                          credentials: ClaudeSystemCredentials) async -> ResolvedLogin? {
+        let token = try? await Task.detached(priority: .utility) { try credentials.accessToken(at: location) }.value
+        guard let token else { return nil }
+        let fingerprint = ClaudeTokenIdentityResolver.fingerprint(token)
+        if let previous, previous.fingerprint == fingerprint { return previous }
+        guard let identity = try? await resolveTokenIdentity(token) else { return nil }
+        return ResolvedLogin(fingerprint: fingerprint, identity: identity)
+    }
+
+    /// The Mac's config names whoever the last session to save it started as.
+    /// Put the token's real owner there so the CLI's own status, and any
+    /// reader that only has the file, agree with what is actually in use.
+    private func repairMacIdentity(credentials: ClaudeSystemCredentials) async {
+        guard let macLogin else { return }
+        let mac = systemClaudeLocation
+        guard ((try? credentials.identity(at: mac)) ?? nil) != macLogin.identity else { return }
+        let owner = accounts.first { $0.provider == .claude && profileIdentity($0) == macLogin.identity }
+        let saved = owner.flatMap { account -> [String: Any]? in
+            let location = credentialLocation(for: account)
+            return (try? credentials.oauthAccount(at: location)) ?? nil
+        }
+        let oauthAccount = saved ?? macLogin.identity.minimalOAuthAccount
+        _ = try? await Task.detached(priority: .utility) { try credentials.rewriteIdentity(at: mac, oauthAccount: oauthAccount) }.value
+    }
+
+    /// The other account whose login this profile is holding, or nil when the
+    /// profile is its own. A profile that is not what it says is not connected:
+    /// its usage would be someone else's, and a switch to it would install the
+    /// wrong subscription.
+    func profileHoldsAnotherLogin(_ account: ManagedAccount) -> ClaudeCredentialIdentity? {
+        guard account.id != systemClaudeAccountID else { return nil }
+        return profileMismatch(account)
+    }
+
+    /// The same question for any profile, the account in use included: its
+    /// saved copy can be stale too, and is what the Mac would be saved back into.
+    private func profileMismatch(_ account: ManagedAccount) -> ClaudeCredentialIdentity? {
+        guard account.provider == .claude, account.existingProfile == nil,
+              let resolved = profileLogins[account.id], let named = profileIdentity(account),
+              resolved.identity != named else { return nil }
+        return resolved.identity
+    }
+
+    /// A saved profile holding another account's secret is repaired from the
+    /// Mac when the Mac has that profile's real login, and otherwise marked for a
+    /// fresh sign-in. Never silently rewritten to be the other account: that is
+    /// how a row the person named would vanish into a merge.
+    private func repairProfileLogins(credentials: ClaudeSystemCredentials) async {
+        for account in accounts where account.provider == .claude {
+            guard !hasShutDown, let stranger = profileMismatch(account), let named = profileIdentity(account) else { continue }
+            if let macLogin, macLogin.identity == named, !busyIDs.contains(account.id), !isSwitchingClaude {
+                let mac = systemClaudeLocation
+                let location = credentialLocation(for: account)
+                let oauthAccount = (try? credentials.oauthAccount(at: location)) ?? nil
+                let repaired: Bool = (try? await Task.detached(priority: .utility) {
+                    try credentials.copyLogin(from: mac, to: location, expectedIdentity: named, allowExpired: true,
+                                              sourceOAuthAccount: oauthAccount)
+                    return true
+                }.value) ?? false
+                guard !hasShutDown else { return }
+                if repaired {
+                    profileLogins[account.id] = macLogin
+                    pausedRefreshIDs.remove(account.id)
+                    externalRetryAfter.removeValue(forKey: account.id)
+                    lastReadAt.removeValue(forKey: account.id)
+                    continue
+                }
+            }
+            // The account in use is read from the Mac, not from its copy, so a
+            // stale copy there is not a fault the person has to act on.
+            guard account.id != systemClaudeAccountID else { continue }
+            markProfileHoldingAnotherLogin(account, stranger: stranger)
+        }
+    }
+
+    private func markProfileHoldingAnotherLogin(_ account: ManagedAccount, stranger: ClaudeCredentialIdentity) {
+        var state = states[account.id] ?? ManagedAccountState()
+        state.isConnected = false
+        state.requiresSignIn = true
+        state.refreshedAt = nil
+        state.windows = []
+        state.message = String(format: NSLocalizedString("This profile holds the sign-in of %1$@ instead of its own. Sign in to %2$@ again.", comment: "Profile mismatch"),
+                               stranger.email, account.label)
+        states[account.id] = state
+        pausedRefreshIDs.insert(account.id)
+    }
+
     /// The Mac's login is the truth; the catalog is only this app's record of it.
     /// Someone can run `claude /login` themselves, and this app used to follow
     /// that in `systemClaudeAccountID` while leaving `selected` pointing at an
     /// account that had not been in use for hours. Everything downstream — which
     /// account is "next", what the notch calls current, where a rotation starts —
     /// reads one or the other, so the two must never disagree.
-    private func adoptSystemClaudeLogin() {
+    private func adoptSystemClaudeLogin(acceptingChange: Bool = false) {
         guard !isSwitchingClaude, let currentID = systemClaudeAccountID,
               currentID != lastKnownSystemClaude,
               let account = accounts.first(where: { $0.id == currentID }) else { return }
+        // A login this app set, replaced by one it did not: almost always a
+        // Claude session started under the old account writing its renewed
+        // token back. Its choice is not the person's, so the person's is put
+        // back — by the reconcile, once, and only on the token's word.
+        if !acceptingChange, let wanted = lastKnownSystemClaude, canRestore(wanted, displacedBy: currentID) {
+            if pendingRestore?.displaced != currentID || pendingRestore?.wanted != wanted {
+                pendingRestore = (displaced: currentID, wanted: wanted)
+            }
+            return
+        }
+        pendingRestore = nil
         // Nothing to compare a first sighting against. Record it rather than
         // announce a change nobody made, which is what a brand-new catalog and
         // an app that has just been given its first account both look like.
@@ -390,17 +553,69 @@ final class AccountManager: ObservableObject {
             resolvedAt: Date())
     }
 
+    /// Whether the person's choice should be put back after something else
+    /// replaced it. Only on the token's word — a config that merely names another
+    /// account is noise — only while rotation is the app's job, only to an
+    /// account that can take a session, and never more than a few times an hour.
+    private func canRestore(_ wanted: UUID, displacedBy currentID: UUID, now: Date = Date()) -> Bool {
+        guard automaticSelection, systemCredentials != nil, !systemSwitchPaused, macLogin != nil, wanted != currentID,
+              let account = accounts.first(where: { $0.id == wanted && $0.provider == .claude }),
+              let state = states[wanted], state.isConnected, !state.requiresSignIn, !state.requiresKeychainAccess,
+              profileHoldsAnotherLogin(account) == nil else { return false }
+        restorations.removeAll { now.timeIntervalSince($0) > Self.restorationWindow }
+        return restorations.count < Self.restorationLimit
+    }
+
+    /// Puts the person's account back on the Mac after a session's write-back
+    /// replaced it, saving the displaced login into its own profile first so
+    /// nothing that session renewed is lost. Falls back to adopting the change
+    /// when the restore cannot be done, so the app never argues with reality.
+    private func restoreSystemClaudeChoice() async {
+        guard let pending = pendingRestore, !hasShutDown, !isSwitchingClaude else { return }
+        pendingRestore = nil
+        // The Mac may have moved again while this waited its turn.
+        guard systemClaudeAccountID == pending.displaced else { adoptDisplacedLogin(); return }
+        guard canRestore(pending.wanted, displacedBy: pending.displaced),
+              let wanted = accounts.first(where: { $0.id == pending.wanted }),
+              let displaced = accounts.first(where: { $0.id == pending.displaced }) else {
+            adoptDisplacedLogin()
+            return
+        }
+        restorations.append(Date())
+        do {
+            try await activateSystemClaude(wanted, automatic: true, cause: .restored(displacedBy: displaced.label))
+        } catch {
+            guard !hasShutDown else { return }
+            adoptDisplacedLogin()
+            notice = [notice, error.localizedDescription].compactMap { $0 }.joined(separator: " ")
+        }
+    }
+
+    /// The change stands: record and announce it the ordinary way.
+    private func adoptDisplacedLogin() { adoptSystemClaudeLogin(acceptingChange: true) }
+
     /// Preserve the outgoing subscription before replacing the shared login.
     /// A discovered default profile becomes a saved profile so its row never
     /// changes identity when the Mac moves to another subscription.
+    ///
+    /// The name written next to the secret is the profile's own, never the Mac
+    /// config's: that file names whichever account the last session to save it
+    /// started under, and copying it is how a profile ends up holding another
+    /// account's login under its own name.
     private func saveSystemClaudeLogin(_ current: ManagedAccount, identity: ClaudeCredentialIdentity) async throws -> ManagedAccount {
-        guard systemCredentials != nil else { throw ManagedAccountError.unavailable }
+        guard let credentials = systemCredentials else { throw ManagedAccountError.unavailable }
+        var carried = identity.minimalOAuthAccount
+        if current.existingProfile?.usesDefaultClaudeHome != true, profileIdentity(current) == identity,
+           let own = (try? credentials.oauthAccount(at: credentialLocation(for: current))) ?? nil {
+            carried = own
+        }
         if current.existingProfile?.usesDefaultClaudeHome == true {
             var saved = current
             saved.existingProfile = nil
             let destination = try usableStorage().profile(saved)
             try await copyClaudeLogin(from: systemClaudeLocation,
-                to: ClaudeCredentialLocation(directory: destination, isDefault: false), identity: identity, allowExpired: true)
+                to: ClaudeCredentialLocation(directory: destination, isDefault: false), identity: identity, allowExpired: true,
+                sourceOAuthAccount: carried)
             var updated = accounts
             guard let index = updated.firstIndex(where: { $0.id == current.id }) else { throw ManagedAccountError.unavailable }
             updated[index] = saved
@@ -408,7 +623,8 @@ final class AccountManager: ObservableObject {
             accounts = updated
             return saved
         }
-        try await copyClaudeLogin(from: systemClaudeLocation, to: credentialLocation(for: current), identity: identity, allowExpired: true)
+        try await copyClaudeLogin(from: systemClaudeLocation, to: credentialLocation(for: current), identity: identity, allowExpired: true,
+                                  sourceOAuthAccount: carried)
         return current
     }
 
@@ -432,6 +648,9 @@ final class AccountManager: ObservableObject {
         case .preferredReturned:
             return String(format: NSLocalizedString("The account you chose is available again, so %1$@ handed back.", comment: "Switch reason"),
                           account.label)
+        case .restored(let displacedBy):
+            return String(format: NSLocalizedString("Something outside Builder Nutch — usually a Claude session still running as %1$@ — put it back on this Mac, so your choice was restored. To use %1$@ instead, choose it here; close and reopen older Claude sessions so they follow.", comment: "Switch reason"),
+                          displacedBy)
         }
     }
 
@@ -439,11 +658,16 @@ final class AccountManager: ObservableObject {
                                       cause: AccountSelection.SystemClaudeDecision.Cause? = nil) async throws {
         guard let credentials = systemCredentials, target.provider == .claude,
               !hasShutDown, !isSwitchingClaude, !busyIDs.contains(target.id), !authenticationInProgress else { throw ManagedAccountError.busy }
+        // Learn who is really on the Mac before moving anyone off it. Cheap when
+        // nothing changed; decisive when a session has just written back.
+        await resolveLoginIdentities()
+        guard !hasShutDown, !isSwitchingClaude, !busyIDs.contains(target.id), !authenticationInProgress else { throw ManagedAccountError.busy }
         updateSystemClaudeIdentity()
+        guard profileHoldsAnotherLogin(target) == nil else { throw ManagedAccountError.notConnected }
         guard let currentID = systemClaudeAccountID,
               let current = accounts.first(where: { $0.id == currentID }),
               !busyIDs.contains(currentID),
-              let currentIdentity = try credentials.identity(at: systemClaudeLocation),
+              let currentIdentity = try macLogin?.identity ?? credentials.identity(at: systemClaudeLocation),
               let targetIdentity = try credentials.identity(at: credentialLocation(for: target))
         else { throw ManagedAccountError.notConnected }
         guard currentID != target.id else { return }
@@ -472,6 +696,12 @@ final class AccountManager: ObservableObject {
         }
         selected = updated
         systemClaudeAccountID = target.id
+        // The Mac now holds the target's token and the outgoing profile holds
+        // what the Mac had. Say so here rather than letting a stale answer name
+        // the wrong account until the next resolve.
+        let outgoing = macLogin
+        macLogin = profileLogins[target.id]
+        if let outgoing { profileLogins[saved.id] = outgoing }
         // Record that this app made the change, so the next launch does not read
         // its own switch as someone signing in behind its back.
         lastKnownSystemClaude = target.id
@@ -496,11 +726,12 @@ final class AccountManager: ObservableObject {
     }
 
     private func copyClaudeLogin(from source: ClaudeCredentialLocation, to target: ClaudeCredentialLocation,
-                                 identity: ClaudeCredentialIdentity, allowExpired: Bool = false, completingTransaction: Bool = false) async throws {
+                                 identity: ClaudeCredentialIdentity, allowExpired: Bool = false, completingTransaction: Bool = false,
+                                 sourceOAuthAccount: [String: Any]? = nil) async throws {
         guard !hasShutDown || completingTransaction, let credentials = systemCredentials else { throw ManagedAccountError.cancelled }
         try await Task.detached(priority: .utility) {
             try credentials.copyLogin(from: source, to: target, expectedIdentity: identity,
-                allowExpired: allowExpired, completingTransaction: completingTransaction)
+                allowExpired: allowExpired, completingTransaction: completingTransaction, sourceOAuthAccount: sourceOAuthAccount)
         }.value
     }
 
@@ -508,6 +739,11 @@ final class AccountManager: ObservableObject {
         defer { updateHealth() }
         guard systemCredentials != nil, !systemSwitchPaused, !isSwitchingClaude, !hasShutDown else { return }
         updateSystemClaudeIdentity()
+        if pendingRestore != nil {
+            await restoreSystemClaudeChoice()
+            guard !hasShutDown, !isSwitchingClaude, !systemSwitchPaused else { return }
+            updateSystemClaudeIdentity()
+        }
         guard automaticSelection, !authenticationInProgress,
               let currentID = systemClaudeAccountID,
               let decision = AccountSelection.systemClaudeDecision(accounts: accounts, states: states,
@@ -576,6 +812,7 @@ final class AccountManager: ObservableObject {
         }
         guard !authenticationInProgress, !busyIDs.contains(account.id) else { notice = ManagedAccountError.busy.localizedDescription; return }
         let cancellation = AccountCancellation()
+        let expected = profileIdentity(account)
         loginAccountID = account.id; markBusy(account.id, cancellation: cancellation)
         states[account.id]?.message = "Complete sign-in in your browser. Only this profile will be connected."
         defer { loginAccountID = nil; finish(account.id); updateHealth() }
@@ -599,10 +836,31 @@ final class AccountManager: ObservableObject {
             _ = try await runner.run(AccountCommand(executable: executable, arguments: args, environment: environment,
                                                     directory: profile, timeout: 180), cancellation: cancellation)
             if cancellation.isCancelled { throw ManagedAccountError.cancelled }
+            // The sign-in replaced this profile's token; forget what the old one
+            // was so the new one is asked about, not judged by its predecessor.
+            profileLogins.removeValue(forKey: account.id)
+            loginIdentityCheckedAt.removeValue(forKey: account.id)
             let result = try await read(account, cancellation: cancellation)
             guard result.isConnected else { throw ManagedAccountError.notConnected }
             states[account.id] = result
+            // A fresh reading is a fresh start: nothing about the old login's
+            // failures should keep this row out of the next refresh.
+            pausedRefreshIDs.remove(account.id)
+            externalRetryAfter.removeValue(forKey: account.id)
+            lastReadAt[account.id] = Date()
             notice = "\(account.label) connected. Existing sessions keep their account."
+            // The browser may have been signed in as someone else entirely, and
+            // that someone may already have a row here. Say so now, before the
+            // two rows are merged and one of them disappears.
+            if account.provider == .claude, let before = expected, let after = profileIdentity(account), after != before {
+                if let twin = accounts.first(where: { $0.id != account.id && $0.provider == .claude && profileIdentity($0) == after }) {
+                    notice = String(format: NSLocalizedString("%1$@ was signed in as %2$@, which is already %3$@. The two rows will be merged.", comment: "Reconnect landed on another account"),
+                                    account.label, after.email, twin.label)
+                } else {
+                    notice = String(format: NSLocalizedString("%1$@ is now signed in as %2$@ (it was %3$@).", comment: "Reconnect changed account"),
+                                    account.label, after.email, before.email)
+                }
+            }
         } catch {
             states[account.id]?.message = error.localizedDescription
             notice = error.localizedDescription
@@ -728,6 +986,14 @@ final class AccountManager: ObservableObject {
         guard !hasShutDown, !busyIDs.contains(account.id),
               loginAccountID == nil || loginAccountID == account.id,
               authorizationAccountID == nil || authorizationAccountID == account.id else { return }
+        // A profile holding another account's login would report that account's
+        // usage under this row's name. Say what it is instead of reading it.
+        if let stranger = profileHoldsAnotherLogin(account) {
+            markProfileHoldingAnotherLogin(account, stranger: stranger)
+            lastReadAt[account.id] = Date()
+            updateHealth()
+            return
+        }
         let cancellation = AccountCancellation(); markBusy(account.id, cancellation: cancellation)
         defer { finish(account.id); updateHealth() }
         do {
@@ -816,8 +1082,13 @@ final class AccountManager: ObservableObject {
     func refreshAll() async {
         guard !hasShutDown, !authenticationInProgress else { return }
         recoverClaudeCacheMarkers()
-        updateSystemClaudeIdentity()
         let audit = auditQueueIfDue()
+        // Who is really where, before anything is read or moved. The audit runs
+        // first so a profile it un-pauses can be paused again here if it is
+        // still holding someone else's login.
+        await resolveLoginIdentities()
+        guard !hasShutDown, !Task.isCancelled else { return }
+        updateSystemClaudeIdentity()
         await refreshAccounts(accounts.filter {
             !pausedRefreshIDs.contains($0.id)
                 && externalRetryAfter[$0.id].map { $0 > Date() } != true
@@ -1143,7 +1414,13 @@ final class AccountManager: ObservableObject {
     }
 
     func launch(_ account: ManagedAccount, project: URL) async {
-        guard !hasShutDown, !authenticationInProgress else { return }
+        guard !hasShutDown else { return }
+        // Doing nothing here is what "the account stays stuck" looked like: the
+        // click landed while a sign-in was still open in the browser.
+        guard !authenticationInProgress else {
+            notice = NSLocalizedString("Finish the sign-in that is still open first, then use the account.", comment: "Switch refused during sign-in")
+            return
+        }
         defer { updateHealth() }
         do {
             if account.provider == .claude, systemCredentials != nil {

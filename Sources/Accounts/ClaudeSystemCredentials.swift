@@ -233,6 +233,56 @@ final class ClaudeSystemCredentials {
         return try Self.identity(in: Self.object(data))
     }
 
+    /// The whole `oauthAccount` object Claude wrote at sign-in, for copying into
+    /// another config verbatim. Nil when this location was never signed in.
+    func oauthAccount(at location: ClaudeCredentialLocation) throws -> [String: Any]? {
+        try Self.validateLocation(location)
+        guard let data = try Self.readConfig(location.configURL) else { return nil }
+        let object = try Self.object(data)
+        guard try Self.identity(in: object) != nil else { return nil }
+        return object["oauthAccount"] as? [String: Any]
+    }
+
+    /// The saved access token, read and nothing else: no renewal, no lock on
+    /// Claude's storage, no request. Nil when there is no saved login. This is
+    /// what the app asks the service about to learn who a login really is.
+    func accessToken(at location: ClaudeCredentialLocation) throws -> String? {
+        try checkRunning()
+        try Self.validateLocation(location)
+        guard let secret = try keychain.read(service: location.service, account: account) else { return nil }
+        guard let oauth = try Self.object(secret.data)["claudeAiOauth"] as? [String: Any] else { return nil }
+        guard let token = oauth["accessToken"] as? String, !token.isEmpty else { return nil }
+        return token
+    }
+
+    /// Puts the right name on a login whose secret and name disagree. Only the
+    /// `oauthAccount` object changes; the secret is not touched, and nothing is
+    /// written when the name is already right. Returns true when it wrote.
+    @discardableResult
+    func rewriteIdentity(at location: ClaudeCredentialLocation, oauthAccount: [String: Any]) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        try checkRunning()
+        try Self.validateLocation(location)
+        guard let wanted = try Self.identity(in: ["oauthAccount": oauthAccount]) else {
+            throw ClaudeSystemCredentialError.malformedData
+        }
+        let storageLock = try ClaudeStorageWriteLock(directory: location.directory, checkCancellation: { try self.checkRunning() })
+        defer { storageLock.release() }
+        let configLock = try ClaudeStorageWriteLock(lockURL: URL(fileURLWithPath: location.configURL.path + ".lock"),
+                                                   staleAfter: 10, checkCancellation: { try self.checkRunning() })
+        defer { configLock.release() }
+        let oldConfig = try Self.readConfig(location.configURL)
+        var object = try oldConfig.map(Self.object) ?? [:]
+        if (try? Self.identity(in: object)) == wanted { return false }
+        object["oauthAccount"] = oauthAccount
+        let bytes = try Self.encode(object)
+        try storageLock.check()
+        try configLock.check()
+        try writeConfig(bytes, location.configURL, oldConfig)
+        return true
+    }
+
     struct SubscriptionLogin {
         let identity: ClaudeCredentialIdentity
         let accessToken: String
@@ -408,9 +458,14 @@ final class ClaudeSystemCredentials {
         }
     }
 
+    /// `sourceOAuthAccount` is the name to carry across when the caller knows who
+    /// the source secret belongs to better than the source config does — the
+    /// Mac's `.claude.json` is rewritten by every running Claude session with
+    /// whatever account that session started under. It must describe
+    /// `expectedIdentity`; the source config is then not consulted for the name.
     func copyLogin(from source: ClaudeCredentialLocation, to target: ClaudeCredentialLocation,
                    expectedIdentity: ClaudeCredentialIdentity, allowExpired: Bool = false,
-                   completingTransaction: Bool = false) throws {
+                   completingTransaction: Bool = false, sourceOAuthAccount: [String: Any]? = nil) throws {
         lock.lock()
         defer { lock.unlock() }
         func checkCancellation() throws { if !completingTransaction { try checkRunning() } }
@@ -440,7 +495,16 @@ final class ClaudeSystemCredentials {
         let sourceConfig = try Self.readConfig(source.configURL)
         guard let sourceConfig else { throw ClaudeSystemCredentialError.missingLogin }
         let sourceObject = try Self.object(sourceConfig)
-        guard try Self.identity(in: sourceObject) == expectedIdentity else { throw ClaudeSystemCredentialError.identityMismatch }
+        let carriedOAuthAccount: Any?
+        if let sourceOAuthAccount {
+            guard try Self.identity(in: ["oauthAccount": sourceOAuthAccount]) == expectedIdentity else {
+                throw ClaudeSystemCredentialError.identityMismatch
+            }
+            carriedOAuthAccount = sourceOAuthAccount
+        } else {
+            guard try Self.identity(in: sourceObject) == expectedIdentity else { throw ClaudeSystemCredentialError.identityMismatch }
+            carriedOAuthAccount = sourceObject["oauthAccount"]
+        }
         guard let sourceSecret = try keychain.read(service: source.service, account: account) else { throw ClaudeSystemCredentialError.missingLogin }
         let sourcePayload = try Self.object(sourceSecret.data)
         guard let oauth = sourcePayload["claudeAiOauth"] as? [String: Any],
@@ -456,7 +520,7 @@ final class ClaudeSystemCredentials {
         let oldSecret = try keychain.read(service: target.service, account: account)
         var newSecret = try oldSecret.map { try Self.object($0.data) } ?? [:]
         newSecret["claudeAiOauth"] = oauth
-        newConfig["oauthAccount"] = sourceObject["oauthAccount"]
+        newConfig["oauthAccount"] = carriedOAuthAccount
         let secretBytes = try Self.encodeKeychainPayload(newSecret)
         let configBytes = try Self.encode(newConfig)
         try Self.validateLocation(source)

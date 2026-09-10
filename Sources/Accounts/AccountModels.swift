@@ -211,6 +211,10 @@ enum AccountSelection {
             case runningOut(minutes: Double)
             /// The account the person chose is available again.
             case preferredReturned
+            /// Something outside the app — a Claude session started under the
+            /// named account, writing its renewed token back — replaced the
+            /// login this app had set, and the app put its choice back.
+            case restored(displacedBy: String)
         }
         let target: ManagedAccount
         let cause: Cause
