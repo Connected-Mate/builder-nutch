@@ -262,6 +262,20 @@ final class ClaudeLoginIdentityTests: XCTestCase {
         XCTAssertNil(f.manager.systemClaudeAccountID)
     }
 
+    // MARK: - Names
+
+    @MainActor
+    func testRowsStillCalledClaudeNTakeTheirNameFromTheAddress() async throws {
+        let f = try fixture()
+        let c = try XCTUnwrap(f.accounts["C"])
+        try f.manager.rename(c, to: "Boulot")
+        await f.manager.refreshAll()
+        let labels = Dictionary(uniqueKeysWithValues: f.manager.accounts.map { ($0.id, $0.label) })
+        XCTAssertEqual(labels[f.accounts["A"]!.id], "A", "Named after its address once that is known")
+        XCTAssertEqual(labels[f.accounts["B"]!.id], "B")
+        XCTAssertEqual(labels[c.id], "Boulot", "A name the person chose is theirs")
+    }
+
     // MARK: - The resolver
 
     private final class Transport: URLProtocol {

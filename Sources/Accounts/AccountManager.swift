@@ -224,6 +224,31 @@ final class AccountManager: ObservableObject {
         return account
     }
 
+    /// Gives every row still called "Claude 3" the name its address suggests,
+    /// once the address is known. Runs after readings and after a sign-in; a
+    /// name the person chose is never touched. Two addresses that would get the
+    /// same name are told apart by their next segment, in catalog order.
+    func adoptEmailLabels() {
+        guard loaded, catalogError == nil else { return }
+        var updated = accounts
+        var taken = Set(accounts.map { $0.label.lowercased() })
+        var changed = false
+        for index in updated.indices {
+            let account = updated[index]
+            guard AccountNaming.isDefault(account.label, provider: account.provider),
+                  let email = states[account.id]?.email ?? account.emailHint, email.contains("@") else { continue }
+            taken.remove(account.label.lowercased())
+            guard let name = AccountNaming.suggested(email: email, taken: taken),
+                  (try? AccountStorage.validLabel(name)) != nil else { taken.insert(account.label.lowercased()); continue }
+            updated[index].label = name
+            taken.insert(name.lowercased())
+            changed = true
+        }
+        guard changed, (try? persist(accounts: updated, selected: selected)) != nil else { return }
+        accounts = updated
+        updateHealth()
+    }
+
     func rename(_ account: ManagedAccount, to label: String) throws {
         guard let index = accounts.firstIndex(where: { $0.id == account.id }) else { throw ManagedAccountError.unavailable }
         var updated = accounts; updated[index].label = try AccountStorage.validLabel(label)
@@ -859,7 +884,9 @@ final class AccountManager: ObservableObject {
             pausedRefreshIDs.remove(account.id)
             externalRetryAfter.removeValue(forKey: account.id)
             lastReadAt[account.id] = Date()
-            notice = "\(account.label) connected. Existing sessions keep their account."
+            adoptEmailLabels()
+            let label = accounts.first(where: { $0.id == account.id })?.label ?? account.label
+            notice = "\(label) connected. Existing sessions keep their account."
             // The browser may have been signed in as someone else entirely, and
             // that someone may already have a row here. Say so now, before the
             // two rows are merged and one of them disappears.
@@ -1111,6 +1138,7 @@ final class AccountManager: ObservableObject {
         guard !hasShutDown, !Task.isCancelled else { return }
         if automaticDiscovery { await discoverExistingAccounts() }
         mergeDuplicateAccounts()
+        adoptEmailLabels()
         reconcileAutomaticSelection()
         await reconcileSystemClaudeSelection()
     }
