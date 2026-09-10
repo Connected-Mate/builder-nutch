@@ -80,6 +80,11 @@ final class NotchWindowController {
     private var foldWork: DispatchWorkItem?
     private var automaticSwitchWork: DispatchWorkItem?
     private var resolutionWork: DispatchWorkItem?
+    /// The last piece of good news this notch has dealt with, shown or declined.
+    /// The account layer keeps its resolution published long after the event,
+    /// and `updateNotch` re-offers it on every change, so without this the
+    /// green came back every minute for as long as that value stayed set.
+    private var shownResolutionID: String?
     private var accountDrag: (source: UUID, target: UUID)?
     /// Whether we have pushed the pointing hand onto the cursor stack.
     private var isPointing = false
@@ -774,8 +779,10 @@ final class NotchWindowController {
         // Red wins. Fixing one of two problems has not made the notch safe to
         // look away from, so the green is not shown at all rather than shown
         // and then contradicted.
+        guard shownResolutionID != resolution.id else { return }
+        // A receipt is news once. Declined or shown, it has been dealt with.
+        shownResolutionID = resolution.id
         guard visibility != .hidden, model.attention == nil else { return }
-        guard model.resolution?.id != resolution.id else { return }
 
         resolutionWork?.cancel()
         withAnimation(NotchMotion.skinRaise) { model.resolution = resolution }

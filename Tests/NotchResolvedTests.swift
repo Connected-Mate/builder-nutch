@@ -324,6 +324,27 @@ final class ResolutionHoldTests: XCTestCase {
         XCTAssertEqual(controller.model.skin, .calm, "A repeat restarted the hold")
     }
 
+    /// The manager keeps the resolution published after the green has let go,
+    /// and re-offers it on every change — a refresh, a hover. It is one piece
+    /// of news, and news is not new the second time.
+    func testTheSameResolutionNeverComesBackOnceItHasLetGo() {
+        let controller = controller(hold: 0.2)
+        controller.show()
+        defer { controller.apply(.hidden); controller.stop() }
+
+        let news = resolution()
+        controller.presentResolution(news)
+        XCTAssertEqual(controller.model.skin, .resolved)
+        pump(0.3)
+        XCTAssertEqual(controller.model.skin, .calm)
+        controller.presentResolution(news)
+        XCTAssertEqual(controller.model.skin, .calm, "Old news was shown again")
+        XCTAssertNil(controller.model.resolution)
+        // A genuinely new event is still shown.
+        controller.presentResolution(resolution(id: "later"))
+        XCTAssertEqual(controller.model.skin, .resolved)
+    }
+
     /// Scenario: automatic handoff with no prior red. Short green, carrying the
     /// sentence that says which limit actually ran out.
     func testAHandoffWithNoPriorProblemStillShowsItsReason() {
