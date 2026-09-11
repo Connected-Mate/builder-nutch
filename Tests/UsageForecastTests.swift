@@ -78,6 +78,12 @@ final class UsageForecastTests: XCTestCase {
     }
 
     func testHeadroomReadsLikeAClock() {
+        // A burn rate of almost nothing yields a finite but absurd figure; it
+        // crashed the accounts window when converted to an integer.
+        XCTAssertNil(UsageForecast.headroom(minutes: 1e300))
+        XCTAssertNil(UsageForecast.headroom(minutes: Double(Int.max) * 4))
+        XCTAssertNil(UsageForecast.headroom(minutes: UsageForecast.longestHeadroomMinutes + 1))
+        XCTAssertNotNil(UsageForecast.headroom(minutes: UsageForecast.longestHeadroomMinutes))
         XCTAssertEqual(UsageForecast.headroom(minutes: 0), "1 min")
         XCTAssertEqual(UsageForecast.headroom(minutes: 45.4), "45 min")
         XCTAssertEqual(UsageForecast.headroom(minutes: 120), "2 h")

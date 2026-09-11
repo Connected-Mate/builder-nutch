@@ -86,8 +86,13 @@ struct UsageForecast: Equatable {
 
     /// "3 h 10" or "45 min". Rounded the way a person reads a clock, never to a
     /// precision the estimate does not have.
+    /// Beyond two weeks there is no headroom worth naming: every window resets
+    /// sooner than that, and a near-zero burn rate produces figures that are
+    /// finite in name only — large enough to crash an integer conversion.
+    static let longestHeadroomMinutes: Double = 14 * 24 * 60
+
     static func headroom(minutes: Double) -> String? {
-        guard minutes.isFinite, minutes >= 0 else { return nil }
+        guard minutes.isFinite, minutes >= 0, minutes <= longestHeadroomMinutes else { return nil }
         let whole = Int(minutes.rounded())
         if whole < 60 { return String(format: NSLocalizedString("%d min", comment: "Minutes of usage left"), max(1, whole)) }
         let hours = whole / 60, rest = whole % 60
