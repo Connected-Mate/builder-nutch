@@ -282,8 +282,24 @@ enum AccountSelection {
             order: order, currentID: currentID, thresholdPercent: threshold,
             keepCurrent: spent, now: now)
         guard let candidate, candidate.id != currentID else { return nil }
+        // When nobody clears the threshold, the threshold has done its job —
+        // there is no fuller account to move to — and the rule becomes: use
+        // what is left. The running account is squeezed to the hard floor
+        // before the login moves at all, so six accounts at 91% are six
+        // accounts still working, not a Mac that cannot choose. Then the
+        // fullest of the rest takes its turn, and the loop goes round.
+        let candidateRemaining = states[candidate.id]?.remainingPercent ?? 0
+        if spent, candidateRemaining <= threshold + 0.001 {
+            guard remaining <= Self.hardFloorPercent + 0.001, candidateRemaining > remaining + 0.001 else { return nil }
+        }
         return SystemClaudeDecision(target: candidate, cause: cause)
     }
+
+    /// Below this there is nothing left worth squeezing: the account is handed
+    /// over even if nobody else clears the threshold. Two percent of a weekly
+    /// window is a few messages, and stopping there rather than at zero leaves
+    /// room for the switch itself to happen before the door shuts.
+    static let hardFloorPercent: Double = 2
 
     static func best(provider: AccountProvider, accounts: [ManagedAccount], states: [UUID: ManagedAccountState], now: Date = Date()) -> ManagedAccount? {
         guard provider.supportsAutomaticSelection else { return nil }
@@ -346,7 +362,12 @@ enum AccountSelection {
         // Among the accounts with room, the fullest one buys the person the most
         // working time. Ties keep the order they chose, so rotation stays theirs.
         if let ready = fullest(wrapped.filter(clearsThreshold), states: states) { return ready }
-        return fullest(cycle.filter { keepCurrent || $0.id != currentID }, states: states)
+        // Nobody clears the threshold: the fullest account that is still above
+        // the hard floor. One at the floor has nothing to give.
+        return fullest(cycle.filter { account in
+            (keepCurrent || account.id != currentID)
+                && (states[account.id]?.remainingPercent ?? 0) > Self.hardFloorPercent + 0.001
+        }, states: states)
     }
 
     /// First entry with the highest remaining quota, preserving the given order.

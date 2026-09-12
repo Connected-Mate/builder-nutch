@@ -379,6 +379,7 @@ struct AccountsView: View {
                     Text("Switch at")
                     Text("\(Int(manager.switchThresholdPercent))%").monospacedDigit()
                     Text("remaining.")
+                    Text("When no account is fuller, each one is used down to 2% before moving on.")
                 }
                 .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
             }
@@ -841,7 +842,7 @@ private struct RotationSettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Automatic rotation")
                     .font(AppTheme.font(size: 20, weightValue: 650))
-                Text("The current account stays active until it reaches your threshold. Builder Nutch then picks the next available account in this loop.")
+                Text("The current account stays active until it reaches your threshold. Builder Nutch then picks the fullest available account in this loop. When none is fuller, each account is used down to 2% before the next takes over, round and round.")
                     .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }

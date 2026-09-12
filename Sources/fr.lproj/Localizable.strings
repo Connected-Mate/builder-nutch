@@ -31,7 +31,7 @@
 "Switch at" = "Changer à";
 "remaining." = "restants.";
 "Switch when remaining quota reaches" = "Changer lorsque le quota restant atteint";
-"The current account stays active until it reaches your threshold. Builder Nutch then picks the next available account in this loop." = "Le compte actuel reste actif jusqu’au seuil choisi. Builder Nutch prend ensuite le prochain compte disponible dans cette boucle.";
+"The current account stays active until it reaches your threshold. Builder Nutch then picks the fullest available account in this loop. When none is fuller, each account is used down to 2% before the next takes over, round and round." = "Le compte actuel reste actif jusqu’au seuil choisi. Builder Nutch prend ensuite le compte le plus plein de cette boucle. Quand aucun n’est plus plein, chaque compte est utilisé jusqu’à 2 % avant de passer au suivant, en tournant.";
 "The change applies to the next session. Sessions already open keep their account." = "Le changement s’applique à la prochaine session. Les sessions déjà ouvertes gardent leur compte.";
 "Add at least one Claude Code, Codex, or Kimi Code account to create a loop." = "Ajoutez au moins un compte Claude Code, Codex ou Kimi Code pour créer une boucle.";
 "NEXT" = "PROCHAIN";
@@ -267,3 +267,4 @@
 "Shares are estimates that rank sessions against each other. The percentage left on each account comes from Claude itself." = "Les parts sont des estimations qui classent les sessions entre elles. Le pourcentage restant de chaque compte vient de Claude lui-même.";
 "The reading stopped early to keep the app quick, so these figures are a floor." = "La lecture s’est arrêtée tôt pour garder l’app rapide : ces chiffres sont un minimum.";
 "next: %1$@ (%2$@)" = "ensuite : %1$@ (%2$@)";
+"When no account is fuller, each one is used down to 2% before moving on." = "Quand aucun compte n’est plus plein, chacun est utilisé jusqu’à 2 % avant de passer au suivant.";

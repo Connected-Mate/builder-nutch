@@ -86,6 +86,14 @@ final class ClaudeAccountUsageTests: XCTestCase {
         XCTAssertThrowsError(try ClaudeAccountUsage.state(status: status, usage: data(["rate_limits_available": 1]), now: now))
         let blocked = try ClaudeAccountUsage.state(status: status, usage: data(["rate_limits_available": true, "rate_limits": ["limits": [["kind": "workspace", "severity": "blocked", "percent": 1]]]]), now: now)
         XCTAssertNotNil(blocked.message)
+        // "critical" is what the service says past 90%. The account still
+        // answers; calling it restricted left six subscriptions unusable at 91%.
+        let critical = try ClaudeAccountUsage.state(status: status, usage: data(["rate_limits_available": true, "rate_limits": [
+            "five_hour": ["utilization": 20], "seven_day": ["utilization": 50],
+            "limits": [["kind": "weekly_scoped", "severity": "critical", "percent": 91, "is_active": true,
+                        "scope": ["model": ["display_name": "Fable"]]]]]]), now: now)
+        XCTAssertNil(critical.message, "A high window is not a locked one")
+        XCTAssertEqual(critical.remainingPercent.map { Int($0.rounded()) }, 9)
         let newBucket = try ClaudeAccountUsage.state(status: status, usage: data(["rate_limits_available": true, "rate_limits": ["future_bucket": ["utilization": 100]]]), now: now)
         XCTAssertEqual(newBucket.remainingPercent, 0)
     }

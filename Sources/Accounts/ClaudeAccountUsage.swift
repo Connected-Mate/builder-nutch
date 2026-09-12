@@ -91,7 +91,12 @@ enum ClaudeAccountUsage {
                 // is_active describes applicability to a selected model, not the
                 // existence of a limit. All subscription constraints remain visible.
                 if !state.windows.contains(where: { $0.label == item.label && $0.usedFraction == item.usedFraction }) { state.windows.append(item) }
-                if let severity = text(row["severity"]), !["normal", "warning"].contains(severity) { blocking = true }
+                // "critical" is what the service calls a window past 90%. It is a
+                // level, not a lock: the account still answers, and treating it
+                // as shut is what left every subscription unusable at 91% while
+                // the person watched six rings sit near full. Only a stated lock
+                // closes the door; a spent window closes itself at 100%.
+                if let severity = text(row["severity"]), Self.lockingSeverities.contains(severity.lowercased()) { blocking = true }
                 if boolean(row["blocking"]) == true || boolean(row["is_blocking"]) == true { blocking = true }
             }
         }
@@ -108,6 +113,9 @@ enum ClaudeAccountUsage {
     /// per-model weekly allowance is a specific, temporary and understandable
     /// thing, and the person is entitled to be told which model and until when.
     /// The account stays out of rotation either way, but for a reason they can read.
+    /// Severities that mean "shut", as opposed to "high".
+    static let lockingSeverities: Set<String> = ["blocked", "blocking", "locked", "exceeded", "restricted", "suspended"]
+
     static func restriction(_ state: ManagedAccountState, now: Date) -> String {
         let spent = state.windows.filter { ($0.usedFraction ?? 0) >= 1 }
         if let model = spent.first(where: { $0.isModelSpecific }), spent.allSatisfy(\.isModelSpecific) {

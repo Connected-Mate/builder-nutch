@@ -144,13 +144,9 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// windows: it is not a measurement, it is a door being shut.
     var block: UsageBlock?
 
-    /// The number on the cell: the provider's declared primary window — for
-    /// Claude, the current session.
-    ///
-    /// Not the most-constrained window, which is what the design spec asks for.
-    /// Picking whichever limit is highest means the headline silently changes
-    /// meaning — session one minute, weekly the next — and disagrees with
-    /// Claude's own panel, which always leads with the session.
+    /// The number on the cell: the window the provider declared as the
+    /// headline. For Claude that is the one that binds, chosen where the state
+    /// is known, so the ring agrees with the rotation and the account rows.
     ///
     /// If the declared window is missing from the response the cell shows no
     /// reading rather than promoting a different one. A blank is honest; a

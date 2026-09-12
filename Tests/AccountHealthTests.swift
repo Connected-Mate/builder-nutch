@@ -68,6 +68,29 @@ final class AccountHealthTests: XCTestCase {
             accounts[1].id, "Equal quotas keep the order the person arranged")
     }
 
+    /// Six accounts at 91%: the threshold has nobody to send us to, so it steps
+    /// aside. The running account is used down to the floor, and only then
+    /// does the fullest of the rest take its turn — round and round, never a
+    /// Mac that cannot choose.
+    func testWhenNobodyClearsTheThresholdEachAccountIsSqueezedToTheFloorThenTheLoopGoesRound() {
+        let accounts = self.accounts(3)
+        var states = [accounts[0].id: state(remaining: 5), accounts[1].id: state(remaining: 9), accounts[2].id: state(remaining: 7)]
+        XCTAssertNil(AccountSelection.systemClaudeDecision(accounts: accounts, states: states, order: accounts.map(\.id),
+            currentID: accounts[0].id, preferredID: nil, thresholdPercent: 15, now: now),
+            "Nobody is fuller than the threshold; the running account is squeezed first")
+        states[accounts[0].id] = state(remaining: 2)
+        let decision = AccountSelection.systemClaudeDecision(accounts: accounts, states: states, order: accounts.map(\.id),
+            currentID: accounts[0].id, preferredID: nil, thresholdPercent: 15, now: now)
+        XCTAssertEqual(decision?.target.id, accounts[1].id, "At the floor, the fullest of the rest takes over")
+        states[accounts[1].id] = state(remaining: 1.5)
+        states[accounts[2].id] = state(remaining: 1)
+        XCTAssertNil(AccountSelection.rotating(provider: .claude, accounts: accounts, states: states, order: accounts.map(\.id),
+            currentID: accounts[0].id, thresholdPercent: 15, keepCurrent: false, now: now),
+            "An account at the floor has nothing to give and is never the fallback")
+        XCTAssertNil(AccountSelection.systemClaudeDecision(accounts: accounts, states: states, order: accounts.map(\.id),
+            currentID: accounts[0].id, preferredID: nil, thresholdPercent: 15, now: now))
+    }
+
     func testThePreferredAccountTakesItsPlaceBackOnceItsWindowHasRolledOver() {
         let accounts = self.accounts(2)
         // The stand-in is well down, so handing back is worth the interruption.

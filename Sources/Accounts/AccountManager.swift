@@ -1508,11 +1508,17 @@ final class AccountManager: ObservableObject {
         } catch { notice = error.localizedDescription }
     }
 
-    /// Which window the ring means. Declared per provider rather than left to
-    /// position, so a window dropping out of a response blanks the cell instead
-    /// of quietly promoting a different one into the headline's place.
-    static func headlineID(for account: ManagedAccount) -> String {
-        if account.provider == .claude { return "five_hour" }
+    /// Which window the ring means. Declared rather than left to position, so
+    /// a window dropping out of a response blanks the cell instead of quietly
+    /// promoting a different one into the headline's place.
+    ///
+    /// For Claude it is the window that binds — the fullest one — because that
+    /// is the number every other part of this app acts on: the rotation, the
+    /// account rows, the health line. A ring that said "0%" for the session
+    /// while the weekly model limit sat at 97% was the notch and the accounts
+    /// window disagreeing about the same subscription.
+    static func headlineID(for account: ManagedAccount, state: ManagedAccountState? = nil) -> String {
+        if account.provider == .claude { return state?.bindingWindow?.id ?? "five_hour" }
         // Cursor's dashboard leads with "Your included usage · N% used", and so
         // does this. `CursorUsage` names that window "included".
         if account.readsDesktopUsage { return "included" }
@@ -1535,7 +1541,7 @@ final class AccountManager: ObservableObject {
                                 accountEmail: email,
                                 glyph: provider.glyph, fidelity: account.isBrowserOnly ? .manual : .official,
                                 status: status, windows: state.windows,
-                                headlineID: Self.headlineID(for: account),
+                                headlineID: Self.headlineID(for: account, state: state),
                                 block: exhausted.map { UsageBlock(reason: "\($0.label) reached", resetsAt: $0.resetsAt) })
     }
 
