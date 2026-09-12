@@ -677,6 +677,9 @@ final class AccountManager: ObservableObject {
         case .preferredReturned:
             return String(format: NSLocalizedString("The account you chose is available again, so %1$@ handed back.", comment: "Switch reason"),
                           account.label)
+        case .signInLost:
+            return String(format: NSLocalizedString("%1$@'s sign-in stopped working, so the Mac moved on. Sign in to %1$@ again when you like.", comment: "Switch reason"),
+                          account.label)
         case .restored(let displacedBy):
             return String(format: NSLocalizedString("Something outside Builder Nutch — usually a Claude session still running as %1$@ — put it back on this Mac, so your choice was restored. To use %1$@ instead, choose it here; close and reopen older Claude sessions so they follow.", comment: "Switch reason"),
                           displacedBy)
@@ -781,9 +784,25 @@ final class AccountManager: ObservableObject {
             updateSystemClaudeIdentity()
         }
         guard !systemSwitchPaused else { return }
-        guard automaticSelection, !authenticationInProgress,
-              let currentID = systemClaudeAccountID,
-              let decision = AccountSelection.systemClaudeDecision(accounts: accounts, states: states,
+        guard automaticSelection, !authenticationInProgress, let currentID = systemClaudeAccountID else { return }
+        // A dead login is not a spent one, and the ordinary decision cannot
+        // read it: it has no usage to compare. Left there, every new session
+        // on this Mac fails until someone signs in. Moving to an account that
+        // works is the whole point of having several.
+        if let current = states[currentID], current.requiresSignIn, !current.isBusy, !busyIDs.contains(currentID),
+           let rescue = AccountSelection.rotating(provider: .claude, accounts: accounts, states: states,
+                order: rotationOrder[.claude] ?? [], currentID: currentID,
+                thresholdPercent: 0, keepCurrent: false, now: Date()),
+           rescue.id != currentID, !busyIDs.contains(rescue.id) {
+            do { try await activateSystemClaude(rescue, automatic: true, cause: .signInLost) }
+            catch {
+                guard !hasShutDown else { return }
+                systemSwitchPaused = true
+                notice = NSLocalizedString("Automatic Claude switching is paused. Use account to retry when ready.", comment: "") + " " + error.localizedDescription
+            }
+            return
+        }
+        guard let decision = AccountSelection.systemClaudeDecision(accounts: accounts, states: states,
                 order: rotationOrder[.claude] ?? [], currentID: currentID,
                 preferredID: selected[.claude], thresholdPercent: switchThresholdPercent,
                 forecasts: usageForecasts, switchAheadMinutes: switchAheadMinutes),

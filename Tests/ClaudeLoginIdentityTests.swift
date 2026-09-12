@@ -35,6 +35,8 @@ final class ClaudeLoginIdentityTests: XCTestCase {
         init(keychain: Keychain) { self.keychain = keychain }
         func read(_ location: ClaudeCredentialLocation, cancellation: AccountCancellation) async throws -> ManagedAccountState {
             guard let token = keychain.token(location.service) else { throw ClaudeSystemCredentialError.missingLogin }
+            // A token the service refuses, the way a revoked refresh token reads.
+            if token.hasPrefix("dead-") { throw ClaudeSystemCredentialError.expiredLogin }
             let owner = String(token.dropFirst("fake-".count))
             return ManagedAccountState(isConnected: true, email: "\(owner)@example.test", plan: "max",
                 windows: [LimitWindow(id: "five_hour", label: "5h limit", usedFraction: (used[owner] ?? 50) / 100,
@@ -260,6 +262,34 @@ final class ClaudeLoginIdentityTests: XCTestCase {
         XCTAssertEqual(f.keychain.token(f.mac.service), "fake-Z", "The stranger's login was not thrown away")
         XCTAssertTrue(f.manager.notice?.contains("Z@example.test") == true, "Says who is there: \(f.manager.notice ?? "-")")
         XCTAssertNil(f.manager.systemClaudeAccountID)
+    }
+
+    @MainActor
+    func testADeadMacLoginIsLeftForAnAccountThatWorks() async throws {
+        let f = try fixture()
+        let a = try XCTUnwrap(f.accounts["A"]), b = try XCTUnwrap(f.accounts["B"])
+        await f.manager.refreshAll()
+        XCTAssertEqual(f.manager.systemClaudeAccountID, a.id)
+        // A's refresh token was revoked under it: the Mac and A's profile both
+        // hold a token the service refuses.
+        try Self.seed(f.mac, name: "A", token: "A", keychain: f.keychain)
+        f.keychain.items[f.mac.service] = try Self.dead(f.mac, name: "A")
+        f.keychain.items[f.location(a).service] = try Self.dead(f.location(a), name: "A")
+        // The next reading finds out; the reconcile that follows acts on it.
+        await f.manager.refresh(a)
+        await f.manager.refreshAll()
+        XCTAssertTrue(f.manager.state(for: a).requiresSignIn, f.manager.state(for: a).message ?? "-")
+        XCTAssertNotEqual(f.manager.systemClaudeAccountID, a.id, "A login that no longer works is not kept on the Mac")
+        XCTAssertEqual(f.manager.systemClaudeAccountID, b.id, "The fullest working account takes over")
+        XCTAssertEqual(f.keychain.token(f.mac.service), "fake-B")
+        XCTAssertEqual(f.manager.attention?.kind, .reconnect, "A still wants a sign-in, at leisure")
+        XCTAssertEqual(f.manager.attention?.accountID, a.id)
+    }
+
+    private static func dead(_ location: ClaudeCredentialLocation, name: String) throws -> ClaudeCredentialSnapshot {
+        let bytes = try JSONSerialization.data(withJSONObject: ["claudeAiOauth": ["accessToken": "dead-\(name)",
+            "refreshToken": "dead-refresh-\(name)", "expiresAt": Date().addingTimeInterval(3600).timeIntervalSince1970 * 1000]])
+        return ClaudeCredentialSnapshot(reference: Data(location.service.utf8), data: bytes)
     }
 
     // MARK: - Names

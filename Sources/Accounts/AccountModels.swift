@@ -219,6 +219,10 @@ enum AccountSelection {
             /// named account, writing its renewed token back — replaced the
             /// login this app had set, and the app put its choice back.
             case restored(displacedBy: String)
+            /// The login on the Mac stopped working — expired or revoked — while
+            /// another account could take over. Waiting for a sign-in would have
+            /// left every new session failing in the meantime.
+            case signInLost
         }
         let target: ManagedAccount
         let cause: Cause

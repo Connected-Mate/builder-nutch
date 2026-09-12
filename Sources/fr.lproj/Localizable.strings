@@ -268,3 +268,4 @@
 "The reading stopped early to keep the app quick, so these figures are a floor." = "La lecture s’est arrêtée tôt pour garder l’app rapide : ces chiffres sont un minimum.";
 "next: %1$@ (%2$@)" = "ensuite : %1$@ (%2$@)";
 "When no account is fuller, each one is used down to 2% before moving on." = "Quand aucun compte n’est plus plein, chacun est utilisé jusqu’à 2 % avant de passer au suivant.";
+"%1$@'s sign-in stopped working, so the Mac moved on. Sign in to %1$@ again when you like." = "La connexion de %1$@ ne fonctionne plus : le Mac est passé à un autre compte. Reconnectez %1$@ quand vous voulez.";
