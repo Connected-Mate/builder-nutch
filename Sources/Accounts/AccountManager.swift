@@ -1528,6 +1528,64 @@ final class AccountManager: ObservableObject {
         } catch { notice = error.localizedDescription }
     }
 
+    /// Explicit relay launches keep the chosen account, independently of rotation.
+    func probeClaudeOpenAIModels(_ account: ManagedAccount, cancellation: AccountCancellation,
+                                node: URL? = nil, relay: URL? = nil) async throws -> [ClaudeOpenAIRelay.Model] {
+        guard !hasShutDown, account.provider == .codex, state(for: account).isConnected else { throw ManagedAccountError.notConnected }
+        guard let node = node ?? ClaudeOpenAIRelay.nodeExecutable() else { throw ClaudeOpenAIRelay.Failure.missingNode }
+        let script = try relay ?? ClaudeOpenAIRelay.bundledScript()
+        let (codex, profile, environment) = try prepare(account)
+        do {
+            let data = try await runner.run(AccountCommand(executable: node,
+                arguments: [script.path, "probe", "--codex", codex.path], environment: environment,
+                directory: profile, timeout: 30), cancellation: cancellation)
+            guard !cancellation.isCancelled, !Task.isCancelled else { throw ManagedAccountError.cancelled }
+            return try ClaudeOpenAIRelay.models(from: data)
+        } catch {
+            if cancellation.isCancelled || Task.isCancelled { throw ManagedAccountError.cancelled }
+            if let failure = error as? ClaudeOpenAIRelay.Failure { throw failure }
+            throw ClaudeOpenAIRelay.Failure.probeFailed
+        }
+    }
+
+    func launchClaudeOpenAI(codex account: ManagedAccount, claudeAccount: ManagedAccount?, project: URL,
+                           model: String, mode: ClaudeOpenAIRelay.Mode, history: ClaudeOpenAIRelay.History,
+                           cancellation: AccountCancellation, node: URL? = nil, relay: URL? = nil) async throws {
+        guard !hasShutDown, !authenticationInProgress else { throw ManagedAccountError.unavailable }
+        var directory: ObjCBool = false
+        guard project.isFileURL, FileManager.default.fileExists(atPath: project.path, isDirectory: &directory),
+              directory.boolValue else { throw CocoaError(.fileReadNoSuchFile) }
+        guard let node = node ?? ClaudeOpenAIRelay.nodeExecutable() else { throw ClaudeOpenAIRelay.Failure.missingNode }
+        let script = try relay ?? ClaudeOpenAIRelay.bundledScript()
+        guard let claude = resolveExecutable(.claude) else { throw ManagedAccountError.missingCLI(.claude) }
+        // Recheck at the click: a catalogue from another account or an old sheet
+        // must never silently choose a different model or subscription.
+        let models = try await probeClaudeOpenAIModels(account, cancellation: cancellation, node: node, relay: script)
+        guard models.contains(where: { $0.id == model }) else { throw ClaudeOpenAIRelay.Failure.invalidModel }
+        guard !hasShutDown, !cancellation.isCancelled, !Task.isCancelled,
+              !authenticationInProgress else { throw ManagedAccountError.cancelled }
+        let (codex, _, codexEnvironment) = try prepare(account)
+        var environment = codexEnvironment
+        if let chosen = claudeAccount {
+            guard chosen.provider == .claude,
+                  let current = accounts.first(where: { $0.id == chosen.id && $0.provider == .claude }) else { throw ManagedAccountError.unavailable }
+            let profile = try usableStorage().profile(current)
+            if current.existingProfile?.usesDefaultClaudeHome != true {
+                environment["CLAUDE_CONFIG_DIR"] = profile.path
+            }
+        }
+        let scripts = try usableStorage().root.appendingPathComponent("launchers", isDirectory: true)
+        try AccountStorage.privateDirectory(scripts)
+        let launcher = scripts.appendingPathComponent("\(UUID().uuidString).command")
+        let text = ClaudeOpenAIRelay.launchScript(node: node, relay: script, codex: codex, claude: claude,
+            project: project, model: model, mode: mode, history: history, environment: environment)
+        try AccountStorage.write(Data(text.utf8), to: launcher, mode: 0o700)
+        guard openTerminal(launcher) else { throw CocoaError(.executableLoad) }
+        notice = mode == .auto
+            ? NSLocalizedString("Claude Code opened in Terminal. It starts with Claude and switches to your OpenAI model if Claude reports a usage limit.", comment: "Automatic relay launched")
+            : NSLocalizedString("Claude Code opened in Terminal with your chosen OpenAI model. Resume a conversation there to keep its history.", comment: "Relay launched")
+    }
+
     /// Which window the ring means. Declared rather than left to position, so
     /// a window dropping out of a response blanks the cell instead of quietly
     /// promoting a different one into the headline's place.

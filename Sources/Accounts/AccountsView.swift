@@ -23,6 +23,7 @@ struct AccountsView: View {
     @State private var connecting: ManagedAccount?
     @State private var personalizing: ManagedAccount?
     @State private var showingRotation = false
+    @State private var showingOpenAIRelay = false
     @State private var removing: ManagedAccount?
     @State private var localError: String?
     @State private var repairing = false
@@ -92,6 +93,10 @@ struct AccountsView: View {
         .sheet(item: $personalizing) { account in
             PersonalizeAssistantView(account: account, manager: manager) { localError = $0 }
                 .preferredColorScheme(.light)
+        }
+        .sheet(isPresented: $showingOpenAIRelay) {
+            ClaudeOpenAIRelayView(manager: manager, project: $projectURL, hidePersonalDetails: hidePersonalDetails)
+                .environment(\.locale, (AppLanguage(rawValue: appLanguage) ?? .system).locale)
         }
         .sheet(isPresented: $showingRotation) {
             RotationSettingsView(manager: manager, provider: filter) { localError = $0 }
@@ -302,7 +307,12 @@ struct AccountsView: View {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     Text("ACCOUNT").frame(maxWidth: .infinity, alignment: .leading)
-                    Text(LocalizedStringKey(preferences.usageDisplayMode.columnTitle)).frame(width: 110)
+                    VStack(spacing: 3) {
+                        Text(LocalizedStringKey(preferences.usageDisplayMode.columnTitle))
+                        if filter == .claude || filter == .codex {
+                            Text("All models").tracking(0)
+                        }
+                    }.frame(width: 110)
                     Text(filter == .claude ? "NEXT ACCOUNT" : "NEXT SESSION").frame(width: 110)
                 }
                 .font(AppTheme.font(size: 9, weightValue: 500)).tracking(0.8).foregroundStyle(AppTheme.muted)
@@ -411,6 +421,11 @@ struct AccountsView: View {
                     Text("· next in rotation").foregroundStyle(AppTheme.muted)
                 }
                 Spacer(minLength: 8)
+                if selectedAccount.provider == .claude || selectedAccount.provider == .codex {
+                    Button(selectedAccount.provider == .claude ? "Use OpenAI…" : "Open Claude Code…") { showingOpenAIRelay = true }
+                        .buttonStyle(WorkspaceSelectionStyle())
+                        .disabled(manager.authenticationInProgress)
+                }
                 if selectedAccount.isBrowserOnly {
                     Button("Open profile") { Task { await manager.launch(selectedAccount, project: projectURL) } }
                         .buttonStyle(WorkspaceSelectionStyle(primary: true))
@@ -574,6 +589,16 @@ private struct CodexUsageGroup: Identifiable {
     }
 }
 
+enum AccountUsageNotice {
+    static func modelLimit(_ state: ManagedAccountState) -> String? {
+        guard state.isConnected, state.isFresh(), (state.accountRemainingPercent ?? 0) > 0,
+              state.accountWindows.allSatisfy({ !$0.isBlocked && ($0.usedFraction ?? 1) < 1 }),
+              let limit = state.windows.first(where: { $0.isModelSpecific && ($0.isBlocked || ($0.usedFraction ?? 0) >= 1) }),
+              let name = limit.modelName else { return nil }
+        return String(format: NSLocalizedString("%@ is at its limit. Choose another model with /model.", comment: "Model-only limit"), name)
+    }
+}
+
 private struct AssistantRow: View {
     let account: ManagedAccount
     let state: ManagedAccountState
@@ -663,7 +688,7 @@ private struct AssistantRow: View {
 
     private var quotaDescription: String {
         if account.isBrowserOnly { return "Check usage on the official website" }
-        guard let remaining = state.remainingPercent, state.isConnected else { return "Usage unavailable" }
+        guard let remaining = state.accountRemainingPercent, state.isConnected else { return "Usage unavailable" }
         let value = displayMode == .remaining ? remaining : 100 - remaining
         return "\(Int(value.rounded())) percent \(displayMode.unit)\(state.isFresh() ? "" : ", last known; refresh needed")"
     }
@@ -671,7 +696,7 @@ private struct AssistantRow: View {
     private var quotaRing: some View {
         ZStack {
             Circle().stroke(AppTheme.track, lineWidth: 3)
-            if let remaining = state.remainingPercent, state.isConnected, !account.isBrowserOnly {
+            if let remaining = state.accountRemainingPercent, state.isConnected, !account.isBrowserOnly {
                 let shown = displayMode == .remaining ? remaining : 100 - remaining
                 Circle().trim(from: 0, to: min(max(shown / 100, 0), 1))
                     .stroke(AppTheme.ink.opacity(state.isFresh() ? 1 : 0.45),
@@ -724,6 +749,7 @@ private struct AssistantRow: View {
         if state.isBusy { return "Checking…" }
         if !state.isConnected { return state.message ?? "Connect this account." }
         if account.isBrowserOnly { return "Browser profile ready" }
+        if let modelLimit = AccountUsageNotice.modelLimit(state) { return modelLimit }
         if let message = state.message {
             if account.provider == .claude && state.needsFirstUsage &&
                 message == "Usage appears after the first Claude Code session launched here." {
@@ -740,9 +766,7 @@ private struct AssistantRow: View {
             }
             if !readings.isEmpty { return readings.joined(separator: " · ") }
         }
-        if let limit = state.windows.filter({ $0.usedFraction != nil }).max(by: {
-            ($0.usedFraction ?? 0) < ($1.usedFraction ?? 0)
-        }), let reset = limit.resetsAt {
+        if let limit = state.accountBindingWindow, let reset = limit.resetsAt {
             return "\(limit.label) · Resets \(reset.formatted(.relative(presentation: .named)))"
         }
         return "Connected"
@@ -783,6 +807,11 @@ private struct AssistantRow: View {
             } else {
                 ForEach(state.windows) { window in
                     VStack(alignment: .leading, spacing: 5) {
+                        if let model = window.modelName {
+                            Text("Model limit: \(model)").font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                        } else {
+                            Text("All models").font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                        }
                         Text(window.label).font(AppTheme.font(size: 12, weightValue: 600))
                         Text(window.summary(for: displayMode)).monospacedDigit()
                         if let reset = window.resetsAt {
@@ -799,6 +828,9 @@ private struct AssistantRow: View {
     }
 
     @ViewBuilder private var usageFooter: some View {
+        if let modelLimit = AccountUsageNotice.modelLimit(state) {
+            Text(modelLimit).fixedSize(horizontal: false, vertical: true)
+        }
         if let date = state.refreshedAt {
             Text("\(state.isFresh() ? "Updated" : "Last known") \(date.formatted(.relative(presentation: .named)))")
                 .foregroundStyle(AppTheme.muted)

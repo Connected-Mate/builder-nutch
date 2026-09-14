@@ -36,6 +36,10 @@ targets:
     platform: macOS
     sources:
       - path: Sources
+        excludes:
+          - Resources/claude-openai-relay.mjs
+      - path: Sources/Resources/claude-openai-relay.mjs
+        buildPhase: resources
     dependencies:
       - package: Sparkle
     info:
