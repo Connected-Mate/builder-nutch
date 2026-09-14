@@ -1535,7 +1535,12 @@ final class AccountManager: ObservableObject {
     /// The Claude account ring covers shared allowance. Model restrictions are
     /// named separately; exhausting one model does not exhaust the account.
     static func headlineID(for account: ManagedAccount, state: ManagedAccountState? = nil) -> String {
-        if account.provider == .claude { return state?.accountBindingWindow?.id ?? "five_hour" }
+        if account.provider == .claude || account.provider == .codex {
+            if let state {
+                return state.accountBindingWindow?.id ?? "shared-usage-unavailable"
+            }
+            return account.provider == .claude ? "five_hour" : "primary"
+        }
         // Cursor's dashboard leads with "Your included usage · N% used", and so
         // does this. `CursorUsage` names that window "included".
         if account.readsDesktopUsage { return "included" }

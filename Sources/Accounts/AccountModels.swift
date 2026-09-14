@@ -157,7 +157,8 @@ struct ManagedAccountState {
     var usageCheckRetryAt: Date? = nil
     var accountWindows: [LimitWindow] { windows.filter { !$0.isModelSpecific } }
     var accountBindingWindow: LimitWindow? {
-        accountWindows.filter { $0.usedFraction != nil }.max { ($0.usedFraction ?? 0) < ($1.usedFraction ?? 0) }
+        guard accountWindows.allSatisfy({ $0.usedFraction.map { $0.isFinite && $0 >= 0 } == true }) else { return nil }
+        return accountWindows.max { ($0.usedFraction ?? 0) < ($1.usedFraction ?? 0) }
     }
     var accountRemainingPercent: Double? {
         guard !accountWindows.isEmpty,

@@ -46,6 +46,23 @@ final class QuotaAccuracyTests: XCTestCase {
         XCTAssertNil(ManagedAccountState(windows: [model, unknown]).accountRemainingPercent)
         let known = LimitWindow(id: "session", label: "Session", usedFraction: 0.04)
         XCTAssertNil(ManagedAccountState(windows: [known, unknown]).accountRemainingPercent)
+        XCTAssertNil(ManagedAccountState(windows: [known, unknown]).accountBindingWindow)
+    }
+
+    @MainActor func testHeadlineUsesTheSameSharedMeasurementForClaudeAndCodex() {
+        for provider in [AccountProvider.claude, .codex] {
+            let account = ManagedAccount(id: UUID(), provider: provider, label: "Fixture", createdAt: Date())
+            let shortID = provider == .claude ? "five_hour" : "primary"
+            let longID = provider == .claude ? "seven_day" : "secondary"
+            let short = LimitWindow(id: shortID, label: "5h", usedFraction: 0.04)
+            let weekly = LimitWindow(id: longID, label: "Weekly", usedFraction: 0.55)
+            let known = ManagedAccountState(isConnected: true, windows: [short, weekly])
+            XCTAssertEqual(AccountManager.headlineID(for: account, state: known), longID)
+            let partial = ManagedAccountState(isConnected: true, windows: [short, LimitWindow(id: longID, label: "Weekly")])
+            let headlineID = AccountManager.headlineID(for: account, state: partial)
+            XCTAssertNil(partial.windows.first { $0.id == headlineID }, "Missing shared usage must blank every account headline")
+            XCTAssertNil(partial.accountRemainingPercent)
+        }
     }
 
     func testCodexSeparateScopeDoesNotConsumeSharedAllowance() throws {
