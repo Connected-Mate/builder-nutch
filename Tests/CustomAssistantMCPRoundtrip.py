@@ -119,6 +119,21 @@ import Darwin
     assert len(value(clients[0].tool("list_assistants", {}))) == 3
     for connection in clients: connection.close()
 
+    # Escaping can make a valid 8000-character profile much larger on disk.
+    bounded = temporary / "bounded-catalog"
+    client = Client(bounded); client.initialize()
+    saved = 0
+    for index in range(100):
+        result = client.tool("configure_assistant", {"name": f"Bounded {index}", "website": "https://example.com",
+                                                    "instructions": "\x01" * 8000})
+        if result["isError"]:
+            break
+        saved += 1
+    assert 0 < saved < 100
+    assert len(value(client.tool("list_assistants", {}))) == saved
+    assert (bounded / "assistants.json").stat().st_size <= 4_000_000
+    client.close()
+
     # A malformed catalog is preserved, and symlink targets are never touched.
     original = b'{"damaged":true}'
     (catalog / "assistants.json").write_bytes(original)
@@ -140,4 +155,4 @@ import Darwin
     assert client.tool("list_assistants", {})["isError"]
     client.close()
 
-print("PASS: real stdio lifecycle, configure/list/report/update, validation, concurrent processes, persistence, private permissions, corrupt-file preservation, symlink protection")
+print("PASS: real stdio lifecycle, configure/list/report/update, validation, concurrent processes, persistence, private permissions, corrupt-file preservation, encoded-size bound, symlink protection")

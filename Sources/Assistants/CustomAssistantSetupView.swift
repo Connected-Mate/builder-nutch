@@ -7,7 +7,7 @@ struct CustomAssistantSetupView: View {
     @State private var copied = ""
     @State private var removal: CustomAssistantConfiguration?
 
-    init(store: CustomAssistantStore = .shared) { self.store = store }
+    init(store: CustomAssistantStore? = nil) { self.store = store ?? .shared }
 
     var body: some View {
         ScrollView {
@@ -126,7 +126,7 @@ struct CustomAssistantSetupView: View {
                 } label: { Image(systemName: "ellipsis") }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .accessibilityLabel(Text("Assistant actions") + Text(": \(assistant.name)"))
+                .accessibilityLabel(Text("Assistant actions: \(assistant.name)"))
             }
             usage(assistant)
             HStack(spacing: 8) {

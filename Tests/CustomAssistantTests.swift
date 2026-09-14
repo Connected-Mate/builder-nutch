@@ -60,6 +60,31 @@ final class CustomAssistantTests: XCTestCase {
         XCTAssertEqual(cleared.usageNote, initial.usageNote)
     }
 
+    func testEncodedCatalogLimitKeepsExistingProfilesReadable() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let repository = CustomAssistantRepository(root: root)
+        defer { try? FileManager.default.removeItem(at: root) }
+        // JSON escapes each control character into six bytes. The input character
+        // limit alone cannot guarantee that a persisted catalog stays readable.
+        let instructions = String(repeating: "\u{0001}", count: 8000)
+        var saved = 0
+        var rejected = false
+        for index in 0..<100 {
+            do {
+                try repository.configure(id: nil, name: "Assistant \(index)", website: "https://example.com", instructions: instructions)
+                saved += 1
+            } catch {
+                rejected = true
+                break
+            }
+        }
+        XCTAssertTrue(rejected)
+        XCTAssertGreaterThan(saved, 0)
+        XCTAssertEqual(try repository.list().count, saved)
+        let size = try Data(contentsOf: root.appendingPathComponent("assistants.json")).count
+        XCTAssertLessThanOrEqual(size, 4_000_000)
+    }
+
     func testConnectionQuotesTheActualExecutableAndDoesNotInstallAnything() throws {
         let connection = CustomAssistantConnection(executable: "/Applications/Builder Nutch.app/Contents/MacOS/Codenotch")
         let data = Data(connection.configurationJSON.utf8)
