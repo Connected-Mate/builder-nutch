@@ -55,10 +55,13 @@ struct LimitWindow: Identifiable, Codable, Equatable {
     /// archives decode unchanged.
     let modelName: String?
     var isModelSpecific: Bool { modelName != nil }
+    /// A vendor restriction is independent of percentage consumption.
+    let blocked: Bool?
+    var isBlocked: Bool { blocked == true }
 
     init(id: String, label: String, usedFraction: Double? = nil,
          remaining: Int? = nil, used: Int? = nil, resetsAt: Date? = nil,
-         derivedReset: Bool? = nil, modelName: String? = nil) {
+         derivedReset: Bool? = nil, modelName: String? = nil, blocked: Bool? = nil) {
         self.id = id
         self.label = label
         self.usedFraction = usedFraction
@@ -67,6 +70,7 @@ struct LimitWindow: Identifiable, Codable, Equatable {
         self.resetsAt = resetsAt
         self.derivedReset = derivedReset
         self.modelName = modelName
+        self.blocked = blocked
     }
 
     /// What the tooltip says on the line under the bar.

@@ -151,6 +151,20 @@ struct ManagedAccountState {
     /// The saved login expired or was revoked. Only a fresh sign-in fixes this,
     /// so it must be surfaced long before a rotation needs the account.
     var requiresSignIn = false
+    /// A failed check invalidates automation, not the timestamp of the last
+    /// successful measurement. Endpoint backoff is not subscription exhaustion.
+    var usageCheckFailedAt: Date? = nil
+    var usageCheckRetryAt: Date? = nil
+    var accountWindows: [LimitWindow] { windows.filter { !$0.isModelSpecific } }
+    var accountBindingWindow: LimitWindow? {
+        accountWindows.filter { $0.usedFraction != nil }.max { ($0.usedFraction ?? 0) < ($1.usedFraction ?? 0) }
+    }
+    var accountRemainingPercent: Double? {
+        guard !accountWindows.isEmpty,
+              accountWindows.allSatisfy({ $0.usedFraction.map { $0.isFinite && $0 >= 0 } == true }),
+              let fraction = accountBindingWindow?.usedFraction else { return nil }
+        return max(0, 100 * (1 - fraction))
+    }
     /// True when this account cannot take a session as it stands.
     var needsAttention: Bool { requiresKeychainAccess || requiresSignIn || !isConnected }
     var remainingPercent: Double? {
@@ -170,7 +184,7 @@ struct ManagedAccountState {
             }
     }
     func isFresh(at now: Date = Date()) -> Bool {
-        guard let refreshedAt else { return false }
+        guard usageCheckFailedAt == nil, let refreshedAt else { return false }
         return now.timeIntervalSince(refreshedAt) >= -5 && now.timeIntervalSince(refreshedAt) <= 300
     }
 }

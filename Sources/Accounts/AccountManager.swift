@@ -1071,13 +1071,14 @@ final class AccountManager: ObservableObject {
             guard !hasShutDown, !cancellation.isCancelled else { return }
             var state = states[account.id] ?? ManagedAccountState()
             // Retain the last displayed quotas, but never use a failed refresh for automation.
-            state.refreshedAt = nil
+            state.usageCheckFailedAt = Date()
             state.requiresKeychainAccess = (error as? ClaudeSystemCredentialError)?.requiresAccess == true
             // A revoked or expired saved login is not a transient failure. Say so
             // now, so the person signs in before a rotation needs this account.
             state.requiresSignIn = lostItsSignIn(account, error: error)
             lastReadAt[account.id] = Date()
             let retryAt = Date().addingTimeInterval(retryDelay(for: error))
+            state.usageCheckRetryAt = retryAt
             if Self.isUsageCheckFailure(error) {
                 // The endpoint was unreachable or asked us to slow down. That says
                 // nothing about whether the person is signed in, and presenting it
@@ -1531,13 +1532,10 @@ final class AccountManager: ObservableObject {
     /// a window dropping out of a response blanks the cell instead of quietly
     /// promoting a different one into the headline's place.
     ///
-    /// For Claude it is the window that binds — the fullest one — because that
-    /// is the number every other part of this app acts on: the rotation, the
-    /// account rows, the health line. A ring that said "0%" for the session
-    /// while the weekly model limit sat at 97% was the notch and the accounts
-    /// window disagreeing about the same subscription.
+    /// The Claude account ring covers shared allowance. Model restrictions are
+    /// named separately; exhausting one model does not exhaust the account.
     static func headlineID(for account: ManagedAccount, state: ManagedAccountState? = nil) -> String {
-        if account.provider == .claude { return state?.bindingWindow?.id ?? "five_hour" }
+        if account.provider == .claude { return state?.accountBindingWindow?.id ?? "five_hour" }
         // Cursor's dashboard leads with "Your included usage · N% used", and so
         // does this. `CursorUsage` names that window "included".
         if account.readsDesktopUsage { return "included" }
@@ -1553,7 +1551,9 @@ final class AccountManager: ObservableObject {
         else if !state.windows.isEmpty && !state.isFresh() { status = .stale(since: state.refreshedAt ?? .distantPast) }
         else if let message = state.message { status = .unsupported(message) }
         else { status = .ok }
-        let exhausted = state.windows.first { ($0.usedFraction ?? 0) >= 1 }
+        let exhausted = state.isFresh() ? state.windows.first {
+            (($0.usedFraction ?? 0) >= 1 || $0.isBlocked) && ($0.resetsAt.map { $0 > Date() } ?? true)
+        } : nil
         let email = UserDefaults.standard.bool(forKey: "accounts.hidePersonalDetails")
             ? nil : (state.email ?? account.emailHint)
         return ProviderSnapshot(id: account.id.uuidString, displayName: account.emoji.map { "\($0) \(account.label)" } ?? account.label,
@@ -1717,7 +1717,11 @@ final class AccountManager: ObservableObject {
     /// nothing is wrong with it.
     private func blockedReason(_ account: ManagedAccount) -> String? {
         guard let state = states[account.id] else { return nil }
+        if !state.isFresh() { return state.message }
         if let window = state.bindingWindow, (window.usedFraction ?? 0) >= 1 {
+            if window.isModelSpecific, (state.accountRemainingPercent ?? 0) > 0 {
+                return ClaudeAccountUsage.restriction(state, now: Date())
+            }
             let reset = window.resetsAt.map { " " + ResetCopy.text(for: $0, derived: window.isResetDerived) } ?? ""
             return String(format: NSLocalizedString("its %1$@ is used up.%2$@", comment: "Health reason"), window.label, reset)
         }
@@ -1852,11 +1856,11 @@ final class AccountManager: ObservableObject {
         let ready = nextUsableAccount(for: .claude, now: now)
         health.currentID = current.id
         health.currentName = label(current)
-        health.currentRemainingPercent = states[current.id]?.remainingPercent
+        health.currentRemainingPercent = states[current.id]?.accountRemainingPercent
         health.currentMinutesRemaining = usageForecasts[current.id]?.minutesUntilExhausted(at: now)
         health.nextID = ready?.id
         health.nextName = ready.map(label)
-        health.nextRemainingPercent = ready.flatMap { states[$0.id]?.remainingPercent }
+        health.nextRemainingPercent = ready.flatMap { states[$0.id]?.accountRemainingPercent }
         health.nextMinutesRemaining = ready.flatMap { usageForecasts[$0.id]?.minutesUntilExhausted(at: now) }
         let next = queued
         if systemCredentials == nil {

@@ -46,6 +46,7 @@ enum ClaudeAccountUsage {
     static func state(status: ManagedAccountState, usage: Data, now: Date = Date()) throws -> ManagedAccountState {
         var state = status
         state.windows = []; state.refreshedAt = nil; state.message = unavailable
+        state.usageCheckFailedAt = nil; state.usageCheckRetryAt = nil
         guard status.isConnected else { return state }
         let object = try AccountQuotas.json(usage)
         guard let available = boolean(object["rate_limits_available"]) else { throw ManagedAccountError.invalidResponse }
@@ -90,7 +91,9 @@ enum ClaudeAccountUsage {
                                       modelName: kind == "session" || kind == "weekly_all" ? nil : model)
                 // is_active describes applicability to a selected model, not the
                 // existence of a limit. All subscription constraints remain visible.
-                if !state.windows.contains(where: { $0.label == item.label && $0.usedFraction == item.usedFraction }) { state.windows.append(item) }
+                if let duplicate = state.windows.firstIndex(where: { $0.label == item.label && $0.usedFraction == item.usedFraction }) {
+                    if item.isBlocked { state.windows[duplicate] = item }
+                } else { state.windows.append(item) }
                 // "critical" is what the service calls a window past 90%. It is a
                 // level, not a lock: the account still answers, and treating it
                 // as shut is what left every subscription unusable at 91% while
@@ -104,7 +107,8 @@ enum ClaudeAccountUsage {
         guard !state.windows.isEmpty else { return state }
         let known = state.windows.allSatisfy { $0.usedFraction != nil }
         state.refreshedAt = known ? now : nil
-        state.message = !known ? unavailable : blocking ? restriction(state, now: now) : nil
+        state.message = !known ? unavailable : blocking || state.windows.contains(where: { ($0.usedFraction ?? 0) >= 1 || $0.isBlocked })
+            ? restriction(state, now: now) : nil
         return state
     }
 
@@ -117,14 +121,18 @@ enum ClaudeAccountUsage {
     static let lockingSeverities: Set<String> = ["blocked", "blocking", "locked", "exceeded", "restricted", "suspended"]
 
     static func restriction(_ state: ManagedAccountState, now: Date) -> String {
-        let spent = state.windows.filter { ($0.usedFraction ?? 0) >= 1 }
-        if let model = spent.first(where: { $0.isModelSpecific }), spent.allSatisfy(\.isModelSpecific) {
+        let spent = state.windows.filter { ($0.usedFraction ?? 0) >= 1 || $0.isBlocked }
+        if let model = spent.first(where: { $0.isModelSpecific }), spent.allSatisfy(\.isModelSpecific),
+           (state.accountRemainingPercent ?? 0) > 0 {
             let reset = model.resetsAt.map { " " + ResetCopy.text(for: $0, now: now, derived: model.isResetDerived) + "." } ?? ""
-            return String(format: NSLocalizedString("%1$@ is used up.%2$@ Your other models still work.", comment: "Model limit reached"),
+            return String(format: NSLocalizedString("%1$@ is unavailable.%2$@ Shared usage remains; choose another model with available usage.", comment: "Model limit reached"),
                           model.label, reset)
         }
         if let window = spent.first {
             let reset = window.resetsAt.map { " " + ResetCopy.text(for: $0, now: now, derived: window.isResetDerived) + "." } ?? ""
+            if (window.usedFraction ?? 0) < 1 {
+                return "\(window.label) is restricted.\(reset)"
+            }
             return String(format: NSLocalizedString("%1$@ is used up.%2$@", comment: "Limit reached"), window.label, reset)
         }
         return NSLocalizedString("Claude reports a subscription restriction. Choose an account manually or refresh its usage.", comment: "Generic restriction")
@@ -150,7 +158,10 @@ enum ClaudeAccountUsage {
         } else { fraction = nil }
         let reset = AccountQuotas.date(row["resets_at"])
         if let raw = row["resets_at"], !(raw is NSNull), reset == nil { throw ManagedAccountError.invalidResponse }
-        return LimitWindow(id: id, label: label, usedFraction: fraction, resetsAt: reset, modelName: modelName)
+        let blocked = containsLock(row) || boolean(row["blocking"]) == true || boolean(row["is_blocking"]) == true
+            || text(row["severity"]).map { lockingSeverities.contains($0.lowercased()) } == true
+        return LimitWindow(id: id, label: label, usedFraction: fraction, resetsAt: reset, modelName: modelName,
+                           blocked: blocked ? true : nil)
     }
     private static func boolean(_ raw: Any?) -> Bool? {
         guard let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }

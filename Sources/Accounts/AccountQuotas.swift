@@ -69,7 +69,8 @@ enum AccountQuotas {
         } else if let legacy = limits["rateLimits"] as? [String: Any] { buckets = [("codex", legacy)] }
         for (bucketID, bucket) in buckets {
             if let reached = bucket["rateLimitReachedType"] as? String, !reached.isEmpty {
-                state.message = "Codex reports an account or workspace limit. This account is unavailable for automatic selection."
+                let scope = bucketID == "codex" ? "Codex account or workspace" : (bucket["limitName"] as? String ?? bucketID)
+                state.message = "\(scope) reports a restriction. Automatic selection is paused until its usage is available."
             }
             for key in ["primary", "secondary"] {
                 guard let window = bucket[key] as? [String: Any] else { continue }
@@ -81,7 +82,8 @@ enum AccountQuotas {
                 // returned beside it, so keep that scope visible in the UI.
                 let scope = bucketID == "codex" ? "All Codex models" : (bucket["limitName"] as? String ?? bucketID)
                 let title = "\(scope) · \(duration)"
-                state.windows.append(LimitWindow(id: bucketID == "codex" ? key : "\(bucketID).\(key)", label: title, usedFraction: fraction, resetsAt: date(window["resetsAt"])))
+                state.windows.append(LimitWindow(id: bucketID == "codex" ? key : "\(bucketID).\(key)", label: title, usedFraction: fraction, resetsAt: date(window["resetsAt"]),
+                    modelName: bucketID == "codex" ? nil : scope))
             }
         }
         if state.windows.isEmpty && state.message == nil { state.message = "Connected. No usage limits were reported by Codex." }

@@ -35,7 +35,8 @@ enum CodexUsage {
                 guard let data = line.data(using: .utf8),
                       let object = try? JSONSerialization.jsonObject(with: data)
                 else { return nil }
-                return rateLimits(in: object)
+                guard let limits = rateLimits(in: object), isAccountBucket(limits) else { return nil }
+                return limits
             }
             .first
 
@@ -70,6 +71,7 @@ enum CodexUsage {
             guard let data = line.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data),
                   let dictionary = object as? [String: Any],
+                  let limits = rateLimits(in: object), isAccountBucket(limits),
                   let stamp = dictionary["timestamp"] as? String
             else { continue }
             if let date = formatter.date(from: stamp) ?? plain.date(from: stamp) { return date }
@@ -88,9 +90,16 @@ enum CodexUsage {
         return nil
     }
 
+    /// A later model-only event cannot replace the shared allowance or make
+    /// an older account measurement appear freshly recorded.
+    private static func isAccountBucket(_ limits: [String: Any]) -> Bool {
+        guard let id = limits["limit_id"] as? String else { return true }
+        return id == "codex"
+    }
+
     private static func window(_ any: Any?, id: String, now: Date) -> LimitWindow? {
         guard let bucket = any as? [String: Any],
-              let percent = (bucket["used_percent"] as? NSNumber)?.doubleValue
+              let fraction = AccountQuotas.percentage(bucket, key: "used_percent")
         else { return nil }
 
         let minutes = (bucket["window_minutes"] as? NSNumber)?.doubleValue
@@ -109,7 +118,7 @@ enum CodexUsage {
         return LimitWindow(
             id: id,
             label: label(windowMinutes: minutes, fallback: id),
-            usedFraction: percent / 100,
+            usedFraction: fraction,
             resetsAt: resetsAt
         )
     }
