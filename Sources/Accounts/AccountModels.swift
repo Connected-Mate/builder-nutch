@@ -156,6 +156,45 @@ struct ManagedAccountState {
     var usageCheckFailedAt: Date? = nil
     var usageCheckRetryAt: Date? = nil
     var accountWindows: [LimitWindow] { windows.filter { !$0.isModelSpecific } }
+    /// The short rolling allowance people see as their current session usage.
+    ///
+    /// This is deliberately independent from `bindingWindow`: the headline
+    /// answers "what have I used in this session?", while automatic selection
+    /// must still consider every account and model window. If the short window
+    /// is absent, it stays unknown rather than borrowing the weekly value.
+    var primaryWindow: LimitWindow? {
+        accountWindows.first(where: \.isPrimaryUsageWindow)
+    }
+    var primaryUsedFraction: Double? {
+        guard let fraction = primaryWindow?.usedFraction,
+              fraction.isFinite, fraction >= 0 else { return nil }
+        return fraction
+    }
+    var primaryRemainingPercent: Double? {
+        primaryUsedFraction.map { max(0, 100 * (1 - $0)) }
+    }
+    /// Provider-declared display window. Claude/Codex require the short
+    /// allowance; the other desktop readers keep their established headline.
+    func headlineWindow(for provider: AccountProvider) -> LimitWindow? {
+        switch provider {
+        case .claude, .codex:
+            return primaryWindow
+        case .cursor:
+            return windows.first { $0.id == "included" }
+        case .kimi:
+            return windows.first { $0.id == "primary" }
+        default:
+            return windows.first
+        }
+    }
+    func headlineRemainingPercent(for provider: AccountProvider) -> Double? {
+        guard let fraction = headlineWindow(for: provider)?.usedFraction,
+              fraction.isFinite, fraction >= 0 else { return nil }
+        return max(0, 100 * (1 - fraction))
+    }
+    func headlinePeriodText(for provider: AccountProvider) -> String? {
+        headlineWindow(for: provider)?.periodText
+    }
     var accountBindingWindow: LimitWindow? {
         guard accountWindows.allSatisfy({ $0.usedFraction.map { $0.isFinite && $0 >= 0 } == true }) else { return nil }
         return accountWindows.max { ($0.usedFraction ?? 0) < ($1.usedFraction ?? 0) }

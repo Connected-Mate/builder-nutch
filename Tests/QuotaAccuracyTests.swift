@@ -8,6 +8,8 @@ final class QuotaAccuracyTests: XCTestCase {
         let state = try ClaudeAccountUsage.state(status: ManagedAccountState(isConnected: true), usage: payload, now: now)
         XCTAssertEqual(try XCTUnwrap(state.accountRemainingPercent), 45, accuracy: 0.001)
         XCTAssertEqual(state.accountBindingWindow?.id, "seven_day")
+        XCTAssertEqual(state.primaryWindow?.id, "five_hour")
+        XCTAssertEqual(try XCTUnwrap(state.primaryRemainingPercent), 96, accuracy: 0.001)
         XCTAssertEqual(state.remainingPercent, 0, "Model-agnostic rotation remains conservative")
         XCTAssertTrue(state.message?.contains("Fable") == true)
         XCTAssertTrue(state.message?.contains("choose another model") == true)
@@ -47,6 +49,30 @@ final class QuotaAccuracyTests: XCTestCase {
         let known = LimitWindow(id: "session", label: "Session", usedFraction: 0.04)
         XCTAssertNil(ManagedAccountState(windows: [known, unknown]).accountRemainingPercent)
         XCTAssertNil(ManagedAccountState(windows: [known, unknown]).accountBindingWindow)
+    }
+
+    func testMissingPrimaryAllowanceNeverBorrowsWeeklyUsage() {
+        let weekly = LimitWindow(id: "seven_day", label: "Weekly limit", usedFraction: 0.70)
+        let state = ManagedAccountState(isConnected: true, windows: [weekly])
+        XCTAssertNil(state.primaryWindow)
+        XCTAssertNil(state.primaryUsedFraction)
+        XCTAssertNil(state.primaryRemainingPercent)
+        XCTAssertEqual(state.accountRemainingPercent, 30)
+    }
+
+    func testOtherDesktopProvidersKeepTheirDeclaredHeadline() {
+        let included = LimitWindow(id: "included", label: "Included usage", usedFraction: 0.18)
+        let cursor = ManagedAccountState(windows: [included,
+            LimitWindow(id: "api", label: "API usage", usedFraction: 0.90)])
+        XCTAssertEqual(cursor.headlineWindow(for: .cursor)?.id, "included")
+        XCTAssertEqual(cursor.headlineRemainingPercent(for: .cursor), 82)
+
+        let summary = LimitWindow(id: "primary", label: "Weekly limit", usedFraction: 0.30)
+        let kimi = ManagedAccountState(windows: [summary,
+            LimitWindow(id: "limit-0", label: "5h limit", usedFraction: 0.80)])
+        XCTAssertEqual(kimi.headlineWindow(for: .kimi)?.id, "primary")
+        XCTAssertEqual(kimi.headlineRemainingPercent(for: .kimi), 70)
+        XCTAssertEqual(kimi.headlinePeriodText(for: .kimi), "Weekly")
     }
 
     @MainActor func testHeadlineUsesTheSameSharedMeasurementForClaudeAndCodex() {

@@ -36,6 +36,7 @@ final class SnapshotTests: XCTestCase {
         let s = snapshot([window("session", 0.22), window("weekly_all", 0.24)])
         XCTAssertEqual(s.headline?.id, "session")
         XCTAssertEqual(s.usedFraction ?? -1, 0.22, accuracy: 0.0001)
+        XCTAssertEqual(s.headlinePeriodText, "Session")
     }
 
     /// The ring and the tooltip's top row are the same window, always.
@@ -50,6 +51,24 @@ final class SnapshotTests: XCTestCase {
         XCTAssertNil(snapshot([]).usedFraction)
         XCTAssertEqual(snapshot([]).headlineText, "—")
         XCTAssertFalse(snapshot([]).hasReading)
+        XCTAssertFalse(snapshot([]).hasHeadlineReading)
+    }
+
+    func testMissingPrimaryDoesNotPromoteWeeklyIntoHeadline() {
+        let weekly = window("weekly_all", 0.30)
+        let s = ProviderSnapshot(id: "p", displayName: "P", glyph: .claude,
+                                 fidelity: .official, status: .ok,
+                                 windows: [weekly], headlineID: "five_hour")
+        XCTAssertTrue(s.hasReading, "Weekly detail remains available")
+        XCTAssertFalse(s.hasHeadlineReading)
+        XCTAssertEqual(s.headlineText, "—")
+        XCTAssertNil(s.headlinePeriodText)
+    }
+
+    func testWindowPeriodsStayExplicit() {
+        XCTAssertEqual(window("five_hour", 0.22).periodText, "5h")
+        XCTAssertEqual(window("seven_day", 0.30).periodText, "Weekly")
+        XCTAssertNil(LimitWindow(id: "requests", label: "Requests", remaining: 2).periodText)
     }
 
     /// A provider that reports only what is left gets a count, not a percentage.

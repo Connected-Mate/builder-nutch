@@ -218,7 +218,7 @@ struct ProviderCell: View {
     /// at all when the account is broken — see `ProviderRing.needsAttention`.
     private var percentText: String {
         if needsAttention { return "" }
-        return snapshot.hasReading ? snapshot.headlineText(for: displayMode) : "—"
+        return snapshot.hasHeadlineReading ? snapshot.headlineText(for: displayMode) : "—"
     }
 
     /// The label as drawn, so a test can state the rule without a renderer.
@@ -227,10 +227,10 @@ struct ProviderCell: View {
     var body: some View {
         VStack(spacing: NotchLayout.ringLabelGap) {
             ProviderRing(
-                usedFraction: snapshot.hasReading ? snapshot.ringFraction : nil,
+                usedFraction: snapshot.hasHeadlineReading ? snapshot.ringFraction : nil,
                 glyph: snapshot.glyph,
                 displayMode: displayMode,
-                isStale: snapshot.status.isStale || !snapshot.hasReading,
+                isStale: snapshot.status.isStale || !snapshot.hasHeadlineReading,
                 isBlocked: snapshot.block != nil,
                 activity: activity,
                 isRefreshing: isRefreshing,

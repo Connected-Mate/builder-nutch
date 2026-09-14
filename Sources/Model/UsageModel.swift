@@ -59,6 +59,39 @@ struct LimitWindow: Identifiable, Codable, Equatable {
     let blocked: Bool?
     var isBlocked: Bool { blocked == true }
 
+    /// The provider's short rolling allowance, suitable for a current-usage
+    /// headline. A weekly or model allowance must never silently take its
+    /// place when this row is missing.
+    var isPrimaryUsageWindow: Bool {
+        guard !isModelSpecific else { return false }
+        let normalizedID = id.lowercased()
+        if ["five_hour", "session", "primary"].contains(normalizedID) { return true }
+        if normalizedID.hasSuffix(".primary") { return true }
+        let normalizedLabel = label.lowercased()
+        return normalizedLabel.contains("5h")
+            || normalizedLabel.contains("5 hour")
+            || normalizedLabel.contains("5-hour")
+            || normalizedLabel.contains("session limit")
+            || normalizedLabel.contains("current session")
+    }
+
+    /// Compact period copy for the small notch headline. Nil means the vendor
+    /// did not identify a period, so the UI must not invent one.
+    var periodText: String? {
+        let normalizedID = id.lowercased()
+        let normalizedLabel = label.lowercased()
+        if normalizedID == "five_hour" || normalizedLabel.contains("5h")
+            || normalizedLabel.contains("5 hour") || normalizedLabel.contains("5-hour") { return "5h" }
+        if normalizedID == "seven_day" || normalizedID == "weekly_all"
+            || normalizedID == "secondary" || normalizedID.hasSuffix(".secondary")
+            || normalizedLabel.contains("weekly") { return "Weekly" }
+        if normalizedID == "session" || normalizedID == "primary"
+            || normalizedID.hasSuffix(".primary") || normalizedLabel.contains("session") { return "Session" }
+        if normalizedLabel.contains("daily") { return "Daily" }
+        if normalizedLabel.contains("monthly") { return "Monthly" }
+        return nil
+    }
+
     init(id: String, label: String, usedFraction: Double? = nil,
          remaining: Int? = nil, used: Int? = nil, resetsAt: Date? = nil,
          derivedReset: Bool? = nil, modelName: String? = nil, blocked: Bool? = nil) {
@@ -161,6 +194,16 @@ struct ProviderSnapshot: Identifiable, Equatable {
     }
 
     var usedFraction: Double? { headline?.usedFraction }
+
+    /// Whether the headline itself has a value. Detail rows may still contain
+    /// weekly/model readings when the short allowance is unavailable.
+    var hasHeadlineReading: Bool {
+        guard let headline else { return false }
+        return headline.usedFraction != nil || headline.remaining != nil || headline.used != nil
+    }
+
+    /// Period named beside the headline, when the provider supplied one.
+    var headlinePeriodText: String? { headline?.periodText }
 
     /// What the cell prints under the ring.
     var headlineText: String {
