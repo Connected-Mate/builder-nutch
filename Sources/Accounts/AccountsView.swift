@@ -11,11 +11,22 @@ private extension AccountProvider {
     }
 }
 
+@MainActor
+final class AccountsNavigation: ObservableObject {
+    @Published var showingSettings = false
+}
+
 /// The native account manager. Public screenshots are captured from this live view.
 struct AccountsView: View {
     @ObservedObject var manager: AccountManager
     @ObservedObject var preferences: Preferences
     let onOpenSettings: (() -> Void)?
+    @ObservedObject var navigation: AccountsNavigation
+    let settingsContent: (() -> AnyView)?
+    @State private var showingCustom = false
+    @State private var catalogSearch = ""
+    @State private var noticeTask: Task<Void, Never>?
+
     @State private var filter: AccountProvider?
     @State private var showingAdd = false
     @State private var showingUsage = false
@@ -32,7 +43,10 @@ struct AccountsView: View {
     @AppStorage("accounts.projectFolder") private var savedProjectPath = ""
     @AppStorage("app.language") private var appLanguage = AppLanguage.system.rawValue
 
-    init(manager: AccountManager, preferences: Preferences, onOpenSettings: (() -> Void)? = nil, projectFolder: URL? = nil) {
+    init(manager: AccountManager, preferences: Preferences, onOpenSettings: (() -> Void)? = nil, projectFolder: URL? = nil,
+         navigation: AccountsNavigation? = nil, settingsContent: (() -> AnyView)? = nil) {
+        self.navigation = navigation ?? AccountsNavigation()
+        self.settingsContent = settingsContent
         self.manager = manager
         self.preferences = preferences
         self.onOpenSettings = onOpenSettings
@@ -51,35 +65,36 @@ struct AccountsView: View {
             sidebar
             VStack(spacing: 0) {
                 header
-                if manager.loginAccountID != nil { loginBanner }
-                if let attention = manager.attention { attentionBanner(attention) }
-                if !manager.accounts.isEmpty { healthLine }
-                if let notice = manager.notice, !hidePersonalDetails { noticeBanner(notice) }
-                if let discovery = manager.discoveryNotice {
-                    Label(discovery, systemImage: "checkmark.circle")
-                        .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 30).padding(.vertical, 10).background(AppTheme.paper)
-                }
-                if showingAdd {
+                if navigation.showingSettings, let settingsContent {
+                    settingsContent()
+                } else if showingCustom {
+                    CustomAssistantSetupView()
+                } else if showingAdd {
                     providerCatalog
                 } else if showingUsage {
                     UsageInsightsView(manager: manager, model: usage, hidePersonalDetails: hidePersonalDetails)
                 } else {
+                    // A single contextual status, only where the affected accounts live.
+                    if manager.loginAccountID != nil {
+                        loginBanner
+                    } else if filter == .claude, let attention = manager.attention {
+                        attentionBanner(attention)
+                    } else if let notice = manager.notice, !hidePersonalDetails {
+                        noticeBanner(notice)
+                    }
                     assistantList
-                    if !manager.accounts.isEmpty { automaticSelectionBar }
-                    nextSessionBar
+                    if !manager.accounts.isEmpty { nextSessionBar }
                 }
             }
             .background(AppTheme.surface)
         }
-        .frame(minWidth: 980, minHeight: 560)
+        .frame(minWidth: 700, minHeight: 450)
         .background(AppTheme.surface).foregroundStyle(AppTheme.ink).tint(AppTheme.ink)
-        .preferredColorScheme(.light)
+        .preferredColorScheme(.dark)
         .environment(\.locale, (AppLanguage(rawValue: appLanguage) ?? .system).locale)
         .sheet(item: $connecting) { account in
             AddAssistantFlow(manager: manager, initialAccount: account) { localError = $0 }
-                .preferredColorScheme(.light)
+                .preferredColorScheme(.dark)
         }
         .sheet(isPresented: Binding(
             get: { !preferences.hasChosenUsageDisplay },
@@ -87,12 +102,12 @@ struct AccountsView: View {
         )) {
             UsageDisplayOnboarding(preferences: preferences)
                 .interactiveDismissDisabled()
-                .preferredColorScheme(.light)
+                .preferredColorScheme(.dark)
                 .environment(\.locale, (AppLanguage(rawValue: appLanguage) ?? .system).locale)
         }
         .sheet(item: $personalizing) { account in
             PersonalizeAssistantView(account: account, manager: manager) { localError = $0 }
-                .preferredColorScheme(.light)
+                .preferredColorScheme(.dark)
         }
         .sheet(isPresented: $showingOpenAIRelay) {
             ClaudeOpenAIRelayView(manager: manager, project: $projectURL, hidePersonalDetails: hidePersonalDetails)
@@ -100,7 +115,7 @@ struct AccountsView: View {
         }
         .sheet(isPresented: $showingRotation) {
             RotationSettingsView(manager: manager, provider: filter) { localError = $0 }
-                .preferredColorScheme(.light)
+                .preferredColorScheme(.dark)
                 .environment(\.locale, (AppLanguage(rawValue: appLanguage) ?? .system).locale)
         }
         .confirmationDialog(
@@ -121,6 +136,18 @@ struct AccountsView: View {
         )) {
             Button("OK") { localError = nil }
         } message: { Text(localError ?? "") }
+        .onAppear { manager.notice = nil }
+        .onChange(of: manager.notice) { _, notice in
+            noticeTask?.cancel()
+            guard notice != nil else { return }
+            noticeTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(8))
+                guard !Task.isCancelled else { return }
+                manager.notice = nil
+            }
+        }
+        .onChange(of: navigation.showingSettings) { _, _ in manager.notice = nil }
+        .onDisappear { noticeTask?.cancel() }
         .onChange(of: providerIDs) { _, _ in
             if filter == nil || !providers.contains(where: { $0 == filter }) { self.filter = providers.first }
         }
@@ -139,78 +166,79 @@ struct AccountsView: View {
         return nil
     }
 
+    private func showAccounts() {
+        navigation.showingSettings = false
+        showingCustom = false
+        showingUsage = false
+        showingAdd = false
+        manager.notice = nil
+    }
+
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Your assistants")
-                Spacer()
-                Text("\(providers.count)")
-            }
-            .font(AppTheme.font(size: 11, weightValue: 500)).foregroundStyle(AppTheme.muted)
-            .padding(.horizontal, 27).padding(.top, 26).padding(.bottom, 16)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Assistants")
+                .font(AppTheme.font(size: 11, weightValue: 550)).foregroundStyle(AppTheme.muted)
+                .padding(.horizontal, 12).padding(.top, 20).padding(.bottom, 4)
             ScrollView {
-                VStack(spacing: 5) {
+                VStack(spacing: 4) {
                     ForEach(providers) { filterButton($0) }
-                    usageButton
                     Button {
-                        showingAdd = true
+                        showAccounts(); showingCustom = true
                     } label: {
-                        Label("Add assistant", systemImage: "plus")
-                            .font(AppTheme.font(size: 12))
-                            .foregroundStyle(AppTheme.muted)
-                            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+                        Label("Custom assistants", systemImage: "slider.horizontal.3")
+                            .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
                             .padding(.horizontal, 12)
                     }
-                    .buttonStyle(WorkspaceQuietButtonStyle()).padding(.top, 7)
+                    .buttonStyle(WorkspaceQuietButtonStyle())
+                    .background(showingCustom && !navigation.showingSettings ? AppTheme.selected : .clear,
+                                in: RoundedRectangle(cornerRadius: 6))
+                    Button {
+                        showAccounts(); showingAdd = true
+                    } label: {
+                        Label("Add assistant", systemImage: "plus")
+                            .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+                            .padding(.horizontal, 12)
+                    }
+                    .buttonStyle(WorkspaceQuietButtonStyle()).padding(.top, 4)
                     .disabled(manager.loginAccountID != nil)
                     .keyboardShortcut("n", modifiers: .command)
                 }
-                .padding(.horizontal, 15)
             }
-            .frame(maxHeight: .infinity)
-            VStack(alignment: .leading, spacing: 4) {
-                Button(action: chooseProjectFolder) {
-                    Label(hidePersonalDetails || projectURL.lastPathComponent.isEmpty ? "Project folder" : projectURL.lastPathComponent,
-                          systemImage: "folder")
-                        .lineLimit(1).truncationMode(.middle)
-                        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-                }
-                .buttonStyle(WorkspaceQuietButtonStyle())
-                .help(hidePersonalDetails ? "Choose project folder" : "Project folder: \(projectURL.path(percentEncoded: false))")
-                .accessibilityLabel("Choose project folder")
-                if let onOpenSettings {
-                    Button(action: onOpenSettings) {
-                        Label("Settings", systemImage: "slider.horizontal.3")
-                            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-                    }
-                    .buttonStyle(WorkspaceQuietButtonStyle())
-                    .keyboardShortcut(",", modifiers: .command)
-                }
-                SupportLink()
-                    .buttonStyle(WorkspaceQuietButtonStyle())
-                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-                Label("On your Mac. In your control.", systemImage: "checkmark.shield")
-                    .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
-                    .padding(.top, 20).padding(.bottom, 20)
+            Spacer(minLength: 8)
+            usageButton
+            Button {
+                if settingsContent != nil {
+                    navigation.showingSettings = true
+                } else { onOpenSettings?() }
+            } label: {
+                Label("Settings", systemImage: "gearshape")
+                    .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+                    .padding(.horizontal, 12)
             }
-            .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
-            .padding(.horizontal, 21)
+            .buttonStyle(WorkspaceQuietButtonStyle())
+            .background(navigation.showingSettings ? AppTheme.selected : .clear,
+                        in: RoundedRectangle(cornerRadius: 6))
+            .keyboardShortcut(",", modifiers: .command)
+            .accessibilityAddTraits(navigation.showingSettings ? .isSelected : [])
         }
-        .frame(width: 222).background(AppTheme.sidebar)
+        .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
+        .padding(.horizontal, 8).padding(.bottom, 12)
+        .frame(width: 174)
+        .background(.ultraThinMaterial)
         .overlay(alignment: .trailing) { Rectangle().fill(AppTheme.line).frame(width: 1) }
     }
 
     /// Where the week went, beside the assistants it was spent with.
     private var usageButton: some View {
-        let active = showingUsage && !showingAdd
-        return Button { showingUsage = true; showingAdd = false } label: {
+        let active = showingUsage && !showingAdd && !showingCustom && !navigation.showingSettings
+        return Button { showAccounts(); showingUsage = true } label: {
             HStack(spacing: 12) {
                 Image(systemName: "chart.bar").font(.system(size: 15, weight: .medium)).frame(width: 24, height: 24)
                 Text("Consumption")
                     .font(AppTheme.font(size: 13, weightValue: active ? 600 : 400)).lineLimit(1)
                 Spacer(minLength: 4)
             }
-            .padding(.horizontal, 12).frame(height: 48)
+            .padding(.horizontal, 12).frame(height: 40)
             .background(active ? AppTheme.selected : Color.clear, in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(active ? AppTheme.line : Color.clear))
             .contentShape(RoundedRectangle(cornerRadius: 6))
@@ -220,17 +248,17 @@ struct AccountsView: View {
     }
 
     private func filterButton(_ provider: AccountProvider) -> some View {
-        let active = filter == provider && !showingAdd && !showingUsage
+        let active = filter == provider && !showingAdd && !showingUsage && !showingCustom && !navigation.showingSettings
         let count = manager.accounts.filter { $0.provider == provider }.count
-        return Button { filter = provider; showingAdd = false; showingUsage = false } label: {
-            HStack(spacing: 12) {
-                ProviderGlyphView(glyph: provider.glyph, size: 24).frame(width: 24, height: 24)
+        return Button { showAccounts(); filter = provider } label: {
+            HStack(spacing: 8) {
+                ProviderGlyphView(glyph: provider.glyph, size: 20).frame(width: 24, height: 24)
                 Text(provider.workspaceTitle)
                     .font(AppTheme.font(size: 13, weightValue: active ? 600 : 400)).lineLimit(1)
                 Spacer(minLength: 4)
                 Text("\(count)").font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
             }
-            .padding(.horizontal, 12).frame(height: 48)
+            .padding(.horizontal, 12).frame(height: 40)
             .background(active ? AppTheme.selected : Color.clear, in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(active ? AppTheme.line : Color.clear))
             .contentShape(RoundedRectangle(cornerRadius: 6))
@@ -241,54 +269,34 @@ struct AccountsView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    if !showingAdd, !showingUsage, let filter {
-                        ProviderGlyphView(glyph: filter.glyph, size: 25).accessibilityHidden(true)
-                    }
-                    Text(showingAdd ? "Add an assistant" : showingUsage ? "Consumption" : filter?.workspaceTitle ?? "All accounts")
-                        .font(AppTheme.font(size: 19, weightValue: 650)).tracking(-0.55)
+        HStack(spacing: 12) {
+            Text(navigation.showingSettings ? "Settings" : showingCustom ? "Custom assistants" :
+                    showingAdd ? "Add an assistant" : showingUsage ? "Consumption" : filter?.workspaceTitle ?? "Accounts")
+                .font(AppTheme.font(size: 19, weightValue: 650)).tracking(-0.4)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+            if !navigation.showingSettings && !showingCustom {
+                Button { hidePersonalDetails.toggle() } label: {
+                    Image(systemName: hidePersonalDetails ? "eye.slash" : "eye").frame(width: 28, height: 32)
                 }
-                Text(showingAdd ? "Choose a service. Sign in on its official page." :
-                        showingUsage ? "Where your quota went, project by project, from the sessions on this Mac." :
-                        visibleAccounts.isEmpty ? "Your next idea starts with an assistant." :
-                        filter == .claude ? "Your subscriptions. One Claude login on this Mac." : "Your accounts. For your next session.")
-                    .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
-            }
-            Spacer(minLength: 12)
-            Button { hidePersonalDetails.toggle() } label: {
-                Image(systemName: hidePersonalDetails ? "eye.slash" : "eye")
-                    .frame(width: 28, height: 32)
-            }
-            .buttonStyle(WorkspaceQuietButtonStyle())
-            .help(hidePersonalDetails ? "Show personal details" : "Hide personal details")
-            .accessibilityLabel(hidePersonalDetails ? "Show personal details" : "Hide personal details")
-            if showingAdd {
-                Button("Back") { showingAdd = false }.buttonStyle(WorkspaceSelectionStyle())
-            } else if showingUsage {
-                Button { Task { await usage.refresh() } } label: {
-                    Image(systemName: "arrow.clockwise").frame(width: 28, height: 32)
+                .buttonStyle(WorkspaceQuietButtonStyle())
+                .help(hidePersonalDetails ? "Show personal details" : "Hide personal details")
+                .accessibilityLabel(hidePersonalDetails ? "Show personal details" : "Hide personal details")
+                if !showingAdd {
+                    Button {
+                        Task {
+                            if showingUsage { await usage.refresh() } else { await manager.refreshAll() }
+                        }
+                    } label: { Image(systemName: "arrow.clockwise").frame(width: 28, height: 32) }
+                    .buttonStyle(WorkspaceQuietButtonStyle()).help("Refresh")
+                    .accessibilityLabel("Refresh")
+                    .disabled(showingUsage ? usage.isLoading : !manager.busyIDs.isEmpty)
+                    .keyboardShortcut("r", modifiers: .command)
                 }
-                .buttonStyle(WorkspaceQuietButtonStyle()).help("Read the sessions again")
-                .accessibilityLabel("Read the sessions again")
-                .disabled(usage.isLoading)
-                .keyboardShortcut("r", modifiers: .command)
-            } else {
-                Text("\(visibleAccounts.count) account\(visibleAccounts.count == 1 ? "" : "s")")
-                    .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(AppTheme.line))
-                Button { Task { await manager.refreshAll() } } label: {
-                    Image(systemName: "arrow.clockwise").frame(width: 28, height: 32)
-                }
-                .buttonStyle(WorkspaceQuietButtonStyle()).help("Refresh accounts")
-                .accessibilityLabel("Refresh accounts")
-                .disabled(manager.accounts.isEmpty || !manager.busyIDs.isEmpty)
-                .keyboardShortcut("r", modifiers: .command)
             }
         }
-        .padding(.horizontal, 30).padding(.top, 24).padding(.bottom, 23)
+        .padding(.horizontal, 24).padding(.vertical, 16)
+        .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
     }
 
     @ViewBuilder private var assistantList: some View {
@@ -306,17 +314,14 @@ struct AccountsView: View {
         } else {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
-                    Text("ACCOUNT").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Account").frame(maxWidth: .infinity, alignment: .leading)
                     VStack(spacing: 3) {
                         Text(LocalizedStringKey(preferences.usageDisplayMode.columnTitle))
-                        if filter == .claude || filter == .codex {
-                            Text("All models").tracking(0)
-                        }
-                    }.frame(width: 110)
-                    Text(filter == .claude ? "NEXT ACCOUNT" : "NEXT SESSION").frame(width: 110)
+                    }.frame(width: 78)
+                    Text("Selection").frame(width: 100)
                 }
-                .font(AppTheme.font(size: 9, weightValue: 500)).tracking(0.8).foregroundStyle(AppTheme.muted)
-                .padding(.bottom, 10)
+                .font(AppTheme.font(size: 10, weightValue: 500)).foregroundStyle(AppTheme.muted)
+                .padding(.vertical, 10)
                 .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
                 ScrollView {
                     LazyVStack(spacing: 0) {
@@ -335,38 +340,49 @@ struct AccountsView: View {
                     }
                 }
             }
-            .padding(.horizontal, 30)
+            .padding(.horizontal, 24)
         }
     }
 
     private var providerCatalog: some View {
-        ScrollView {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 24), GridItem(.flexible(), spacing: 24)], spacing: 0) {
-                ForEach(AccountProvider.allCases) { provider in
-                    Button { createAndConnect(provider) } label: {
-                        HStack(spacing: 12) {
-                            ProviderGlyphView(glyph: provider.glyph, size: 24).frame(width: 28)
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(provider.workspaceTitle).font(AppTheme.font(size: 13, weightValue: 550))
-                                Text(provider.connectionSummary).font(AppTheme.font(size: 11))
-                                    .foregroundStyle(AppTheme.muted).lineLimit(2)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Choose a service, then sign in on its official page.")
+                .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
+            TextField("Find an assistant", text: $catalogSearch)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Find an assistant")
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(AccountProvider.allCases.filter {
+                        catalogSearch.isEmpty || $0.workspaceTitle.localizedCaseInsensitiveContains(catalogSearch)
+                    }) { provider in
+                        Button { createAndConnect(provider) } label: {
+                            HStack(spacing: 12) {
+                                ProviderGlyphView(glyph: provider.glyph, size: 24).frame(width: 28)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(provider.workspaceTitle).font(AppTheme.font(size: 13, weightValue: 550))
+                                    Text(provider.connectionSummary).font(AppTheme.font(size: 11))
+                                        .foregroundStyle(AppTheme.muted).lineLimit(2)
+                                }
+                                Spacer(minLength: 4)
+                                Image(systemName: "plus").font(.system(size: 12))
                             }
-                            Spacer(minLength: 4)
-                            Image(systemName: "arrow.right").font(.system(size: 12))
+                            .padding(.horizontal, 8).frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
-                        .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
-                        .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
-                        .contentShape(Rectangle())
+                        .buttonStyle(WorkspaceQuietButtonStyle()).disabled(manager.authenticationInProgress)
+                        .accessibilityLabel("Add \(provider.workspaceTitle). \(provider.connectionDetail)")
                     }
-                    .buttonStyle(WorkspaceQuietButtonStyle()).disabled(manager.authenticationInProgress)
-                    .accessibilityLabel("Add \(provider.workspaceTitle). \(provider.connectionDetail)")
                 }
             }
-            Text("Choose your service, complete its official sign-in, then add a nickname or emoji.")
-                .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
-                .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 24)
+            Button {
+                showingAdd = false; showingCustom = true
+            } label: {
+                Label("Add a custom assistant", systemImage: "plus.circle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }.buttonStyle(AppButtonStyle(compact: true))
         }
-        .padding(.horizontal, 30)
+        .padding(24)
     }
 
     private func createAndConnect(_ provider: AccountProvider) {
@@ -380,74 +396,48 @@ struct AccountsView: View {
         } catch { localError = error.localizedDescription }
     }
 
-    private var automaticSelectionBar: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "slider.horizontal.3").font(.system(size: 16))
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Automatic rotation").font(AppTheme.font(size: 11, weightValue: 550))
-                HStack(spacing: 3) {
-                    Text("Switch at")
-                    Text("\(Int(manager.switchThresholdPercent))%").monospacedDigit()
-                    Text("remaining.")
-                    Text("When no account is fuller, each one is used down to 2% before moving on.")
-                }
-                .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
-            }
-            Spacer(minLength: 12)
-            Toggle("Auto-select", isOn: $manager.automaticSelection)
-                .font(AppTheme.font(size: 11)).toggleStyle(.switch).controlSize(.small)
-                .disabled(!manager.accounts.contains { $0.provider.supportsAutomaticSelection })
-                .help("Claude switches its Mac login at your threshold. Other coding assistants use the next account when opened.")
-            Button("Order & threshold…") { showingRotation = true }
-                .buttonStyle(WorkspaceSelectionStyle())
-                .disabled(filter?.supportsAutomaticSelection != true)
-        }
-        .padding(.vertical, 18).padding(.horizontal, 30)
-    }
-
     private var nextSessionBar: some View {
-        HStack(spacing: 6) {
-            Circle().fill(AppTheme.ink).frame(width: 4, height: 4).accessibilityHidden(true)
-            if let selectedAccount {
-                if selectedAccount.isBrowserOnly {
-                    Text("Selected profile:")
-                } else if selectedAccount.provider == .claude {
-                    Text("Next account:")
-                } else {
-                    Text("Next \(selectedAccount.provider.workspaceTitle) session:")
-                }
-                Text(displayName(for: selectedAccount)).font(AppTheme.font(size: 10, weightValue: 600)).lineLimit(1)
-                if manager.automaticSelection && selectedAccount.provider.supportsAutomaticSelection {
-                    Text("· next in rotation").foregroundStyle(AppTheme.muted)
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
+                if filter?.supportsAutomaticSelection == true {
+                    Toggle("Automatic rotation", isOn: $manager.automaticSelection)
+                        .font(AppTheme.font(size: 11)).toggleStyle(.switch).controlSize(.mini)
+                    Button { showingRotation = true } label: {
+                        Image(systemName: "slider.horizontal.3").frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(WorkspaceQuietButtonStyle()).help("Order & threshold…")
+                    .accessibilityLabel("Order & threshold…")
                 }
                 Spacer(minLength: 8)
-                if selectedAccount.provider == .claude || selectedAccount.provider == .codex {
-                    Button(selectedAccount.provider == .claude ? "Use OpenAI…" : "Open Claude Code…") { showingOpenAIRelay = true }
-                        .buttonStyle(WorkspaceSelectionStyle())
-                        .disabled(manager.authenticationInProgress)
-                }
-                if selectedAccount.isBrowserOnly {
-                    Button("Open profile") { Task { await manager.launch(selectedAccount, project: projectURL) } }
-                        .buttonStyle(WorkspaceSelectionStyle(primary: true))
-                        .disabled(!manager.state(for: selectedAccount).isConnected || manager.state(for: selectedAccount).isBusy)
-                } else {
-                    Button { Task { await manager.launch(selectedAccount, project: projectURL) } } label: {
-                        if selectedAccount.provider == .claude {
-                            Text("Use account")
-                        } else {
-                            Text("Open \(selectedAccount.provider.workspaceTitle)")
-                        }
+                Menu {
+                    Button("Choose project folder…", action: chooseProjectFolder)
+                    if filter == .claude || filter == .codex {
+                        Button(filter == .claude ? "Use OpenAI…" : "Open Claude Code…") { showingOpenAIRelay = true }
+                            .disabled(manager.authenticationInProgress)
                     }
-                    .buttonStyle(WorkspaceSelectionStyle(primary: true))
-                    .disabled(!manager.state(for: selectedAccount).isConnected || manager.state(for: selectedAccount).isBusy)
+                } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
+                    .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Session options")
+            }
+            if let selectedAccount {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(selectedAccount.isBrowserOnly ? "Selected profile" : "For your next session")
+                            .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
+                        Text(displayName(for: selectedAccount)).font(AppTheme.font(size: 12, weightValue: 550)).lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Button {
+                        Task { await manager.launch(selectedAccount, project: projectURL) }
+                    } label: {
+                        Label(selectedAccount.isBrowserOnly ? "Open profile" : "Open \(selectedAccount.provider.workspaceTitle)",
+                              systemImage: "arrow.up.right")
+                    }
+                    .buttonStyle(AppButtonStyle(primary: true, compact: true))
+                    .disabled(!manager.state(for: selectedAccount).isConnected || manager.state(for: selectedAccount).isBusy || manager.authenticationInProgress)
                 }
-            } else {
-                Text("Choose an assistant to prepare your next session.")
-                Spacer()
             }
         }
-        .font(AppTheme.font(size: 10))
-        .padding(.horizontal, 30).padding(.vertical, 10).frame(minHeight: 48)
+        .padding(.horizontal, 24).padding(.vertical, 12)
         .background(AppTheme.sidebar)
         .overlay(alignment: .top) { Rectangle().fill(AppTheme.line).frame(height: 1) }
     }
@@ -465,7 +455,7 @@ struct AccountsView: View {
             Spacer()
             Button("Cancel") { manager.cancelLogin() }.buttonStyle(WorkspaceSelectionStyle())
         }
-        .padding(.horizontal, 30).padding(.vertical, 10).background(AppTheme.soft)
+        .padding(.horizontal, 24).padding(.vertical, 10).background(AppTheme.soft)
     }
 
     /// One problem, one sentence, one button. The colour separates "macOS is
@@ -489,7 +479,6 @@ struct AccountsView: View {
         }
         .padding(.leading, 27).padding(.trailing, 30).padding(.vertical, 12)
         .background(tint.opacity(0.06))
-        .overlay(alignment: .leading) { Rectangle().fill(tint).frame(width: 3) }
         .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(attention.title). \(attention.detail)")
@@ -497,25 +486,9 @@ struct AccountsView: View {
 
     private static func attentionTint(_ kind: AccountAttention.Kind) -> Color {
         switch kind {
-        case .keychainAccess, .reconnect: return Color(hex: 0xB3261E)
-        case .switchPaused, .queueEmpty: return Color(hex: 0x8A5300)
+        case .keychainAccess, .reconnect: return Palette.alert
+        case .switchPaused, .queueEmpty: return AppTheme.muted
         }
-    }
-
-    /// The quiet line under the banner: what is running, what is queued, and
-    /// whether a switch would work if it were needed this minute.
-    private var healthLine: some View {
-        HStack(spacing: 7) {
-            Circle().fill(manager.health.isSwitchReady ? Color(hex: 0x1F7A44) : AppTheme.muted)
-                .frame(width: 6, height: 6)
-            Text(manager.healthSummary).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
-                .lineLimit(1).truncationMode(.tail)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 30).padding(.vertical, 8)
-        .background(AppTheme.paper)
-        .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
-        .accessibilityElement(children: .combine)
     }
 
     private func repair(_ attention: AccountAttention) {
@@ -538,7 +511,7 @@ struct AccountsView: View {
                 .buttonStyle(.plain).accessibilityLabel("Dismiss notice")
         }
         .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
-        .padding(.horizontal, 30).padding(.vertical, 10).background(AppTheme.paper)
+        .padding(.horizontal, 24).padding(.vertical, 10).background(AppTheme.paper)
     }
 
     private func chooseProjectFolder() {
@@ -674,11 +647,18 @@ private struct AssistantRow: View {
                 .padding(.trailing, 8)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Button { showingUsage = true } label: { quotaRing }
-                .buttonStyle(.plain).frame(width: 110)
+            Button { showingUsage = true } label: {
+                VStack(spacing: 0) {
+                    quotaRing
+                    if let period = state.headlinePeriodText(for: account.provider) {
+                        Text(period).font(AppTheme.font(size: 9)).foregroundStyle(AppTheme.muted)
+                    }
+                }
+            }
+                .buttonStyle(.plain).frame(width: 78)
                 .accessibilityLabel("Usage details for \(displayLabel): \(quotaDescription)")
                 .popover(isPresented: $showingUsage) { usageDetails }
-            selectionControl.frame(width: 110)
+            selectionControl.frame(width: 100)
         }
         .padding(.vertical, 8).frame(minHeight: 76)
         .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
@@ -688,15 +668,15 @@ private struct AssistantRow: View {
 
     private var quotaDescription: String {
         if account.isBrowserOnly { return "Check usage on the official website" }
-        guard let remaining = state.accountRemainingPercent, state.isConnected else { return "Usage unavailable" }
+        guard let remaining = state.headlineRemainingPercent(for: account.provider), state.isConnected else { return "Usage unavailable" }
         let value = displayMode == .remaining ? remaining : 100 - remaining
-        return "\(Int(value.rounded())) percent \(displayMode.unit)\(state.isFresh() ? "" : ", last known; refresh needed")"
+        return "\(Int(value.rounded())) percent \(displayMode.unit) · \(state.headlinePeriodText(for: account.provider) ?? "")\(state.isFresh() ? "" : ", last known; refresh needed")"
     }
 
     private var quotaRing: some View {
         ZStack {
             Circle().stroke(AppTheme.track, lineWidth: 3)
-            if let remaining = state.accountRemainingPercent, state.isConnected, !account.isBrowserOnly {
+            if let remaining = state.headlineRemainingPercent(for: account.provider), state.isConnected, !account.isBrowserOnly {
                 let shown = displayMode == .remaining ? remaining : 100 - remaining
                 Circle().trim(from: 0, to: min(max(shown / 100, 0), 1))
                     .stroke(AppTheme.ink.opacity(state.isFresh() ? 1 : 0.45),
@@ -727,19 +707,18 @@ private struct AssistantRow: View {
                 do { try manager.setNext(account) } catch { reportError(error.localizedDescription) }
             } label: {
                 HStack(spacing: 5) {
-                    if isSelected { Image(systemName: "checkmark") }
+                    if isSelected { Image(systemName: "checkmark").font(.system(size: 9)) }
                     if isSelected {
-                        Text("Next")
+                        Text("Selected")
                     } else {
-                        Text("Set next")
-                        Image(systemName: "arrow.right")
+                        Text("Select")
                     }
                 }
-                .frame(width: 86)
+                .frame(width: 70)
             }
             .buttonStyle(WorkspaceSelectionStyle(primary: isSelected))
             .disabled(state.isBusy || isLoginPending)
-            .accessibilityLabel("\(isSelected ? "Next" : "Set next") \(displayLabel) for \(account.provider.workspaceTitle)")
+            .accessibilityLabel("\(isSelected ? "Selected" : "Select") \(displayLabel) for \(account.provider.workspaceTitle)")
             .accessibilityAddTraits(isSelected ? .isSelected : [])
         }
     }
@@ -749,7 +728,7 @@ private struct AssistantRow: View {
         if state.isBusy { return "Checking…" }
         if !state.isConnected { return state.message ?? "Connect this account." }
         if account.isBrowserOnly { return "Browser profile ready" }
-        if let modelLimit = AccountUsageNotice.modelLimit(state) { return modelLimit }
+        if account.provider == .claude && manager.systemClaudeAccountID == account.id { return "Current account on this Mac" }
         if let message = state.message {
             if account.provider == .claude && state.needsFirstUsage &&
                 message == "Usage appears after the first Claude Code session launched here." {
@@ -824,7 +803,7 @@ private struct AssistantRow: View {
             }
         }
         .font(AppTheme.font(size: 12)).padding(24).frame(width: 390, alignment: .leading)
-        .background(AppTheme.surface).foregroundStyle(AppTheme.ink).preferredColorScheme(.light)
+        .background(AppTheme.surface).foregroundStyle(AppTheme.ink).preferredColorScheme(.dark)
     }
 
     @ViewBuilder private var usageFooter: some View {
@@ -870,6 +849,7 @@ private struct RotationSettingsView: View {
     }
 
     var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Automatic rotation")
@@ -968,10 +948,19 @@ private struct RotationSettingsView: View {
                 Toggle("Automatic rotation", isOn: $manager.automaticSelection)
                     .toggleStyle(.switch).controlSize(.small)
                 Spacer()
-                Button("Done") { dismiss() }.buttonStyle(WorkspaceSelectionStyle(primary: true))
+
             }
         }
-        .padding(26).frame(width: 600, height: 680)
+        .padding(24)
+        }
+        .safeAreaInset(edge: .bottom) {
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }.buttonStyle(WorkspaceSelectionStyle(primary: true))
+                    .keyboardShortcut(.defaultAction)
+            }.padding(16).background(AppTheme.surface)
+        }
+        .frame(width: 560, height: 480)
         .background(AppTheme.surface).foregroundStyle(AppTheme.ink).tint(AppTheme.ink)
     }
 
@@ -1008,7 +997,7 @@ private struct AddAssistantFlow: View {
                 } else { connectionStep(account, state) }
             } else { providerStep }
         }
-        .frame(width: 720, height: 570).background(AppTheme.surface).foregroundStyle(AppTheme.ink)
+        .frame(width: 560, height: 470).background(AppTheme.surface).foregroundStyle(AppTheme.ink)
         .alert("Couldn't continue", isPresented: Binding(
             get: { localError != nil }, set: { if !$0 { localError = nil } }
         )) {

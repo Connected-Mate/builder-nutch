@@ -7,9 +7,13 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let manager: AccountManager
     private let preferences: Preferences
+    private let navigation = AccountsNavigation()
+    private let settingsContent: (() -> AnyView)?
     private let onOpenSettings: (() -> Void)?
 
-    init(manager: AccountManager, preferences: Preferences, onOpenSettings: (() -> Void)? = nil) {
+    init(manager: AccountManager, preferences: Preferences, onOpenSettings: (() -> Void)? = nil,
+         settingsContent: (() -> AnyView)? = nil) {
+        self.settingsContent = settingsContent
         self.manager = manager
         self.preferences = preferences
         self.onOpenSettings = onOpenSettings
@@ -23,26 +27,32 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
         }
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1160, height: 680),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 540),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Builder Nutch"
-        window.minSize = NSSize(width: 980, height: 588)
-        window.setFrameAutosaveName("BuilderNutchPreviewWindowV1")
+        window.minSize = NSSize(width: 700, height: 480)
+        window.setFrameAutosaveName("BuilderNutchCompactWindowV2")
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
-        window.appearance = NSAppearance(named: .aqua)
+        window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = AppTheme.windowBackground
-        window.titlebarAppearsTransparent = false
+        window.titlebarAppearsTransparent = true
         window.delegate = self
         window.contentView = NSHostingView(
-            rootView: AccountsView(manager: manager, preferences: preferences, onOpenSettings: onOpenSettings)
+            rootView: AccountsView(manager: manager, preferences: preferences, onOpenSettings: onOpenSettings,
+                                   navigation: navigation, settingsContent: settingsContent)
         )
         window.center()
         self.window = window
         surface(window)
+    }
+
+    func showSettings() {
+        navigation.showingSettings = true
+        show()
     }
 
     private func surface(_ window: NSWindow) {

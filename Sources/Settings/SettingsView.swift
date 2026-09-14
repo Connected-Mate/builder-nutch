@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The settings sheet, reached from the orb below the notch.
+/// Compact settings content embedded in the account-manager window.
 struct SettingsView: View {
     @ObservedObject var preferences: Preferences
     let providers: () -> [ProviderSummary]
@@ -21,13 +21,25 @@ struct SettingsView: View {
     let retry: (String) -> Void
     @ObservedObject var updater: Updater
     var managedAccounts = false
+    @State private var section = SettingsSection.appearance
+
+    private enum SettingsSection: String, CaseIterable, Identifiable {
+        case appearance = "Appearance", notifications = "Notifications", general = "General"
+        var id: String { rawValue }
+    }
     @AppStorage("app.language") private var appLanguage = AppLanguage.system.rawValue
 
     var body: some View {
-        ScrollView {
-          VStack(alignment: .leading, spacing: 24) {
-            introduction
-            if !managedAccounts { settingsSection("Integrations") {
+        VStack(spacing: 0) {
+          Picker("Settings section", selection: $section) {
+              ForEach(SettingsSection.allCases) { section in
+                  Text(LocalizedStringKey(section.rawValue)).tag(section)
+              }
+          }
+          .pickerStyle(.segmented).padding(.horizontal, 24).padding(.vertical, 16)
+          ScrollView {
+          VStack(alignment: .leading, spacing: 20) {
+            if !managedAccounts && section == .general { settingsSection("Integrations") {
                 if needsSetup { setupNote }
                 ForEach(accounts) {
                     AccountRow(provider: $0, preferences: preferences,
@@ -51,7 +63,7 @@ struct SettingsView: View {
             // looks like and where it turns up. Split across three headers it
             // read as three unrelated settings, and "Where Codenotch appears"
             // was a header long enough to look like a warning.
-            settingsSection("Appearance") {
+            if section == .appearance { settingsSection("Appearance") {
                 SettingsChoices(label: "Usage display", choices: UsageDisplayMode.allCases,
                                 selection: Binding(
                                     get: { preferences.usageDisplayMode },
@@ -65,34 +77,25 @@ struct SettingsView: View {
 
                 SettingsChoices(label: "Show", choices: NotchVisibility.allCases,
                                 selection: $preferences.notchVisibility, title: { $0.title })
+                    .help(LocalizedStringKey(preferences.notchVisibility.explanation))
 
-                Text(LocalizedStringKey(preferences.notchVisibility.explanation))
-                    .font(AppTheme.font(.caption))
-                    .foregroundStyle(AppTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
 
                 SettingsChoices(label: "Edge", choices: NotchEdge.allCases,
                                 selection: $preferences.notchEdge, title: { $0.title })
+                    .help(LocalizedStringKey(preferences.notchEdge.explanation))
 
-                Text(LocalizedStringKey(preferences.notchEdge.explanation))
-                    .font(AppTheme.font(.caption))
-                    .foregroundStyle(AppTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
 
                 // "App icon", not "Icon": the two rows above it are about the
                 // notch, and on its own the word would read as another of them.
                 SettingsChoices(label: "App icon", choices: AppPresence.allCases,
                                 selection: $preferences.appPresence, title: { $0.title })
+                    .help(LocalizedStringKey(preferences.appPresence.explanation))
 
-                Text(LocalizedStringKey(preferences.appPresence.explanation))
-                    .font(AppTheme.font(.caption))
-                    .foregroundStyle(AppTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            } }
 
             // One switch per thing macOS might say. The notch shows everything
             // regardless; these only decide what is allowed to interrupt.
-            settingsSection("Notifications") {
+            if section == .notifications { settingsSection("Notifications") {
                 Toggle("Tell me when an account is running low", isOn: $preferences.usageAlerts)
                 // Wrapped in a key rather than written as a concatenated
                 // literal: `Text` only localises a literal, and a `+` chain
@@ -113,12 +116,12 @@ struct SettingsView: View {
                     .font(AppTheme.font(.caption))
                     .foregroundStyle(AppTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-            }
+            } }
 
             // Startup and updates together: both are about what Codenotch does
             // without being asked, and one switch under its own header looked
             // like an oversight rather than a section.
-            settingsSection("General") {
+            if section == .general { settingsSection("General") {
                 SettingsChoices(label: "Language", choices: AppLanguage.allCases,
                                 selection: Binding(
                                     get: { AppLanguage(rawValue: appLanguage) ?? .system },
@@ -174,23 +177,22 @@ struct SettingsView: View {
                     Text("This community build checks no external update feed. Install new releases from the project page.")
                         .font(AppTheme.font(.caption)).foregroundStyle(AppTheme.muted)
                 }
-            }
+            } }
           }
-          .padding(32)
+          .padding(.horizontal, 24).padding(.bottom, 20)
+          }
         }
         .scrollBounceBehavior(.basedOnSize)
-        // Outside the form, so it stays put at the foot of the window rather
-        // than scrolling away below the last section — a credit that has to be
-        // hunted for is not really a credit.
+        // Keep attribution and support reachable in each compact section.
         .safeAreaInset(edge: .bottom, spacing: 0) { credit }
-        .frame(width: SettingsView.width, height: SettingsView.height)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppTheme.paper)
         .foregroundStyle(AppTheme.ink)
         .font(AppTheme.font(.body))
         .buttonStyle(AppButtonStyle(compact: true))
         .toggleStyle(.switch)
         .tint(AppTheme.ink)
-        .preferredColorScheme(.light)
+        .preferredColorScheme(.dark)
         .environment(\.locale, (AppLanguage(rawValue: appLanguage) ?? .system).locale)
         .onAppear { accounts = providers() }
         .onReceive(NotificationCenter.default.publisher(
@@ -198,25 +200,8 @@ struct SettingsView: View {
         )) { _ in accounts = providers() }
     }
 
-    private var introduction: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Make room for your work.")
-                .font(AppTheme.font(size: 28, weight: .semibold))
-                .accessibilityAddTraits(.isHeader)
-            Text("Choose where Builder Nutch lives, and when it appears.")
-                .font(AppTheme.font(.callout))
-                .foregroundStyle(AppTheme.muted)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.bottom, 8)
-    }
-
     private func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Rectangle().fill(AppTheme.line).frame(height: 1).accessibilityHidden(true)
-            Text(LocalizedStringKey(title))
-                .font(AppTheme.font(.title3, weight: .semibold))
-                .accessibilityAddTraits(.isHeader)
+        VStack(alignment: .leading, spacing: 12) {
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -230,7 +215,7 @@ struct SettingsView: View {
                     .buttonStyle(AppButtonStyle(compact: true))
                 Spacer(minLength: 8)
                 HStack(spacing: 4) {
-                    Text(managedAccounts ? "Based on Codenotch by" : "App designed and developed by")
+                    Text("Codenotch by")
                     Link("@hivinz_", destination: SettingsView.authorURL)
                         .onHover { inside in
                             if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
@@ -249,9 +234,9 @@ struct SettingsView: View {
     static let authorURL = URL(string: "https://x.com/hivinz_")!
 
     /// Room for all four visibility choices without shrinking their labels.
-    static let width: CGFloat = 640
+    static let width: CGFloat = 520
     /// The page scrolls while credits remain visible at the foot of the window.
-    static let height: CGFloat = 680
+    static let height: CGFloat = 450
 
     /// Says which three points, and says that the important warning is not the
     /// one being switched off. Somebody turning usage alerts off should not

@@ -1,14 +1,11 @@
 import AppKit
 import SwiftUI
 
-/// Hosts the settings sheet in its own window.
-///
-/// A real window rather than a panel attached to the notch: settings are a place
-/// you go, not something you glance at, and a floating panel that follows the
-/// notch would be one more thing hovering over the screen edge.
+/// Supplies settings content to the single account-manager window.
 @MainActor
 final class SettingsWindowController {
-    private var window: NSWindow?
+    /// All settings entry points route to the existing account manager.
+    var onShowInAccounts: (() -> Void)?
     private let preferences: Preferences
     /// A closure, not a snapshot. Read once at launch, the account shown here
     /// went stale the moment someone switched account in Cursor — and stayed
@@ -39,51 +36,14 @@ final class SettingsWindowController {
         self.signIn = signIn
     }
 
-    /// Bring the window to the front from an accessory app.
-    ///
-    /// `makeKeyAndOrderFront` plus `activate` is not enough on its own here:
-    /// an app with no dock icon is not always allowed to pull itself in front
-    /// of whatever the user is working in, and the window then opens silently
-    /// behind everything. `orderFrontRegardless` is the part that does not ask
-    /// permission, and it is why the window appears at all.
-    private func surface(_ window: NSWindow) {
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        window.orderFrontRegardless()
+    func makeView() -> AnyView {
+        AnyView(SettingsView(preferences: preferences, providers: providers,
+                             signOut: signOut, signIn: signIn,
+                             switchAccount: switchAccount, retry: retry,
+                             updater: updater, managedAccounts: managedAccounts))
     }
 
     func show() {
-        if let window {
-            surface(window)
-            return
-        }
-
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0,
-                                width: SettingsView.width, height: SettingsView.height),
-            // No `fullSizeContentView`: it pulls content up beneath the title
-            // bar, and the form's first section header would sit behind it.
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "Builder Nutch"
-        window.appearance = NSAppearance(named: .aqua)
-        window.backgroundColor = AppTheme.windowBackground
-        window.titlebarAppearsTransparent = true
-        window.contentView = NSHostingView(
-            rootView: SettingsView(preferences: preferences,
-                                   providers: providers,
-                                   signOut: signOut,
-                                   signIn: signIn,
-                                   switchAccount: switchAccount,
-                                   retry: retry,
-                                   updater: updater,
-                                   managedAccounts: managedAccounts)
-        )
-        window.center()
-        window.isReleasedWhenClosed = false
-        self.window = window
-        surface(window)
+        onShowInAccounts?()
     }
 }

@@ -48,6 +48,7 @@ struct UsageInsightsView: View {
     @ObservedObject var manager: AccountManager
     @ObservedObject var model: UsageInsightsModel
     let hidePersonalDetails: Bool
+    @State private var expandedProjects: Set<String> = []
 
     var body: some View {
         Group {
@@ -75,18 +76,19 @@ struct UsageInsightsView: View {
                 .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(30)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(24)
     }
 
     private func content(_ report: UsageLedgerReport) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: 24) {
                 overview(report)
                 projects(report)
-                accounts(report)
+                DisclosureGroup("By account") { accounts(report).padding(.top, 12) }
+                    .font(AppTheme.font(size: 12, weightValue: 550))
                 footnote(report)
             }
-            .padding(.horizontal, 30).padding(.top, 4).padding(.bottom, 30)
+            .padding(24)
         }
     }
 
@@ -95,13 +97,15 @@ struct UsageInsightsView: View {
     private func overview(_ report: UsageLedgerReport) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
                 Text(String(format: NSLocalizedString("%d sessions", comment: "Usage summary"), report.sessionCount))
                     .font(AppTheme.font(size: 22, weightValue: 550)).tracking(-0.5)
                 Text(String(format: NSLocalizedString("%@ messages · last %d days", comment: "Usage summary"),
                             Self.compact(report.messages), report.days))
-                    .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
+                    .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                }
                 Spacer(minLength: 8)
-                Picker("", selection: $model.days) {
+                Picker("Period", selection: $model.days) {
                     Text("7 days").tag(7)
                     Text("30 days").tag(30)
                 }
@@ -119,7 +123,7 @@ struct UsageInsightsView: View {
         let byDay = Dictionary(uniqueKeysWithValues: report.timeline.map { ($0.day, $0) })
         let days = Self.dayKeys(from: report.windowStart, to: report.windowEnd)
         let peak = max(report.timeline.map(\.weight).max() ?? 1, 1)
-        return HStack(alignment: .bottom, spacing: 6) {
+        return HStack(alignment: .bottom, spacing: report.days <= 7 ? 6 : 2) {
             ForEach(days, id: \.self) { day in
                 let slice = byDay[day]
                 VStack(spacing: 5) {
@@ -127,8 +131,10 @@ struct UsageInsightsView: View {
                         .fill(slice == nil ? AppTheme.track : AppTheme.ink)
                         .frame(height: max(3, CGFloat((slice?.weight ?? 0) / peak) * 56))
                         .frame(maxHeight: 56, alignment: .bottom)
-                    Text(Self.dayLabel(day, wide: report.days <= 7))
-                        .font(AppTheme.font(size: 9)).foregroundStyle(AppTheme.muted).lineLimit(1)
+                    if report.days <= 7 {
+                        Text(Self.dayLabel(day, wide: true))
+                            .font(AppTheme.font(size: 9)).foregroundStyle(AppTheme.muted).lineLimit(1)
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 .help(slice.map { "\(Self.dayLabel(day, wide: true)): \(Int($0.sharePercent.rounded()))%" } ?? Self.dayLabel(day, wide: true))
@@ -144,47 +150,46 @@ struct UsageInsightsView: View {
     // MARK: - Projects
 
     private func projects(_ report: UsageLedgerReport) -> some View {
-        let ranked = rankedProjects(report)
-        return VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                Text("PROJECT").frame(maxWidth: .infinity, alignment: .leading)
-                Text("SHARE").frame(width: 150, alignment: .leading)
-                Text("SESSIONS").frame(width: 70, alignment: .trailing)
-                Text("PAID BY").frame(width: 180, alignment: .trailing)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Projects")
+                Spacer()
+                Text("Estimated share").foregroundStyle(AppTheme.muted)
             }
-            .font(AppTheme.font(size: 9, weightValue: 500)).tracking(0.8).foregroundStyle(AppTheme.muted)
-            .padding(.bottom, 10)
-            .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
-            ForEach(ranked, id: \.path) { project in projectRow(project) }
+            .font(AppTheme.font(size: 11, weightValue: 550)).padding(.bottom, 8)
+            ForEach(rankedProjects(report), id: \.path) { project in projectRow(project) }
         }
     }
 
     private func projectRow(_ project: RankedProject) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(project.name).font(AppTheme.font(size: 13, weightValue: 550)).lineLimit(1)
+        DisclosureGroup(isExpanded: Binding(
+            get: { expandedProjects.contains(project.path) },
+            set: { if $0 { expandedProjects.insert(project.path) } else { expandedProjects.remove(project.path) } }
+        )) {
+            VStack(alignment: .leading, spacing: 6) {
                 if !hidePersonalDetails {
-                    Text(Self.shortPath(project.path)).font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
-                        .lineLimit(1).truncationMode(.middle)
+                    Text(Self.shortPath(project.path)).lineLimit(2).truncationMode(.middle)
+                    if !project.topics.isEmpty { Text(project.topics.joined(separator: " · ")) }
                 }
-                if !project.topics.isEmpty {
-                    Text(project.topics.joined(separator: " · "))
-                        .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
-                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                }
+                Text(project.payers.joined(separator: ", "))
             }
-            .frame(maxWidth: .infinity, alignment: .leading).padding(.trailing, 16)
-            shareBar(project.sharePercent).frame(width: 150, alignment: .leading)
-            Text("\(project.sessions)").font(AppTheme.font(size: 12)).monospacedDigit()
-                .frame(width: 70, alignment: .trailing)
-            Text(project.payers.joined(separator: ", "))
-                .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
-                .lineLimit(2).multilineTextAlignment(.trailing)
-                .frame(width: 180, alignment: .trailing)
+            .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(hidePersonalDetails ? "Project" : project.name)
+                        .font(AppTheme.font(size: 13, weightValue: 550)).lineLimit(1)
+                    Text(String(format: NSLocalizedString("%d sessions", comment: "Usage summary"), project.sessions))
+                        .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                shareBar(project.sharePercent).frame(width: 110)
+            }
+            .padding(.trailing, 8)
         }
         .padding(.vertical, 12)
         .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
-        .accessibilityElement(children: .combine)
     }
 
     private func shareBar(_ percent: Double) -> some View {
@@ -206,25 +211,16 @@ struct UsageInsightsView: View {
 
     private func accounts(_ report: UsageLedgerReport) -> some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                Text("ACCOUNT").frame(maxWidth: .infinity, alignment: .leading)
-                Text("SHARE").frame(width: 150, alignment: .leading)
-                Text("SESSIONS").frame(width: 70, alignment: .trailing)
-                Text("HOW WE KNOW").frame(width: 180, alignment: .trailing)
-            }
-            .font(AppTheme.font(size: 9, weightValue: 500)).tracking(0.8).foregroundStyle(AppTheme.muted)
-            .padding(.bottom, 10)
-            .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
             ForEach(report.accounts.sorted { $0.weight > $1.weight }, id: \.accountKey) { share in
-                HStack(spacing: 0) {
-                    Text(label(for: share)).font(AppTheme.font(size: 13, weightValue: 550)).lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.trailing, 16)
-                    shareBar(share.sharePercent).frame(width: 150, alignment: .leading)
-                    Text("\(share.sessionCount)").font(AppTheme.font(size: 12)).monospacedDigit()
-                        .frame(width: 70, alignment: .trailing)
-                    Text(Self.attributionText(share.attribution))
-                        .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
-                        .frame(width: 180, alignment: .trailing)
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(label(for: share)).font(AppTheme.font(size: 13, weightValue: 550)).lineLimit(1)
+                        Text(String(format: NSLocalizedString("%d sessions", comment: "Usage summary"), share.sessionCount))
+                            + Text(" · ") + Text(Self.attributionText(share.attribution))
+                    }
+                    .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    shareBar(share.sharePercent).frame(width: 110)
                 }
                 .padding(.vertical, 12)
                 .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
@@ -289,6 +285,7 @@ struct UsageInsightsView: View {
     }
 
     private func label(forKey key: String, managedID: String?, vendorID: String?) -> String {
+        if hidePersonalDetails { return NSLocalizedString("Account", comment: "Hidden account name") }
         if let managedID, let account = manager.accounts.first(where: { $0.id.uuidString.lowercased() == managedID.lowercased() }) {
             return account.label
         }

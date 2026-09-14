@@ -2,18 +2,19 @@ import AppKit
 import CoreText
 import SwiftUI
 
-/// Shared with the approved website. The ambient notch has its own dark palette.
+/// Compact native companion to the dark notch. Existing neutral tokens are
+/// reused in reverse contrast; the notch's palette and geometry stay untouched.
 enum AppTheme {
-    static let paper = Color(hex: 0xFAFAFA)
-    static let surface = Color.white
-    static let ink = Color(hex: 0x242424)
-    static let muted = Color(hex: 0x626262)
-    static let line = Color(hex: 0xE3E3E3)
-    static let soft = Color(hex: 0xF3F3F3)
-    static let sidebar = Color(hex: 0xFCFCFC)
-    static let selected = Color(hex: 0xEEEEEE)
-    static let track = Color(hex: 0xE7E7E7)
-    static let windowBackground = NSColor(srgbRed: 250 / 255, green: 250 / 255, blue: 250 / 255, alpha: 1)
+    static let paper = Color(hex: 0x242424)
+    static let surface = Color(hex: 0x242424)
+    static let ink = Color(hex: 0xFAFAFA)
+    static let muted = Color(hex: 0xAAAAAA)
+    static let line = Color(hex: 0x303030)
+    static let soft = Color(hex: 0x2D2D2D)
+    static let sidebar = Color.black.opacity(0.16)
+    static let selected = Color(hex: 0x303030)
+    static let track = Color(hex: 0x303030)
+    static let windowBackground = NSColor(srgbRed: 36 / 255, green: 36 / 255, blue: 36 / 255, alpha: 1)
 
     /// Registered only inside this application, without installing a system font.
     static let fontName: String? = {
