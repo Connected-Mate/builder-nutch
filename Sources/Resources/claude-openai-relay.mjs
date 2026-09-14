@@ -261,6 +261,8 @@ export class Relay {
       }else{
         const started=await this.app.rpc('turn/start',{threadId:s.id,input:inputFor(body),environments:[],model:this.model,effort:'high'},30000);
         s.turnId=started.turn.id;
+        // Cancellation may have disposed the slot while turn/start was pending.
+        if(!this.slots.has(s.id))await this.app.rpc('turn/interrupt',{threadId:s.id,turnId:s.turnId},3000).catch(()=>{});
       }
     }catch(error){this.finish(s,safeError(error));}
   }
