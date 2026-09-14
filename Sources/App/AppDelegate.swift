@@ -8,6 +8,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchWindowController?
     private var accountManager: AccountManager?
+    private var customAssistants: CustomAssistantStore?
     private var accountsWindow: AccountsWindowController?
     private var settings: SettingsWindowController?
     private var preferences: Preferences?
@@ -56,15 +57,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             signOut: { _ in }, signIn: { _ in false },
             switchAccount: { _ in false }, retry: { _ in }, managedAccounts: true
         )
-        let accounts = AccountsWindowController(manager: manager, preferences: preferences, onOpenSettings: { [weak appearance] in
-            appearance?.show()
-        })
+        let accounts = AccountsWindowController(
+            manager: manager, preferences: preferences,
+            settingsContent: { appearance.makeView() }
+        )
+        appearance.onShowInAccounts = { [weak accounts] in accounts?.showSettings() }
         self.accountManager = manager
         self.accountsWindow = accounts
         self.preferences = preferences
         self.notchController = controller
         self.settings = appearance
         self.updater = updater
+        let customAssistants = CustomAssistantStore.shared
+        self.customAssistants = customAssistants
+        customAssistants.$assistants.receive(on: RunLoop.main).sink { [weak self] _ in
+            self?.updateNotch()
+        }.store(in: &cancellables)
+        customAssistants.startMonitoring()
         // The notification centre, and the two things that speak through it.
         // Both are given the same notifier so a single authorisation covers
         // them, and both are built here rather than lazily: an escalation that
@@ -188,6 +197,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         accountsWindow?.show()
     }
 
+    func openSettings() {
+        escalator?.accountsWindowOpened()
+        accountsWindow?.showSettings()
+    }
+
     private func refresh() {
         guard !terminating, refreshTask == nil, let manager = accountManager else { return }
         refreshTask = Task { [weak self] in
@@ -220,6 +234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return manager.snapshot(for: displayed)
         }
+        controller.model.snapshots += (customAssistants?.assistants ?? []).map { $0.snapshot() }
         controller.model.refreshing = Set(manager.busyIDs.map(\.uuidString))
         controller.model.now = Date()
 
@@ -341,9 +356,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let accounts = displayed.map { account in
             let state = manager.state(for: account)
             let usage: String
-            if let remaining = state.remainingPercent {
+            if let remaining = state.headlineRemainingPercent(for: account.provider) {
                 let value = mode == .remaining ? remaining : 100 - remaining
-                usage = "\(Int(value.rounded()))% \(mode.unit)"
+                usage = "\(Int(value.rounded()))% \(mode.unit) · \(state.headlinePeriodText(for: account.provider) ?? "")"
             } else {
                 usage = "—"
             }
@@ -352,7 +367,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 name: account.emoji.map { "\($0) \(account.label)" } ?? account.label,
                 subtitle: hideDetails ? nil : (state.email ?? account.emailHint),
                 usage: usage,
-                usedFraction: state.windows.first?.usedFraction,
+                usedFraction: state.headlineWindow(for: account.provider)?.usedFraction,
                 isCurrent: account.id == currentBadge,
                 isNext: nextBadge != nil && account.id == nextBadge,
                 // `needsAttention`, not "has no reading". An account that is

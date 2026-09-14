@@ -129,13 +129,14 @@ final class ClaudeOpenAIRelayTests: XCTestCase {
         await manager.refresh(account)
         let view = NSHostingView(rootView: ClaudeOpenAIRelayView(manager: manager, project: .constant(root), hidePersonalDetails: true)
             .environment(\.locale, Locale(identifier: "fr")))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 700),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 500),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = view
-        view.frame = NSRect(x: 0, y: 0, width: 640, height: 700)
+        view.frame = NSRect(x: 0, y: 0, width: 600, height: 500)
         try await Task.sleep(nanoseconds: 200_000_000)
         view.layoutSubtreeIfNeeded()
-        XCTAssertEqual(view.fittingSize.width, 640, accuracy: 1)
+        XCTAssertEqual(view.fittingSize.width, 600, accuracy: 1)
+        XCTAssertEqual(view.fittingSize.height, 500, accuracy: 1)
         let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: bitmap)
         let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))

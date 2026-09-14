@@ -34,7 +34,7 @@ struct WhatsNewView: View {
         .foregroundStyle(AppTheme.ink)
         .font(AppTheme.font(.body))
         .tint(AppTheme.ink)
-        .preferredColorScheme(.light)
+        .preferredColorScheme(.dark)
     }
 
     private var header: some View {

@@ -31,6 +31,15 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.11.0",
+            headline: "Less to manage. More room to build.",
+            changes: [
+                .init(title: "A smaller, calmer workspace", detail: "Your accounts and settings now share one compact window. Details appear when you need them."),
+                .init(title: "Usage with a clear time period", detail: "The main percentage follows your session limit. Weekly limits and individual models remain visible in the details."),
+                .init(title: "Your own assistant", detail: "Copy a setup prompt for your AI. Its local MCP connection can create a personalized assistant in Builder Nutch.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.10.0",
             headline: "Clear limits. More ways to continue.",
             changes: [

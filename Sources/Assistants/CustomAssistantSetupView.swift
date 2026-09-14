@@ -39,9 +39,6 @@ struct CustomAssistantSetupView: View {
 
     private var introduction: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Your custom assistants")
-                .font(AppTheme.font(.title2, weight: .semibold))
-                .accessibilityAddTraits(.isHeader)
             Text("Give your AI the request below. It can create your assistant here and report usage it has actually observed.")
                 .foregroundStyle(AppTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)

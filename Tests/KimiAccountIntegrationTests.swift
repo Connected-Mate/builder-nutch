@@ -170,7 +170,13 @@ final class KimiAccountIntegrationTests: XCTestCase {
         _ = try await KimiAccountIntegration.read(executable: script, profile: root, environment: [:],
             cancellation: AccountCancellation(), runner: OfficialAccountProcess(), http: http, port: { 51247 }, startupTimeout: 3)
         let pid = try XCTUnwrap(Int32(String(contentsOf: pidFile, encoding: .utf8)))
-        XCTAssertNotEqual(kill(pid, 0), 0)
+        // SIGKILL can leave a briefly observable zombie until the supervisor's
+        // asynchronous reaper runs. Wait for removal, not only signal delivery.
+        for _ in 0..<200 {
+            if kill(pid, 0) == -1 && errno == ESRCH { return }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail("Owned Kimi server survived cleanup")
     }
 
     func testPortAllocatorAndLoopbackValidation() async throws {

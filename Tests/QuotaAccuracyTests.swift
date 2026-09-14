@@ -14,7 +14,7 @@ final class QuotaAccuracyTests: XCTestCase {
         XCTAssertTrue(state.message?.contains("Fable") == true)
         XCTAssertTrue(state.message?.contains("choose another model") == true)
         let account = ManagedAccount(id: UUID(), provider: .claude, label: "Staff2 fixture", createdAt: now)
-        XCTAssertEqual(AccountManager.headlineID(for: account, state: state), "seven_day")
+        XCTAssertEqual(AccountManager.headlineID(for: account, state: state), "five_hour")
     }
 
     func testModelLockBelowFullUsageNamesTheScopeWithoutInventingExhaustion() throws {
@@ -51,13 +51,13 @@ final class QuotaAccuracyTests: XCTestCase {
         XCTAssertNil(ManagedAccountState(windows: [known, unknown]).accountBindingWindow)
     }
 
-    func testMissingPrimaryAllowanceNeverBorrowsWeeklyUsage() {
+    func testMissingPrimaryAllowanceNeverBorrowsWeeklyUsage() throws {
         let weekly = LimitWindow(id: "seven_day", label: "Weekly limit", usedFraction: 0.70)
         let state = ManagedAccountState(isConnected: true, windows: [weekly])
         XCTAssertNil(state.primaryWindow)
         XCTAssertNil(state.primaryUsedFraction)
         XCTAssertNil(state.primaryRemainingPercent)
-        XCTAssertEqual(state.accountRemainingPercent, 30)
+        XCTAssertEqual(try XCTUnwrap(state.accountRemainingPercent), 30, accuracy: 0.001)
     }
 
     func testOtherDesktopProvidersKeepTheirDeclaredHeadline() {
@@ -75,7 +75,7 @@ final class QuotaAccuracyTests: XCTestCase {
         XCTAssertEqual(kimi.headlinePeriodText(for: .kimi), "Weekly")
     }
 
-    @MainActor func testHeadlineUsesTheSameSharedMeasurementForClaudeAndCodex() {
+    @MainActor func testHeadlineUsesTheSameSessionMeasurementForClaudeAndCodex() {
         for provider in [AccountProvider.claude, .codex] {
             let account = ManagedAccount(id: UUID(), provider: provider, label: "Fixture", createdAt: Date())
             let shortID = provider == .claude ? "five_hour" : "primary"
@@ -83,11 +83,16 @@ final class QuotaAccuracyTests: XCTestCase {
             let short = LimitWindow(id: shortID, label: "5h", usedFraction: 0.04)
             let weekly = LimitWindow(id: longID, label: "Weekly", usedFraction: 0.55)
             let known = ManagedAccountState(isConnected: true, windows: [short, weekly])
-            XCTAssertEqual(AccountManager.headlineID(for: account, state: known), longID)
+            XCTAssertEqual(AccountManager.headlineID(for: account, state: known), shortID)
             let partial = ManagedAccountState(isConnected: true, windows: [short, LimitWindow(id: longID, label: "Weekly")])
             let headlineID = AccountManager.headlineID(for: account, state: partial)
-            XCTAssertNil(partial.windows.first { $0.id == headlineID }, "Missing shared usage must blank every account headline")
+            XCTAssertEqual(partial.windows.first { $0.id == headlineID }?.usedFraction, 0.04,
+                           "An unknown weekly allowance must not hide the known session measurement")
             XCTAssertNil(partial.accountRemainingPercent)
+            let missingSession = ManagedAccountState(isConnected: true, windows: [weekly])
+            let missingID = AccountManager.headlineID(for: account, state: missingSession)
+            XCTAssertNil(missingSession.windows.first { $0.id == missingID },
+                         "A weekly allowance must not silently become the session headline")
         }
     }
 

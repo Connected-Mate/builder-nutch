@@ -4,6 +4,9 @@ import Darwin
 @main
 struct CodenotchMain {
     static func main() {
+        if CommandLine.arguments.contains(CustomAssistantMCPServer.flag) {
+            exit(CustomAssistantMCPServer.run())
+        }
         if CommandLine.arguments.contains("--diagnose-claude-accounts") {
             exit(ClaudeAccountDiagnostics.run())
         }
@@ -23,5 +26,11 @@ struct CodenotchApplication: App {
         // The notch is the UI; the panel is put up by the delegate. This scene
         // exists only because `App` needs one.
         Settings { EmptyView() }
+            .commands {
+                CommandGroup(replacing: .appSettings) {
+                    Button("Settings…") { appDelegate.openSettings() }
+                        .keyboardShortcut(",", modifiers: .command)
+                }
+            }
     }
 }

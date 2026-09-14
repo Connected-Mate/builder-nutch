@@ -234,7 +234,7 @@ struct AccountsView: View {
         return Button { showAccounts(); showingUsage = true } label: {
             HStack(spacing: 12) {
                 Image(systemName: "chart.bar").font(.system(size: 15, weight: .medium)).frame(width: 24, height: 24)
-                Text("Consumption")
+                Text("Usage")
                     .font(AppTheme.font(size: 13, weightValue: active ? 600 : 400)).lineLimit(1)
                 Spacer(minLength: 4)
             }
@@ -253,7 +253,7 @@ struct AccountsView: View {
         return Button { showAccounts(); filter = provider } label: {
             HStack(spacing: 8) {
                 ProviderGlyphView(glyph: provider.glyph, size: 20).frame(width: 24, height: 24)
-                Text(provider.workspaceTitle)
+                Text(provider.title)
                     .font(AppTheme.font(size: 13, weightValue: active ? 600 : 400)).lineLimit(1)
                 Spacer(minLength: 4)
                 Text("\(count)").font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
@@ -270,8 +270,8 @@ struct AccountsView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text(navigation.showingSettings ? "Settings" : showingCustom ? "Custom assistants" :
-                    showingAdd ? "Add an assistant" : showingUsage ? "Consumption" : filter?.workspaceTitle ?? "Accounts")
+            Text(LocalizedStringKey(navigation.showingSettings ? "Settings" : showingCustom ? "Custom assistants" :
+                    showingAdd ? "Add an assistant" : showingUsage ? "Usage" : filter?.workspaceTitle ?? "Accounts"))
                 .font(AppTheme.font(size: 19, weightValue: 650)).tracking(-0.4)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
@@ -728,6 +728,8 @@ private struct AssistantRow: View {
         if state.isBusy { return "Checking…" }
         if !state.isConnected { return state.message ?? "Connect this account." }
         if account.isBrowserOnly { return "Browser profile ready" }
+        if !state.windows.isEmpty && !state.isFresh() { return "Last known usage · refresh to update" }
+        if AccountUsageNotice.modelLimit(state) != nil { return "Model limit · See usage details" }
         if account.provider == .claude && manager.systemClaudeAccountID == account.id { return "Current account on this Mac" }
         if let message = state.message {
             if account.provider == .claude && state.needsFirstUsage &&
@@ -736,16 +738,7 @@ private struct AssistantRow: View {
             }
             return message
         }
-        if !state.windows.isEmpty && !state.isFresh() { return "Last known usage · refresh to update" }
-        if account.provider == .codex {
-            let readings = codexUsageGroups.compactMap { group -> String? in
-                guard let remaining = group.remainingPercent else { return nil }
-                let value = displayMode == .remaining ? remaining : 100 - remaining
-                return "\(group.title) \(value)% \(displayMode.unit)"
-            }
-            if !readings.isEmpty { return readings.joined(separator: " · ") }
-        }
-        if let limit = state.accountBindingWindow, let reset = limit.resetsAt {
+        if let limit = state.headlineWindow(for: account.provider), let reset = limit.resetsAt {
             return "\(limit.label) · Resets \(reset.formatted(.relative(presentation: .named)))"
         }
         return "Connected"

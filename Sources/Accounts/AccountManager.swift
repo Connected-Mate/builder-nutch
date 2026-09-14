@@ -1590,12 +1590,12 @@ final class AccountManager: ObservableObject {
     /// a window dropping out of a response blanks the cell instead of quietly
     /// promoting a different one into the headline's place.
     ///
-    /// The Claude account ring covers shared allowance. Model restrictions are
-    /// named separately; exhausting one model does not exhaust the account.
+    /// The headline names a stable period, rather than silently selecting the
+    /// largest reading. Rotation still considers every applicable restriction.
     static func headlineID(for account: ManagedAccount, state: ManagedAccountState? = nil) -> String {
         if account.provider == .claude || account.provider == .codex {
             if let state {
-                return state.accountBindingWindow?.id ?? "shared-usage-unavailable"
+                return state.headlineWindow(for: account.provider)?.id ?? "usage-headline-unavailable"
             }
             return account.provider == .claude ? "five_hour" : "primary"
         }

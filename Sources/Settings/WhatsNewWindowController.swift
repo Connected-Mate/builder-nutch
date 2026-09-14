@@ -50,7 +50,7 @@ final class WhatsNewWindowController {
             defer: false
         )
         window.title = "What's New"
-        window.appearance = NSAppearance(named: .aqua)
+        window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = AppTheme.windowBackground
         window.titlebarAppearsTransparent = true
         window.contentView = NSHostingView(

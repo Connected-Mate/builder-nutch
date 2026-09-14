@@ -30,12 +30,12 @@ struct ClaudeOpenAIRelayView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Claude Code with OpenAI").font(AppTheme.font(size: 22, weightValue: 650))
+                Text("Claude Code with OpenAI").font(AppTheme.font(size: 19, weightValue: 650))
                 Text("Keep Claude Code and its tools. Your chosen Codex account supplies the model.")
                     .font(AppTheme.font(size: 13)).foregroundStyle(AppTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(28).frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20).frame(maxWidth: .infinity, alignment: .leading)
             .background(AppTheme.paper)
             Divider()
             ScrollView {
@@ -109,7 +109,7 @@ struct ClaudeOpenAIRelayView: View {
                             .textSelection(.enabled).accessibilityAddTraits(.updatesFrequently)
                     }
                 }
-                .font(AppTheme.font(size: 13)).padding(28).disabled(launching)
+                .font(AppTheme.font(size: 13)).padding(20).disabled(launching)
             }
             Divider()
             HStack {
@@ -121,11 +121,11 @@ struct ClaudeOpenAIRelayView: View {
                     .buttonStyle(AppButtonStyle(primary: true)).keyboardShortcut(.defaultAction)
                     .disabled(selectedCodex == nil || loading || launching || !models.contains { $0.id == modelID })
             }
-            .padding(28)
+            .padding(20)
         }
-        .frame(width: 640, height: 700)
+        .frame(width: 600, height: 500)
         .background(AppTheme.surface).foregroundStyle(AppTheme.ink).tint(AppTheme.ink)
-        .preferredColorScheme(.light)
+        .preferredColorScheme(.dark)
         .onAppear {
             let selected = manager.selectedAccount(for: .codex)
             codexID = codexAccounts.first { $0.id == selected?.id }?.id ?? codexAccounts.first?.id

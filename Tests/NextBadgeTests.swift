@@ -138,26 +138,28 @@ final class NextBadgeTests: XCTestCase {
                        "A handover was drawn to an account that is not next")
     }
 
-    /// The badge is painted where the data says, and nowhere else. Rendered twice
-    /// and differenced, because the extra ink a badge adds is the only thing
-    /// that reliably distinguishes one black cell from another.
+    /// The badge is painted where the data says, and nowhere else.
+    ///
+    /// Two renders differenced, because the extra ink a badge adds is the only
+    /// thing that reliably tells one black cell from another. Both variants
+    /// carry a successor, so the connector and the rule are identical in each
+    /// and the only thing that moves is the badge itself.
     func testTheBadgeIsPaintedOnTheCellTheDataNames() throws {
         let ids = (0..<3).map { _ in UUID() }
-        let bare = [
-            item("Claude 6", id: ids[0], usage: "40%", current: true, next: false),
-            item("Claude 4", id: ids[1], usage: "40%", current: false, next: false),
-            item("Claude 1", id: ids[2], usage: "40%", current: false, next: false)
-        ]
-        var badged = bare
-        badged[1] = item("Claude 4", id: ids[1], usage: "40%", current: false, next: true)
+        let names = ["Claude 6", "Claude 4", "Claude 1"]
+        func row(nextAt position: Int) -> [NotchAccountItem] {
+            (0..<3).map {
+                item(names[$0], id: ids[$0], usage: "40%",
+                     current: $0 == 0, next: $0 == position)
+            }
+        }
 
-        let without = try XCTUnwrap(render(bare))
-        let with = try XCTUnwrap(render(badged))
-        let a = inkPerBand(without, bands: 3)
-        let b = inkPerBand(with, bands: 3)
+        let onSecond = try XCTUnwrap(render(row(nextAt: 1)))
+        let onThird = try XCTUnwrap(render(row(nextAt: 2)))
+        let a = inkPerBand(onSecond, bands: 3)
+        let b = inkPerBand(onThird, bands: 3)
 
-        XCTAssertGreaterThan(b[1], a[1], "No NEXT badge was painted on the named cell")
-        // The spent account, last in the row, gains nothing.
-        XCTAssertEqual(b[2], a[2], "Ink appeared on a cell that was never named NEXT")
+        XCTAssertGreaterThan(a[1], b[1], "The badge did not leave the cell it was taken off")
+        XCTAssertGreaterThan(b[2], a[2], "The badge did not arrive on the cell the data named")
     }
 }

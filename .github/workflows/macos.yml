@@ -13,3 +13,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build and test (no live accounts)
         run: ./Scripts/build-accounts.sh test
+      - name: Verify custom assistant MCP transport
+        run: python3 Tests/CustomAssistantMCPRoundtrip.py

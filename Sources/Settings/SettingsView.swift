@@ -36,7 +36,7 @@ struct SettingsView: View {
                   Text(LocalizedStringKey(section.rawValue)).tag(section)
               }
           }
-          .pickerStyle(.segmented).padding(.horizontal, 24).padding(.vertical, 16)
+          .pickerStyle(.segmented).labelsHidden().padding(.horizontal, 24).padding(.vertical, 16)
           ScrollView {
           VStack(alignment: .leading, spacing: 20) {
             if !managedAccounts && section == .general { settingsSection("Integrations") {
@@ -211,7 +211,7 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             Rectangle().fill(AppTheme.line).frame(height: 1).accessibilityHidden(true)
             HStack(spacing: 16) {
-                SupportLink()
+                SupportLink(compact: true)
                     .buttonStyle(AppButtonStyle(compact: true))
                 Spacer(minLength: 8)
                 HStack(spacing: 4) {
