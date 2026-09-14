@@ -6,6 +6,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdtemp, rmdir } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -114,9 +115,11 @@ function validateBody(body) {
   if (!body || !Array.isArray(body.messages) || !body.messages.length || body.messages.length > 10000) throw invalid('Une conversation non vide est requise.');
   if (body.stream !== undefined && typeof body.stream !== 'boolean') throw invalid('Le paramètre stream doit être booléen.');
   for (const m of body.messages) {
-    if (!['user','assistant'].includes(m.role)) throw invalid('Rôle de message invalide.');
+    if (!['user','assistant','system'].includes(m.role)) throw invalid('Rôle de message invalide.');
+    if (m.role==='system' && Array.isArray(m.content) && m.content.some(b=>b.type!=='text')) throw invalid('Instruction système non textuelle.');
     textContent(m.content);
   }
+  if (!body.messages.some(m=>m.role!=='system')) throw invalid('Une conversation non vide est requise.');
   if (body.tools && (!Array.isArray(body.tools) || body.tools.length > 256)) throw invalid('Liste d’outils invalide ou trop longue.');
   if(body.tool_choice && !['auto','none'].includes(body.tool_choice.type))throw invalid('Ce relais ne prend pas en charge un choix d’outil obligatoire.');
   if(body.stop_sequences?.length)throw invalid('Les séquences d’arrêt personnalisées ne sont pas prises en charge.');
@@ -125,6 +128,14 @@ function validateBody(body) {
     if (typeof t.name !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(t.name) || names.has(t.name) || !t.input_schema || t.input_schema.type !== 'object') throw invalid('Définition d’outil incompatible avec OpenAI.');
     names.add(t.name);
   }
+}
+function normalizeInstructions(body) {
+  // Recent Claude clients append system messages to the conversation array.
+  // Keep their instruction authority, and keep the last tool-result message
+  // available for the native tool continuation handshake.
+  const instructions=[textContent(body.system??[])];
+  for(const message of body.messages)if(message.role==='system')instructions.push(textContent(message.content));
+  return {...body,system:instructions.filter(Boolean).join('\n\n'),messages:body.messages.filter(m=>m.role!=='system')};
 }
 function inputFor(body) {
   // A new thread imports the complete Claude transcript; its subsequent tool turns
@@ -197,6 +208,7 @@ export class Relay {
     }
     if(path.endsWith('/count_tokens'))throw new RelayError('Comptage exact indisponible pour ce modèle.',404,'not_found_error');
     validateBody(body);
+    body=normalizeInstructions(body);
     if(!this.app.authenticated)throw new RelayError('Connectez un compte ChatGPT dans Codex avant d’utiliser le relais.',401,'authentication_error');
     if(!this.app.models.some(m=>m.id===this.model))throw invalid('Le modèle OpenAI choisi n’est pas disponible sur ce compte.');
     await this.generate(body,res);
@@ -362,7 +374,11 @@ export async function main(argv=process.argv.slice(2)){
     finally{process.off('SIGINT',stop);process.off('SIGTERM',stop);}
   }finally{if(relay)await relay.close();else app.close();await rmdir(safeCwd).catch(()=>{});}
 }
-if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
+function isEntryPoint() {
+  try { return !!process.argv[1] && realpathSync(process.argv[1])===fileURLToPath(import.meta.url); }
+  catch { return false; }
+}
+if(isEntryPoint()) {
   const probe=process.argv[2]==='probe';
   const nodeSupported=Number(process.versions.node.split('.')[0])>=22;
   (nodeSupported?main():Promise.reject(new RelayError('Node.js 22 ou plus récent est requis.'))).catch(error=>{

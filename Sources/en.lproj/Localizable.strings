@@ -38,3 +38,9 @@
 "Claude Code opened in Terminal. It starts with Claude and switches to your OpenAI model if Claude reports a usage limit." = "Claude Code opened in Terminal. It starts with Claude and switches to your OpenAI model if Claude reports a usage limit.";
 "Choose folder…" = "Choose folder…";
 "Open Claude Code…" = "Open Claude Code…";
+"Clear limits. More ways to continue." = "Clear limits. More ways to continue.";
+"Shared quota and model limits, separately" = "Shared quota and model limits, separately";
+"An exhausted model no longer makes your whole account appear empty. Failed usage checks keep the last reading and its actual date." = "An exhausted model no longer makes your whole account appear empty. Failed usage checks keep the last reading and its actual date.";
+"Choose a connected Codex account and model. Use OpenAI immediately, or let it take over when Claude reaches its limit." = "Choose a connected Codex account and model. Use OpenAI immediately, or let it take over when Claude reaches its limit.";
+"Resume your conversation" = "Resume your conversation";
+"Open Use OpenAI from your accounts to resume a Claude conversation with its history and tools." = "Open Use OpenAI from your accounts to resume a Claude conversation with its history and tools.";

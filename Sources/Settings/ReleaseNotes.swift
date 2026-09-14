@@ -31,6 +31,15 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "0.10.0",
+            headline: "Clear limits. More ways to continue.",
+            changes: [
+                .init(title: "Shared quota and model limits, separately", detail: "An exhausted model no longer makes your whole account appear empty. Failed usage checks keep the last reading and its actual date."),
+                .init(title: "Claude Code with OpenAI", detail: "Choose a connected Codex account and model. Use OpenAI immediately, or let it take over when Claude reaches its limit."),
+                .init(title: "Resume your conversation", detail: "Open Use OpenAI from your accounts to resume a Claude conversation with its history and tools.")
+            ]
+        ),
+        ReleaseNote(
             version: "0.9.2",
             headline: "Quietly, reliably.",
             changes: [

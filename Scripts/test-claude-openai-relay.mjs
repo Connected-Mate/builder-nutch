@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {PassThrough} from 'node:stream';
 import {fileURLToPath} from 'node:url';
+import {execFileSync} from 'node:child_process';
+import {mkdtempSync,symlinkSync,unlinkSync,rmdirSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {AppServer,Relay,SAFE_CONFIG} from '../Sources/Resources/claude-openai-relay.mjs';
 const fixture=fileURLToPath(new URL('./fixtures/claude-openai-app-server.mjs',import.meta.url));
 const base={model:'gpt-6-astra',max_tokens:100,messages:[{role:'user',content:'Hello fixture'}]};
@@ -31,4 +35,20 @@ test('cancel before turn/start reply interrupts the late-started turn',async t=>
  const{app,relay,url}=await setup(t);const original=app.rpc.bind(app);let release;const waiting=new Promise(r=>{release=r;});const calls=[];
  app.rpc=async(method,params,...rest)=>{calls.push({method,params});const result=await original(method,params,...rest);if(method==='turn/start')await waiting;return result;};
  const control=new AbortController();const response=await fetch(url+'/v1/messages',{method:'POST',headers:{authorization:`Bearer ${relay.token}`},body:JSON.stringify({...base,stream:true,messages:[{role:'user',content:'CANCEL_FIXTURE'}]}),signal:control.signal});assert.equal(response.status,200);control.abort();await new Promise(r=>setTimeout(r,30));assert.equal(relay.slots.size,0);release();await new Promise(r=>setTimeout(r,30));assert.ok(calls.some(c=>c.method==='turn/interrupt'&&c.params.turnId));
+});
+
+test('Claude inline system messages preserve authority and native tool continuation',async t=>{
+ const{app,request}=await setup(t);const original=app.rpc.bind(app);const starts=[];
+ app.rpc=(method,params,...rest)=>{if(method==='thread/start')starts.push(params);return original(method,params,...rest);};
+ const system={role:'system',content:[{type:'text',text:'CLIENT_SYSTEM_FIXTURE'}]};
+ const body={...base,system:'TOP_SYSTEM_FIXTURE',tools:[{name:'Echo',input_schema:{type:'object',properties:{text:{type:'string'}}}}],messages:[...base.messages,system]};
+ const first=await(await request(body)).json();assert.equal(first.stop_reason,'tool_use');
+ const follow={...body,messages:[...base.messages,{role:'assistant',content:first.content},{role:'user',content:[{type:'tool_result',tool_use_id:first.content[0].id,content:'INLINE_SYSTEM_OK'}]},system]};
+ const next=await(await request(follow)).json();assert.equal(next.content[0].text,'INLINE_SYSTEM_OK');assert.equal(starts.length,1);assert.equal(starts[0].baseInstructions,'TOP_SYSTEM_FIXTURE\n\nCLIENT_SYSTEM_FIXTURE');
+});
+
+test('bundled relay entry point also runs through a symbolic path',()=>{
+ const directory=mkdtempSync(join(tmpdir(),'relay-entry-test-'));const link=join(directory,'relay.mjs');
+ try{symlinkSync(fileURLToPath(new URL('../Sources/Resources/claude-openai-relay.mjs',import.meta.url)),link);assert.match(execFileSync(process.execPath,[link,'--help'],{encoding:'utf8'}),/Usage: relay/);}
+ finally{unlinkSync(link);rmdirSync(directory);}
 });
