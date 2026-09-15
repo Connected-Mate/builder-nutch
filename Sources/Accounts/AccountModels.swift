@@ -155,6 +155,8 @@ struct ManagedAccountState {
     /// successful measurement. Endpoint backoff is not subscription exhaustion.
     var usageCheckFailedAt: Date? = nil
     var usageCheckRetryAt: Date? = nil
+    /// Explicit service restriction, independent of quota-reader backoff.
+    var providerRestriction: AccountProviderRestriction? = nil
     var accountWindows: [LimitWindow] { windows.filter { !$0.isModelSpecific } }
     /// The short rolling allowance people see as their current session usage.
     ///

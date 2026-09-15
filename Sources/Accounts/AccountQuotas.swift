@@ -68,8 +68,20 @@ enum AccountQuotas {
             buckets = byID.keys.sorted().map { ($0, byID[$0]!) }
         } else if let legacy = limits["rateLimits"] as? [String: Any] { buckets = [("codex", legacy)] }
         for (bucketID, bucket) in buckets {
-            if let reached = bucket["rateLimitReachedType"] as? String, !reached.isEmpty {
+            let spentQuota = ["primary", "secondary"].contains { key in
+                guard let window = bucket[key] as? [String: Any] else { return false }
+                return (percentage(window, key: "usedPercent") ?? 0) >= 1
+            }
+            if let reached = bucket["rateLimitReachedType"] as? String, !reached.isEmpty,
+               reached != "rate_limit_reached" || !spentQuota {
                 let scope = bucketID == "codex" ? "Codex account or workspace" : (bucket["limitName"] as? String ?? bucketID)
+                let label = "\(scope) · \(CodexBridge.reason(forReachedType: reached))"
+                if let previous = state.providerRestriction {
+                    state.providerRestriction = AccountProviderRestriction(label: previous.label + "; " + label, observedAt: now)
+                } else {
+                    state.providerRestriction = AccountProviderRestriction(label: label,
+                        modelName: bucketID == "codex" ? nil : scope, observedAt: now)
+                }
                 state.message = "\(scope) reports a restriction. Automatic selection is paused until its usage is available."
             }
             for key in ["primary", "secondary"] {

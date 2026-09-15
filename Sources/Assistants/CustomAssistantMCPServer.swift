@@ -91,7 +91,7 @@ final class CustomAssistantMCPServer {
                         guard arguments.isEmpty else { throw CustomAssistantError.invalid("This tool does not accept arguments.") }
                         result = try toolResult(repository.list())
                     } else if name == "report_usage" {
-                        guard Set(arguments.keys).isSubset(of: ["id", "limits", "observedAt", "source"]),
+                        guard Set(arguments.keys).isSubset(of: ["id", "limits", "observedAt", "source", "rateLimit"]),
                               let rawID = arguments["id"] as? String, let assistantID = UUID(uuidString: rawID) else {
                             throw CustomAssistantError.invalid("Provide assistant id, limits, observedAt and source only.")
                         }
@@ -113,6 +113,12 @@ final class CustomAssistantMCPServer {
                               limits.allSatisfy({ Set($0.keys).isSubset(of: ["label", "usedPercent", "resetsAt"]) &&
                                 ($0["usedPercent"] as? NSNumber).map { CFGetTypeID($0) != CFBooleanGetTypeID() } == true }) else {
                             throw CustomAssistantError.invalid("Each limit accepts label, numeric usedPercent and optional resetsAt only.")
+                        }
+                        if let raw = arguments["rateLimit"] {
+                            guard let rate = raw as? [String: Any],
+                                  Set(rate.keys).isSubset(of: ["kind", "scope", "retryAt"]) else {
+                                throw CustomAssistantError.invalid("A request limit accepts kind, scope and optional retryAt only.")
+                            }
                         }
                         let usage = try decoder.decode(CustomAssistantUsage.self, from: JSONSerialization.data(withJSONObject: reading))
                         result = try toolResult(repository.reportUsage(id: assistantID, usage: usage))
@@ -183,14 +189,19 @@ final class CustomAssistantMCPServer {
                                         "required": ["label", "usedPercent"], "additionalProperties": false]
         let reportProperties: [String: Any] = [
             "id": ["type": "string"],
-            "limits": ["type": "array", "minItems": 1, "maxItems": 8, "items": limitSchema],
+            "limits": ["type": "array", "minItems": 0, "maxItems": 8, "items": limitSchema],
+            "rateLimit": ["type": "object", "additionalProperties": false,
+                "required": ["kind", "scope"], "properties": [
+                    "kind": ["type": "string", "enum": ["rateLimited", "concurrencyLimited", "providerOverloaded"]],
+                    "scope": ["type": "string", "minLength": 1, "maxLength": 80],
+                    "retryAt": ["type": "string", "format": "date-time", "description": "Only the retry time explicitly reported by the provider; omit if unknown."]]],
             "observedAt": ["type": "string", "format": "date-time"],
             "source": ["type": "string", "minLength": 1, "maxLength": 200, "description": "Where you observed the actual usage; never include credentials."]
         ]
         let reportSchema: [String: Any] = ["type": "object", "properties": reportProperties,
             "required": ["id", "limits", "observedAt", "source"], "additionalProperties": false]
         let reporting: [String: Any] = ["name": "report_usage",
-            "description": "Report actual subscription usage you observed, never estimates or invented quotas. The app labels the figures as assistant-reported and stale after one hour or a passed reset. This does not enable automatic polling. The first limit is the headline in the notch.",
+            "description": "Report actual subscription usage and optional request restriction observed in an authorized provider response. Never estimate quotas, RPM, TPM or retry times. A usage-endpoint HTTP429 is not evidence of an inference restriction. Use rateLimit only for an explicit inference rate, concurrency or overload response. At least one quota or a rateLimit is required; limits may be empty for a restriction-only report. Omit rateLimit in a newer successful report to clear it. Reports become stale after one hour or a passed reset/retry time. The first quota is the notch headline; no automatic polling.",
             "inputSchema": reportSchema,
             "annotations": ["readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false]]
         return [listing, configuring, reporting]

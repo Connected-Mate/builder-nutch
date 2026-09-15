@@ -1614,9 +1614,13 @@ final class AccountManager: ObservableObject {
         else if !state.windows.isEmpty && !state.isFresh() { status = .stale(since: state.refreshedAt ?? .distantPast) }
         else if let message = state.message { status = .unsupported(message) }
         else { status = .ok }
-        let exhausted = state.isFresh() ? state.windows.first {
-            (($0.usedFraction ?? 0) >= 1 || $0.isBlocked) && ($0.resetsAt.map { $0 > Date() } ?? true)
-        } : nil
+        let restriction = state.rateLimitStatus()
+        let block: UsageBlock?
+        switch restriction.kind {
+        case .quotaExhausted, .modelRestricted, .providerRestricted:
+            block = UsageBlock(reason: restriction.affectedLabels.joined(separator: "; "), resetsAt: restriction.retryAt)
+        default: block = nil
+        }
         let email = UserDefaults.standard.bool(forKey: "accounts.hidePersonalDetails")
             ? nil : (state.email ?? account.emailHint)
         return ProviderSnapshot(id: account.id.uuidString, displayName: account.emoji.map { "\($0) \(account.label)" } ?? account.label,
@@ -1624,7 +1628,7 @@ final class AccountManager: ObservableObject {
                                 glyph: provider.glyph, fidelity: account.isBrowserOnly ? .manual : .official,
                                 status: status, windows: state.windows,
                                 headlineID: Self.headlineID(for: account, state: state),
-                                block: exhausted.map { UsageBlock(reason: "\($0.label) reached", resetsAt: $0.resetsAt) })
+                                block: block)
     }
 
     var snapshots: [ProviderSnapshot] {

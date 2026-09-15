@@ -155,6 +155,21 @@ struct CustomAssistantSetupView: View {
         if let report = assistant.usage {
             TimelineView(.periodic(from: .now, by: 30)) { context in
                 VStack(alignment: .leading, spacing: 4) {
+                    if let rate = report.rateLimit {
+                        Text(rate.title + " · " + rate.scope)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let retryAt = rate.retryAt {
+                            if retryAt > context.date {
+                                Text(String(format: NSLocalizedString("Provider retry time: %@", comment: "Observed provider retry time"),
+                                    retryAt.formatted(date: .abbreviated, time: .shortened)))
+                                    .foregroundStyle(AppTheme.muted)
+                            } else {
+                                Text("Retry time passed · Refresh needed").foregroundStyle(AppTheme.muted)
+                            }
+                        } else {
+                            Text("Retry time not reported").foregroundStyle(AppTheme.muted)
+                        }
+                    }
                     ForEach(Array(report.limits.enumerated()), id: \.offset) { _, limit in
                         HStack {
                             Text(limit.label).lineLimit(2)

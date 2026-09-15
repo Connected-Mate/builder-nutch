@@ -47,6 +47,7 @@ enum ClaudeAccountUsage {
         var state = status
         state.windows = []; state.refreshedAt = nil; state.message = unavailable
         state.usageCheckFailedAt = nil; state.usageCheckRetryAt = nil
+        state.providerRestriction = nil
         guard status.isConnected else { return state }
         let object = try AccountQuotas.json(usage)
         guard let available = boolean(object["rate_limits_available"]) else { throw ManagedAccountError.invalidResponse }
@@ -104,7 +105,17 @@ enum ClaudeAccountUsage {
             }
         }
         // Paid extra_usage is never added to subscription allowance.
-        guard !state.windows.isEmpty else { return state }
+        let unrepresentedLock = rates.contains { key, value in
+            !knownKeys.contains(key) && key != "spend"
+                && (value as? [String: Any])?["utilization"] == nil && containsLock(value)
+        }
+        if unrepresentedLock || (blocking && !state.windows.contains(where: \.isBlocked)) {
+            state.providerRestriction = AccountProviderRestriction(label: "Claude subscription restriction", observedAt: now)
+        }
+        guard !state.windows.isEmpty else {
+            if blocking { state.message = restriction(state, now: now) }
+            return state
+        }
         let known = state.windows.allSatisfy { $0.usedFraction != nil }
         state.refreshedAt = known ? now : nil
         state.message = !known ? unavailable : blocking || state.windows.contains(where: { ($0.usedFraction ?? 0) >= 1 || $0.isBlocked })
@@ -122,14 +133,18 @@ enum ClaudeAccountUsage {
 
     static func restriction(_ state: ManagedAccountState, now: Date) -> String {
         let spent = state.windows.filter { ($0.usedFraction ?? 0) >= 1 || $0.isBlocked }
+        let status = state.rateLimitStatus(at: now)
+        let reset = status.retryAt.map { " " + ResetCopy.text(for: $0, now: now, derived: status.isResetDerived) + "." } ?? ""
+        if state.providerRestriction != nil {
+            return NSLocalizedString("Claude reports a subscription restriction. Choose an account manually or refresh its usage.", comment: "Generic restriction")
+        }
         if let model = spent.first(where: { $0.isModelSpecific }), spent.allSatisfy(\.isModelSpecific),
            (state.accountRemainingPercent ?? 0) > 0 {
-            let reset = model.resetsAt.map { " " + ResetCopy.text(for: $0, now: now, derived: model.isResetDerived) + "." } ?? ""
+            let label = spent.count > 1 ? spent.map(\.label).joined(separator: ", ") : model.label
             return String(format: NSLocalizedString("%1$@ is unavailable.%2$@ Shared usage remains; choose another model with available usage.", comment: "Model limit reached"),
-                          model.label, reset)
+                          label, reset)
         }
         if let window = spent.first {
-            let reset = window.resetsAt.map { " " + ResetCopy.text(for: $0, now: now, derived: window.isResetDerived) + "." } ?? ""
             if (window.usedFraction ?? 0) < 1 {
                 return "\(window.label) is restricted.\(reset)"
             }
