@@ -79,10 +79,11 @@ struct UsageMilestonesView: View {
             }
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text(String(format: UsagePodiumTier.localized("%@ tokens", locale: locale),
-                                compact(stamp.threshold)))
+                    Text(stamp.level == 0
+                         ? UsagePodiumTier.localized("First recorded token", locale: locale)
+                         : String(format: UsagePodiumTier.localized("%@ tokens", locale: locale),
+                                  compact(stamp.threshold)))
                         .foregroundStyle(AppTheme.muted)
-                        .help(stamp.threshold.formatted())
                 }
                 if stamp.reached, let date = stamp.reachedAt {
                     Text(String(format: UsagePodiumTier.localized("Reached on %@", locale: locale),

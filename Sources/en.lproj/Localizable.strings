@@ -302,3 +302,5 @@
 "All levels reached" = "All levels reached";
 "Progress to next level" = "Progress to next level";
 "Next: %@ · %@ tokens" = "Next: %@ · %@ tokens";
+
+"First recorded token" = "First recorded token";

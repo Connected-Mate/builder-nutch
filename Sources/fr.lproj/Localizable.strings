@@ -567,3 +567,5 @@
 "All levels reached" = "Tous les niveaux atteints";
 "Progress to next level" = "Progression vers le prochain niveau";
 "Next: %@ · %@ tokens" = "À suivre : %@ · %@ tokens";
+
+"First recorded token" = "Premier token enregistré";
