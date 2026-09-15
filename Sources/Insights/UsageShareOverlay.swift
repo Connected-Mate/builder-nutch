@@ -38,6 +38,7 @@ struct UsageShareOverlay: View {
             }
         }
         .foregroundStyle(AppTheme.ink)
+        .tint(AppTheme.ink)
         .onExitCommand { presentation.close() }
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
