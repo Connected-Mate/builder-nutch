@@ -40,30 +40,37 @@ extension ManagedAccountState {
         }
         guard isConnected else { return AccountRateLimitStatus(kind: .notReported) }
         let spent = windows.filter { ($0.usedFraction ?? 0) >= 1 || $0.isBlocked }
-        if !spent.isEmpty {
-            let shared = spent.filter { !$0.isModelSpecific }
-            let applicable = (shared.isEmpty ? spent : shared).filter { $0.resetsAt.map { $0 > now } ?? true }
-            guard isFresh(at: now), !applicable.isEmpty else {
-                return AccountRateLimitStatus(kind: .refreshRequired, affectedLabels: spent.map(\.label), observedAt: refreshedAt)
-            }
+        let freshRestriction = providerRestriction.flatMap { restriction -> AccountProviderRestriction? in
+            let age = now.timeIntervalSince(restriction.observedAt)
+            return age >= -5 && age <= 300 ? restriction : nil
+        }
+        // Expired shared windows cannot hide a still-active model restriction.
+        // Each independent evidence source expires on its own timestamp.
+        let active = isFresh(at: now) ? spent.filter { $0.resetsAt.map { $0 > now } ?? true } : []
+        let shared = active.filter { !$0.isModelSpecific }
+        let applicable = shared.isEmpty ? active : shared
+        if !applicable.isEmpty {
             // A short reset cannot clear an exhausted weekly allowance. Unknown
             // reset on any blocker means there is no known overall resume time.
             let reset = applicable.allSatisfy { $0.resetsAt != nil } ? applicable.compactMap(\.resetsAt).max() : nil
             // A separately reported restriction has no declared reset; do not
             // borrow one from an unrelated spent quota window.
-            let independentRestriction = providerRestriction != nil
-            let kind: AccountRateLimitStatus.Kind = providerRestriction?.modelName == nil && independentRestriction ? .providerRestricted
+            let independentRestriction = freshRestriction != nil
+            let kind: AccountRateLimitStatus.Kind = freshRestriction?.modelName == nil && independentRestriction ? .providerRestricted
                 : shared.isEmpty ? .modelRestricted
                 : applicable.contains(where: { ($0.usedFraction ?? 0) >= 1 }) ? .quotaExhausted : .providerRestricted
             return AccountRateLimitStatus(kind: kind,
-                affectedLabels: spent.map(\.label) + (providerRestriction.map { [$0.label] } ?? []), retryAt: independentRestriction ? nil : reset,
-                isResetDerived: reset != nil && applicable.contains(where: \.isResetDerived), observedAt: refreshedAt)
+                affectedLabels: active.map(\.label) + (freshRestriction.map { [$0.label] } ?? []), retryAt: independentRestriction ? nil : reset,
+                isResetDerived: !independentRestriction && reset != nil && applicable.contains(where: \.isResetDerived), observedAt: refreshedAt)
         }
-        if let restriction = providerRestriction {
-            let age = now.timeIntervalSince(restriction.observedAt)
-            return AccountRateLimitStatus(kind: age >= -5 && age <= 300
-                ? (restriction.modelName == nil ? .providerRestricted : .modelRestricted) : .refreshRequired,
+        if let restriction = freshRestriction {
+            return AccountRateLimitStatus(kind: restriction.modelName == nil ? .providerRestricted : .modelRestricted,
                 affectedLabels: [restriction.label], observedAt: restriction.observedAt)
+        }
+        if !spent.isEmpty || providerRestriction != nil {
+            return AccountRateLimitStatus(kind: .refreshRequired,
+                affectedLabels: spent.map(\.label) + (providerRestriction.map { [$0.label] } ?? []),
+                observedAt: refreshedAt ?? providerRestriction?.observedAt)
         }
         return AccountRateLimitStatus(kind: .notReported, observedAt: refreshedAt)
     }

@@ -77,7 +77,9 @@ enum AccountQuotas {
                 let scope = bucketID == "codex" ? "Codex account or workspace" : (bucket["limitName"] as? String ?? bucketID)
                 let label = "\(scope) · \(CodexBridge.reason(forReachedType: reached))"
                 if let previous = state.providerRestriction {
-                    state.providerRestriction = AccountProviderRestriction(label: previous.label + "; " + label, observedAt: now)
+                    let models = previous.modelName.flatMap { bucketID == "codex" ? nil : $0 + "; " + scope }
+                    state.providerRestriction = AccountProviderRestriction(label: previous.label + "; " + label,
+                        modelName: models, observedAt: now)
                 } else {
                     state.providerRestriction = AccountProviderRestriction(label: label,
                         modelName: bucketID == "codex" ? nil : scope, observedAt: now)

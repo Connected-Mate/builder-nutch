@@ -78,6 +78,53 @@ final class AccountRateLimitStatusTests: XCTestCase {
         XCTAssertTrue(state.rateLimitStatus(at: now).affectedLabels.first?.contains("Workspace credits") == true)
     }
 
+    func testMultipleCodexModelRestrictionsPreserveModelOnlyScope() throws {
+        let data = Data(#"{"account":{"type":"chatgpt"},"limits":{"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":4}},"model_a":{"limitName":"Model A","rateLimitReachedType":"rate_limit_reached"},"model_b":{"limitName":"Model B","rateLimitReachedType":"rate_limit_reached"}}}}"#.utf8)
+        let state = try AccountQuotas.codex(data, now: now)
+        XCTAssertEqual(state.rateLimitStatus(at: now).kind, .modelRestricted)
+        XCTAssertEqual(state.providerRestriction?.modelName, "Model A; Model B")
+        XCTAssertEqual(state.accountRemainingPercent, 96)
+        XCTAssertTrue(state.rateLimitStatus(at: now).affectedLabels.first?.contains("Model A") == true)
+        XCTAssertTrue(state.rateLimitStatus(at: now).affectedLabels.first?.contains("Model B") == true)
+    }
+
+    func testMixedCodexRestrictionsRetainAccountScope() throws {
+        let data = Data(#"{"account":{"type":"chatgpt"},"limits":{"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":4},"rateLimitReachedType":"workspace_owner_credits_depleted"},"model_a":{"limitName":"Model A","rateLimitReachedType":"rate_limit_reached"}}}}"#.utf8)
+        let state = try AccountQuotas.codex(data, now: now)
+        XCTAssertEqual(state.rateLimitStatus(at: now).kind, .providerRestricted)
+        XCTAssertNil(state.providerRestriction?.modelName)
+    }
+
+    func testPassedQuotaCannotHideFreshWorkspaceRestriction() throws {
+        let data = Data(#"{"account":{"type":"chatgpt"},"limits":{"rateLimits":{"rateLimitReachedType":"workspace_owner_credits_depleted","primary":{"usedPercent":100,"resetsAt":1799999940}}}}"#.utf8)
+        let state = try AccountQuotas.codex(data, now: now)
+        let status = state.rateLimitStatus(at: now)
+        XCTAssertEqual(status.kind, .providerRestricted)
+        XCTAssertNil(status.retryAt)
+        XCTAssertEqual(status.observedAt, now)
+        XCTAssertTrue(status.affectedLabels.first?.contains("Workspace credits") == true)
+    }
+
+    func testPassedSharedQuotaCannotHideActiveModelRestriction() {
+        let state = ManagedAccountState(isConnected: true, windows: [
+            .init(id: "five_hour", label: "5h", usedFraction: 1, resetsAt: now.addingTimeInterval(-60)),
+            .init(id: "model", label: "Model weekly", usedFraction: 1,
+                  resetsAt: now.addingTimeInterval(600), modelName: "Model")], refreshedAt: now)
+        let status = state.rateLimitStatus(at: now)
+        XCTAssertEqual(status.kind, .modelRestricted)
+        XCTAssertEqual(status.retryAt, now.addingTimeInterval(600))
+        XCTAssertEqual(status.affectedLabels, ["Model weekly"])
+    }
+
+    func testFreshModelQuotaDoesNotRefreshOldWorkspaceEvidence() {
+        let state = ManagedAccountState(isConnected: true, windows: [
+            .init(id: "model", label: "Model weekly", usedFraction: 1,
+                  resetsAt: now.addingTimeInterval(600), modelName: "Model")], refreshedAt: now,
+            providerRestriction: .init(label: "Workspace", observedAt: now.addingTimeInterval(-301)))
+        XCTAssertEqual(state.rateLimitStatus(at: now).kind, .modelRestricted)
+        XCTAssertEqual(state.rateLimitStatus(at: now).affectedLabels, ["Model weekly"])
+    }
+
     func testClaudeRestrictionWithoutWindowsRemainsVisible() throws {
         let data = Data(#"{"rate_limits_available":true,"rate_limits":{"future_scope":{"locked_reason":"restricted"}}}"#.utf8)
         let state = try ClaudeAccountUsage.state(status: .init(isConnected: true), usage: data, now: now)
