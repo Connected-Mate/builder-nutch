@@ -57,6 +57,11 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
         show()
     }
 
+    func showDailyUsageShare() {
+        navigation.dailyShareRequest = UUID()
+        show()
+    }
+
     private func surface(_ window: NSWindow) {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)

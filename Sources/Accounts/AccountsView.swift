@@ -14,6 +14,7 @@ private extension AccountProvider {
 @MainActor
 final class AccountsNavigation: ObservableObject {
     @Published var showingSettings = false
+    @Published var dailyShareRequest: UUID?
 }
 
 /// The native account manager. Public screenshots are captured from this live view.
@@ -28,6 +29,8 @@ struct AccountsView: View {
     @State private var addingDesktopAssistant = false
     @State private var desktopSetupMessage: String?
     @State private var noticeTask: Task<Void, Never>?
+    @StateObject private var share = UsageSharePresentation()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var filter: AccountProvider?
     @State private var showingAdd = false
@@ -76,7 +79,8 @@ struct AccountsView: View {
                 } else if showingAdd {
                     providerCatalog
                 } else if showingUsage {
-                    UsageInsightsView(manager: manager, model: usage, hidePersonalDetails: hidePersonalDetails)
+                    UsageInsightsView(manager: manager, model: usage, hidePersonalDetails: hidePersonalDetails,
+                                      onShare: { openShare(projectPath: $0) })
                 } else {
                     // A single contextual status, only where the affected accounts live.
                     if manager.loginAccountID != nil {
@@ -94,6 +98,18 @@ struct AccountsView: View {
         }
         .frame(minWidth: 700, minHeight: 450)
         .background(AppTheme.surface).foregroundStyle(AppTheme.ink).tint(AppTheme.ink)
+        .blur(radius: share.isPresented ? 10 : 0)
+        .disabled(share.isPresented)
+        .allowsHitTesting(!share.isPresented)
+        .accessibilityHidden(share.isPresented)
+        .overlay {
+            if share.isPresented {
+                UsageShareOverlay(presentation: share, hidePersonalDetails: hidePersonalDetails,
+                                  onRetry: { openShare(projectPath: share.projectPath) })
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.98)))
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: share.isPresented)
         .preferredColorScheme(.dark)
         .environment(\.locale, (AppLanguage(rawValue: appLanguage) ?? .system).locale)
         .sheet(item: $connecting) { account in
@@ -140,7 +156,11 @@ struct AccountsView: View {
         )) {
             Button("OK") { localError = nil }
         } message: { Text(localError ?? "") }
-        .onAppear { manager.notice = nil }
+        .onAppear {
+            manager.notice = nil
+            consumeDailyShareRequest()
+        }
+        .onChange(of: navigation.dailyShareRequest) { _, _ in consumeDailyShareRequest() }
         .onChange(of: manager.notice) { _, notice in
             noticeTask?.cancel()
             guard notice != nil else { return }
@@ -155,6 +175,23 @@ struct AccountsView: View {
         .onChange(of: providerIDs) { _, _ in
             if filter == nil || !providers.contains(where: { $0 == filter }) { self.filter = providers.first }
         }
+    }
+
+    private func openShare(projectPath: String? = nil, refresh: Bool = false) {
+        share.open(projectPath: projectPath) {
+            if refresh { await usage.refreshIfStale() }
+            return await usage.reportForSharing()
+        }
+    }
+
+    private func consumeDailyShareRequest() {
+        guard navigation.dailyShareRequest != nil else { return }
+        navigation.dailyShareRequest = nil
+        navigation.showingSettings = false
+        showingCustom = false
+        showingAdd = false
+        showingUsage = true
+        openShare(refresh: true)
     }
 
     private var providerIDs: [String] { manager.accounts.map(\.provider.rawValue).sorted() }

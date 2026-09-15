@@ -7,6 +7,7 @@ struct UsageStatisticsView: View {
     @Binding var days: Int
     let isLoading: Bool
     var onShare: (() -> Void)?
+    var sharePreview: UsageShareSnapshot?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var entered = false
     @State private var selectedDay: String?
@@ -16,11 +17,13 @@ struct UsageStatisticsView: View {
 
     private let chartDays: [UsageChartDay]
 
-    init(report: UsageLedgerReport, days: Binding<Int>, isLoading: Bool, onShare: (() -> Void)? = nil) {
+    init(report: UsageLedgerReport, days: Binding<Int>, isLoading: Bool,
+         sharePreview: UsageShareSnapshot? = nil, onShare: (() -> Void)? = nil) {
         self.report = report
         self._days = days
         self.isLoading = isLoading
         self.onShare = onShare
+        self.sharePreview = sharePreview
         chartDays = UsageChartDay.make(keys: UsageInsightsView.dayKeys(from: report.windowStart, to: report.windowEnd),
                                       timeline: report.timeline, partialHistory: report.scan.hitLimit)
     }
@@ -61,27 +64,15 @@ struct UsageStatisticsView: View {
             Text("Recorded tokens")
                 .font(AppTheme.font(size: 12, weightValue: 550))
             Spacer(minLength: 4)
-            if let onShare {
-                Button(action: onShare) {
-                    Image(systemName: "square.and.arrow.up")
-                        .frame(width: 28, height: 28).contentShape(Rectangle())
-                }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text("Export activity"))
-                    .help("Export activity")
-                    .disabled(isLoading)
-            }
-            Group {
-                if isLoading { ProgressView().controlSize(.mini) }
-                else { Color.clear.accessibilityHidden(true) }
-            }
-            .frame(width: 12, height: 12)
             Picker("Period", selection: $days) {
                 Text("7 days").tag(7)
                 Text("30 days").tag(30)
             }
             .pickerStyle(.segmented).labelsHidden().frame(width: 136).controlSize(.small)
             .disabled(isLoading)
+            if let onShare {
+                UsageShareButton(snapshot: sharePreview, action: onShare)
+            }
         }
     }
 

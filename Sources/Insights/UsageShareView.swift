@@ -6,6 +6,8 @@ struct UsageShareView: View {
     let report: UsageLedgerReport
     let hidePersonalDetails: Bool
     let onClose: () -> Void
+    let onSavingChange: (Bool) -> Void
+    @FocusState private var closeFocused: Bool
     @Environment(\.locale) private var locale
     @State private var period: UsageSharePeriod = .day
     @State private var projectPath: String?
@@ -14,10 +16,12 @@ struct UsageShareView: View {
     @State private var saving = false
 
     init(report: UsageLedgerReport, initialProjectPath: String? = nil,
-         hidePersonalDetails: Bool = false, onClose: @escaping () -> Void) {
+         hidePersonalDetails: Bool = false, onSavingChange: @escaping (Bool) -> Void = { _ in },
+         onClose: @escaping () -> Void) {
         self.report = report
         self.hidePersonalDetails = hidePersonalDetails
         self.onClose = onClose
+        self.onSavingChange = onSavingChange
         _projectPath = State(initialValue: initialProjectPath)
     }
 
@@ -29,75 +33,87 @@ struct UsageShareView: View {
     var body: some View {
         GeometryReader { available in
             let ratio = UsageShareCard.width / UsageShareCard.height
-            let previewWidth = min(max(0, available.size.width - 48), max(300, (available.size.height - 205) * ratio))
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Button(action: onClose) { Label("Back", systemImage: "chevron.left") }
-                            .buttonStyle(AppButtonStyle(compact: true))
-                        Spacer()
-                        Text("Share your activity").font(AppTheme.font(size: 13, weightValue: 550))
+            let previewWidth = min(960, max(240, available.size.width - 48),
+                                   max(240, (available.size.height - 184) * ratio))
+            VStack(spacing: 12) {
+                HStack {
+                    Text("Share your activity").font(AppTheme.font(size: 18, weightValue: 550))
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                            .background(AppTheme.soft, in: Circle())
                     }
-                    HStack(spacing: 12) {
-                        Picker("Period", selection: $period) {
-                            Text("Today").tag(UsageSharePeriod.day)
-                            Text("This week").tag(UsageSharePeriod.week)
-                            Text("This month").tag(UsageSharePeriod.month)
-                        }
-                        .pickerStyle(.segmented).labelsHidden()
-                        .frame(maxWidth: 280)
-                        Picker("Project", selection: $projectPath) {
-                            Text("All projects").tag(String?.none)
-                            ForEach(Array(projects.enumerated()), id: \.element.path) { index, project in
-                                Text(hidePersonalDetails
-                                     ? String(format: NSLocalizedString("Project %d", comment: "Private project choice"), index + 1)
-                                     : project.displayName)
-                                    .tag(Optional(project.path))
-                            }
-                        }
-                        .pickerStyle(.menu).labelsHidden()
-                        .frame(maxWidth: .infinity)
+                    .buttonStyle(.plain).disabled(saving)
+                    .accessibilityLabel(Text("Close"))
+                    .keyboardShortcut(.cancelAction)
+                    .focused($closeFocused)
+                }
+                HStack(spacing: 12) {
+                    Picker("Period", selection: $period) {
+                        Text("Today").tag(UsageSharePeriod.day)
+                        Text("This week").tag(UsageSharePeriod.week)
+                        Text("This month").tag(UsageSharePeriod.month)
                     }
-                    .disabled(saving)
+                    .pickerStyle(.segmented).labelsHidden()
+                    .frame(maxWidth: 300)
+                    Picker("Project", selection: $projectPath) {
+                        Text("All projects").tag(String?.none)
+                        ForEach(Array(projects.enumerated()), id: \.element.path) { index, project in
+                            Text(hidePersonalDetails
+                                 ? String(format: NSLocalizedString("Project %d", comment: "Private project choice"), index + 1)
+                                 : project.displayName)
+                                .tag(Optional(project.path))
+                        }
+                    }
+                    .pickerStyle(.menu).labelsHidden()
+                    .frame(maxWidth: .infinity)
+                }
+                .disabled(saving)
 
-                    UsageShareCard(snapshot: snapshot)
-                        .scaleEffect(previewWidth / UsageShareCard.width, anchor: .topLeading)
-                        .frame(width: previewWidth, height: previewWidth / ratio, alignment: .topLeading)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(Text("Token consumption image preview"))
-                        .accessibilityValue(Text(accessibleSummary))
+                UsageShareCard(snapshot: snapshot)
+                    .scaleEffect(previewWidth / UsageShareCard.width, anchor: .topLeading)
+                    .frame(width: previewWidth, height: previewWidth / ratio, alignment: .topLeading)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.muted.opacity(0.22)))
+                    .shadow(color: .black.opacity(0.65), radius: 24, y: 12)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Text("Token consumption image preview"))
+                    .accessibilityValue(Text(accessibleSummary))
 
-                    HStack(spacing: 8) {
-                        Button { copy() } label: { Label("Copy image", systemImage: "doc.on.doc") }
-                            .buttonStyle(AppButtonStyle(compact: true))
-                        Button { save() } label: { Label("Save image…", systemImage: "square.and.arrow.down") }
-                            .buttonStyle(AppButtonStyle(primary: true, compact: true))
-                        Spacer(minLength: 0)
-                        Text("PNG · 2400 × 1260").font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
-                    }
-                    .disabled(saving)
-                    Group {
-                        if snapshot.projectName != nil {
-                            Text("The selected project name appears on the image. Accounts stay private.")
-                        } else {
-                            Text("Ready for LinkedIn or your favorite network. Accounts and projects stay private.")
-                        }
-                    }
-                    .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Text("PNG · 2400 × 1260").font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
+                    Spacer(minLength: 0)
+                    Button { copy() } label: { Label("Copy image", systemImage: "doc.on.doc") }
+                        .buttonStyle(AppButtonStyle(compact: true))
+                    Button { save() } label: { Label("Save image…", systemImage: "square.and.arrow.down") }
+                        .buttonStyle(AppButtonStyle(primary: true, compact: true))
+                }
+                .disabled(saving)
+                Group {
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")
-                            .font(AppTheme.font(size: 11)).fixedSize(horizontal: false, vertical: true)
                     } else if let status {
                         Label(status, systemImage: "checkmark")
-                            .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                    } else if snapshot.projectName != nil {
+                        Text("The selected project name appears on the image. Accounts stay private.")
+                    } else {
+                        Text("Ready for LinkedIn or your favorite network. Accounts and projects stay private.")
                     }
                 }
-                .padding(.horizontal, 24).padding(.vertical, 16)
+                .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(width: min(960, max(0, available.size.width - 48)))
+            .padding(.vertical, 16)
+            .contentShape(Rectangle())
+            .onTapGesture { }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .foregroundStyle(AppTheme.ink)
+        .onAppear { closeFocused = true }
         .onChange(of: period) { _, _ in status = nil; error = nil }
         .onChange(of: projectPath) { _, _ in status = nil; error = nil }
     }
@@ -144,8 +160,10 @@ struct UsageShareView: View {
         do {
             let data = try UsageShareExporter.pngData(snapshot: frozen, locale: locale)
             saving = true
+            onSavingChange(true)
             UsageShareExporter.save(data, snapshot: frozen) { result in
                 saving = false
+                onSavingChange(false)
                 switch result {
                 case .success(let url):
                     if url != nil { status = NSLocalizedString("Image saved. Ready to share.", comment: "Usage export success") }
