@@ -132,6 +132,36 @@ final class AccountRateLimitStatusTests: XCTestCase {
         XCTAssertNotNil(state.message)
     }
 
+    func testClaudeResetCopyPreservesDeclaredTimeWithoutMarkingReadingFresh() {
+        let reset = now.addingTimeInterval(3600)
+        let state = ManagedAccountState(isConnected: true, windows: [
+            .init(id: "model-0", label: "Fable weekly limit", usedFraction: 1,
+                  resetsAt: reset, modelName: "Fable")])
+        let message = ClaudeAccountUsage.restriction(state, now: now)
+        XCTAssertTrue(message.contains("Fable weekly limit"))
+        XCTAssertTrue(message.contains(ResetCopy.text(for: reset, now: now)))
+        XCTAssertNil(state.refreshedAt)
+        XCTAssertEqual(state.rateLimitStatus(at: now).kind, .refreshRequired)
+        XCTAssertNil(state.rateLimitStatus(at: now).retryAt)
+    }
+
+    func testClaudeParsedModelBlockRetainsDeclaredResetInMessage() throws {
+        let data = Data(#"{"rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":4},"model_scoped":[{"display_name":"Fable","utilization":100,"resets_at":1800003600}]}}"#.utf8)
+        let state = try ClaudeAccountUsage.state(status: .init(isConnected: true), usage: data, now: now)
+        XCTAssertTrue(state.message?.contains("Fable") == true)
+        XCTAssertTrue(state.message?.contains(ResetCopy.text(for: now.addingTimeInterval(3600), now: now)) == true)
+        XCTAssertEqual(state.refreshedAt, now)
+        XCTAssertEqual(state.rateLimitStatus(at: now).kind, .modelRestricted)
+    }
+
+    func testClaudeResetCopyCannotBorrowShortResetWhenWeeklyResetIsUnknown() {
+        let reset = now.addingTimeInterval(3600)
+        let state = ManagedAccountState(isConnected: true, windows: [
+            .init(id: "five_hour", label: "5h limit", usedFraction: 1, resetsAt: reset),
+            .init(id: "seven_day", label: "Weekly limit", usedFraction: 1)])
+        XCTAssertTrue(!ClaudeAccountUsage.restriction(state, now: now).contains(ResetCopy.text(for: reset, now: now)))
+    }
+
     func testUnknownClaudeAccountLockCannotMasqueradeAsOnlyAModelLimit() throws {
         let data = Data(#"{"rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":4},"model_scoped":[{"display_name":"Model","utilization":100}],"future_scope":{"locked_reason":"restricted"}}}"#.utf8)
         let state = try ClaudeAccountUsage.state(status: .init(isConnected: true), usage: data, now: now)

@@ -133,11 +133,18 @@ enum ClaudeAccountUsage {
 
     static func restriction(_ state: ManagedAccountState, now: Date) -> String {
         let spent = state.windows.filter { ($0.usedFraction ?? 0) >= 1 || $0.isBlocked }
-        let status = state.rateLimitStatus(at: now)
-        let reset = status.retryAt.map { " " + ResetCopy.text(for: $0, now: now, derived: status.isResetDerived) + "." } ?? ""
         if state.providerRestriction != nil {
             return NSLocalizedString("Claude reports a subscription restriction. Choose an account manually or refresh its usage.", comment: "Generic restriction")
         }
+        // This formats the declared observation, including while callers are
+        // assembling a state that has no freshness timestamp yet. It must not
+        // authorize a live block: rateLimitStatus remains the freshness gate.
+        let shared = spent.filter { !$0.isModelSpecific }
+        let applicable = shared.isEmpty ? spent : shared
+        let resetAt = !applicable.isEmpty && applicable.allSatisfy { $0.resetsAt.map { $0 > now } == true }
+            ? applicable.compactMap(\.resetsAt).max() : nil
+        let derived = applicable.contains(where: \.isResetDerived)
+        let reset = resetAt.map { " " + ResetCopy.text(for: $0, now: now, derived: derived) + "." } ?? ""
         if let model = spent.first(where: { $0.isModelSpecific }), spent.allSatisfy(\.isModelSpecific),
            (state.accountRemainingPercent ?? 0) > 0 {
             let label = spent.count > 1 ? spent.map(\.label).joined(separator: ", ") : model.label
