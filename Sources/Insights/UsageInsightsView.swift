@@ -96,6 +96,7 @@ struct UsageInsightsView: View {
                 Text(String(format: NSLocalizedString("%@ tokens", comment: "Usage summary"),
                             (report.scan.hitLimit ? "≥ " : "") + Self.compact(report.tokens.total)))
                     .font(AppTheme.font(size: 22, weightValue: 550)).tracking(-0.5)
+                    .help((report.scan.hitLimit ? "≥ " : "") + report.tokens.total.formatted())
                 Text(String(format: NSLocalizedString("Last %d days", comment: "Usage summary"), report.days))
                     .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
                 if report.scan.hitLimit {
@@ -133,23 +134,27 @@ struct UsageInsightsView: View {
 
     private func tokenSummary(_ tokens: UsageTokenTotals) -> some View {
         HStack(alignment: .top, spacing: 16) {
-            tokenMetric("Input", value: Self.tokenDisplay(tokens.totalInput, availability: tokens.coverage.input, compact: true))
-            tokenMetric("Output", value: Self.tokenDisplay(tokens.output, availability: tokens.coverage.output, compact: true))
+            tokenMetric("Input", value: Self.tokenDisplay(tokens.totalInput, availability: tokens.coverage.input, compact: true),
+                        exact: Self.tokenDisplay(tokens.totalInput, availability: tokens.coverage.input))
+            tokenMetric("Output", value: Self.tokenDisplay(tokens.output, availability: tokens.coverage.output, compact: true),
+                        exact: Self.tokenDisplay(tokens.output, availability: tokens.coverage.output))
             tokenMetric("Reasoning", value: tokens.measuredReasoning.map {
                 (tokens.reasoningAvailability == .partial ? "≥ " : "") + Self.compact($0)
-            } ?? "—", note: tokens.reasoningAvailability == .unavailable ? "Not reported" :
+            } ?? "—", exact: Self.tokenDisplay(tokens.thinking, availability: tokens.reasoningAvailability),
+                        note: tokens.reasoningAvailability == .unavailable ? "Not reported" :
                             tokens.reasoningAvailability == .partial ? "Partial reading" : nil)
         }
         .padding(.vertical, 8)
     }
 
-    private func tokenMetric(_ title: LocalizedStringKey, value: String, note: LocalizedStringKey? = nil) -> some View {
+    private func tokenMetric(_ title: LocalizedStringKey, value: String, exact: String? = nil, note: LocalizedStringKey? = nil) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
             Text(value).font(AppTheme.font(size: 18, weightValue: 550)).monospacedDigit()
             if let note { Text(note).font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .help(exact ?? value)
         .accessibilityElement(children: .combine)
     }
 
