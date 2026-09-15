@@ -206,7 +206,8 @@ struct UsageTranscriptScanner {
                                        model: model, sidechain: isSidechain)
         let requestID = UsageText.identifier(object["uuid"]) ?? UsageText.identifier(message["id"])
         let id = event.identity(sessionID: digest.sessionID, provider: .claude, requestID: requestID)
-        digest.recordedEvents?[id] = event
+        let enriched = digest.recordedEvents?[id]?.reconciled(with: event) ?? event
+        digest.recordedEvents?[id] = enriched
         outcome.digest = digest
     }
 
@@ -342,7 +343,17 @@ struct UsageTranscriptScanner {
             if let owner = UsageText.identifier(payload["thread_id"]),
                let threadID = state.threadID, owner != threadID { return }
             if let responseID = UsageText.identifier(payload["response_id"]),
-               !state.responseIDs.insert(responseID).inserted { return }
+               !state.responseIDs.insert(responseID).inserted {
+                // The request is already counted, but its final record may
+                // carry higher counters or newly available cache/reasoning.
+                let event = UsageRecordedEvent(tokens: counters.totals(), weight: UsageWeight.weight(counters.totals(), model: state.model),
+                                               date: UsageText.date(object["timestamp"]), projectPath: state.projectPath,
+                                               model: state.model, sidechain: false)
+                let id = event.identity(sessionID: state.digest.sessionID, provider: .codex, requestID: responseID)
+                let enriched = state.digest.recordedEvents?[id]?.reconciled(with: event) ?? event
+                state.digest.recordedEvents?[id] = enriched
+                return
+            }
             state.sawExactRecord = true
             recordCodex(counters.totals(), at: UsageText.date(object["timestamp"]), into: &state.digest,
                         projectPath: state.projectPath, model: state.model,
@@ -374,7 +385,8 @@ struct UsageTranscriptScanner {
         let event = UsageRecordedEvent(tokens: tokens, weight: weight, date: date,
                                        projectPath: projectPath, model: model, sidechain: false)
         let id = event.identity(sessionID: digest.sessionID, provider: .codex, requestID: requestID)
-        digest.recordedEvents?[id] = event
+        let enriched = digest.recordedEvents?[id]?.reconciled(with: event) ?? event
+        digest.recordedEvents?[id] = enriched
         digest.tokens += tokens
         digest.weight += weight
         digest.messages += 1

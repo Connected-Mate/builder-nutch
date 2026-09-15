@@ -38,6 +38,11 @@ struct UsageLedgerCache: Codable, Equatable {
     var version = UsageLedgerCache.currentVersion
     var formula = UsageLedgerCache.currentFormula
     var entries: [String: UsageLedgerCacheEntry] = [:]
+    /// The next bounded pass continues the sweep instead of revisiting its
+    /// first files forever. Optional fields keep v5 cache migration compatible.
+    var scanCursor: UsageLedgerScanCursor?
+    var scanSeenPaths: Set<String>?
+
 
     /// Reads the cache, treating every failure as "no cache". A corrupt index
     /// must cost a slow refresh, never an error the person has to understand.
@@ -106,4 +111,9 @@ struct UsageLedgerCache: Codable, Equatable {
     mutating func prune(keeping paths: Set<String>) {
         entries = entries.filter { paths.contains($0.key) }
     }
+}
+
+struct UsageLedgerScanCursor: Codable, Equatable {
+    var sourceRoot: String
+    var filePath: String
 }

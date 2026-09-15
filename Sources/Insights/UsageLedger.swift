@@ -36,19 +36,26 @@ struct UsageLedgerEngine {
         let started = ProcessInfo.processInfo.systemUptime
         let budget = cache.entries.isEmpty ? limits.initialTimeBudget : limits.timeBudget
         let scanner = UsageTranscriptScanner(limits: limits)
-        var digests: [UsageSessionDigest] = []
-        var seenPaths: Set<String> = []
+        let resumeIndex = cache.scanCursor.flatMap { cursor in sources.firstIndex { $0.projectsRoot.path == cursor.sourceRoot } }
+        let startIndex = resumeIndex ?? 0
+        var seenPaths = resumeIndex != nil ? (cache.scanSeenPaths ?? []) : []
+        var lastCursor = resumeIndex != nil ? cache.scanCursor : nil
+        var interrupted = false
 
-        for source in sources {
-            if Task.isCancelled { summary.hitLimit = true; break }
-            for file in transcripts(in: source.projectsRoot, summary: &summary, deadline: started + budget) {
-                if Task.isCancelled { summary.hitLimit = true; break }
-                guard summary.filesSeen < limits.maxFiles else {
-                    summary.hitLimit = true
-                    break
+        sourceLoop: for sourceIndex in startIndex..<sources.count {
+            let source = sources[sourceIndex]
+            if Task.isCancelled { interrupted = true; break }
+            let afterPath = sourceIndex == resumeIndex ? cache.scanCursor?.filePath : nil
+            let batch = transcripts(in: source.projectsRoot, after: afterPath,
+                                    limit: max(0, limits.maxFiles - summary.filesSeen), deadline: started + budget)
+            for file in batch.files {
+                if Task.isCancelled || ProcessInfo.processInfo.systemUptime - started > budget {
+                    interrupted = true
+                    break sourceLoop
                 }
                 summary.filesSeen += 1
                 seenPaths.insert(file.path)
+                lastCursor = UsageLedgerScanCursor(sourceRoot: source.projectsRoot.path, filePath: file.path)
 
                 guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
                       let size = (attributes[.size] as? NSNumber)?.uint64Value,
@@ -59,7 +66,6 @@ struct UsageLedgerEngine {
 
                 let cached = cache.entries[file.path]
                 if let cached, cached.size == size, cached.modified == modified, !cached.truncated {
-                    digests.append(cached.digest)
                     summary.filesFromCache += 1
                     continue
                 }
@@ -73,7 +79,7 @@ struct UsageLedgerEngine {
                 // dropping a project off the screen, and say the pass was partial.
                 if ProcessInfo.processInfo.systemUptime - started > budget {
                     summary.hitLimit = true
-                    if let cached { digests.append(cached.digest); summary.filesFromCache += 1 }
+                    if cached != nil { summary.filesFromCache += 1 }
                     else { summary.filesSkipped += 1 }
                     continue
                 }
@@ -131,7 +137,6 @@ struct UsageLedgerEngine {
 
                 guard parsedSlice else {
                     summary.filesSkipped += 1
-                    if let cached { digests.append(cached.digest) }
                     continue
                 }
 
@@ -145,7 +150,6 @@ struct UsageLedgerEngine {
                 } else {
                     digest = incremental
                 }
-                digests.append(digest)
                 cache.entries[file.path] = UsageLedgerCacheEntry(size: size, modified: modified,
                                                                  offset: nextOffset, digest: digest,
                                                                  truncated: finalTruncated, checkpoint: checkpoint,
@@ -153,46 +157,67 @@ struct UsageLedgerEngine {
                 summary.filesParsed += 1
                 if finalTruncated { summary.hitLimit = true }
             }
+            if !batch.reachedEnd {
+                interrupted = true
+                break
+            }
         }
 
-        // Every file was *listed*, even the ones too old to open, so a missing
-        // path really is a deleted transcript. A pass that stopped early listed
-        // only part of the tree and is not allowed to forget the rest.
-        if !summary.hitLimit { cache.prune(keeping: seenPaths) }
+        if interrupted {
+            summary.hitLimit = true
+            cache.scanCursor = lastCursor
+            cache.scanSeenPaths = seenPaths
+        } else {
+            // A full sweep can span several bounded passes. Only its complete
+            // inventory is allowed to prune the disposable cache.
+            cache.prune(keeping: seenPaths)
+            cache.scanCursor = nil
+            cache.scanSeenPaths = nil
+        }
         summary.duration = ProcessInfo.processInfo.systemUptime - started
-        return (Self.merge(digests), summary)
+        // Unvisited files retain their last known digest during a partial sweep.
+        return (Self.merge(cache.entries.values.map(\.digest)), summary)
     }
 
-    /// Every `.jsonl` under a projects root, subagent transcripts included —
-    /// their tokens are as real as anyone else's. Tool results are skipped
-    /// wholesale: they are most of the bytes and none of the usage.
-    private func transcripts(in root: URL, summary: inout UsageScanSummary, deadline: TimeInterval) -> [URL] {
+    private struct TranscriptBatch {
+        var files: [URL] = []
+        var reachedEnd = true
+    }
+
+    /// Resume a bounded depth-first enumeration after its last visited file.
+    /// If that file disappeared, restart this source so deletion cannot leave
+    /// the cursor permanently stuck. Cancellation/time bounds also cover skips.
+    private func transcripts(in root: URL, after path: String?, limit: Int, deadline: TimeInterval) -> TranscriptBatch {
         let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey]
         guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: keys,
                                                           options: [.skipsHiddenFiles, .skipsPackageDescendants]) else {
-            return []
+            return TranscriptBatch()
         }
-        var files: [URL] = []
+        var batch = TranscriptBatch()
+        var waitingForCursor = path != nil
         while let url = walker.nextObject() as? URL {
             if Task.isCancelled || ProcessInfo.processInfo.systemUptime > deadline {
-                summary.hitLimit = true
-                break
-            }
-            guard files.count < limits.maxFiles else {
-                summary.hitLimit = true
+                batch.reachedEnd = false
                 break
             }
             let values = try? url.resourceValues(forKeys: Set(keys))
-            // A symlink could point anywhere, including outside the home this
-            // source is supposed to cover. Never follow one.
             if values?.isSymbolicLink == true { walker.skipDescendants(); continue }
             if values?.isDirectory == true {
                 if url.lastPathComponent == "tool-results" { walker.skipDescendants() }
                 continue
             }
-            if url.pathExtension == "jsonl" { files.append(url) }
+            if waitingForCursor {
+                if url.path == path { waitingForCursor = false }
+                continue
+            }
+            guard url.pathExtension == "jsonl" else { continue }
+            guard batch.files.count < limit else { batch.reachedEnd = false; break }
+            batch.files.append(url)
         }
-        return files
+        if waitingForCursor, batch.reachedEnd {
+            return transcripts(in: root, after: nil, limit: limit, deadline: deadline)
+        }
+        return batch
     }
 
     /// The session a file belongs to, before any line is read.

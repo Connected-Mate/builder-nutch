@@ -33,6 +33,18 @@ struct UsageRecordedEvent: Codable, Equatable {
         return Self.hash(Data("\(provider.rawValue)|\(sessionID)|".utf8) + payload)
     }
 
+    /// A final response can enrich an earlier measurement under the same ID.
+    /// Keep its strongest observed counters/coverage when older copies return.
+    func reconciled(with other: UsageRecordedEvent) -> UsageRecordedEvent {
+        var result = self
+        result.tokens = tokens.reconciled(with: other.tokens)
+        result.model = model ?? other.model
+        result.projectPath = projectPath ?? other.projectPath
+        result.date = [date, other.date].compactMap { $0 }.min()
+        result.weight = max(weight, other.weight, UsageWeight.weight(result.tokens, model: result.model))
+        return result
+    }
+
     static func hash(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
@@ -131,7 +143,20 @@ struct UsageLedgerArchive: Codable, Equatable {
             Self.improveMetadata(&session.metadata, from: digest, timeline: timeline)
             let stream = Self.streamKey(digest)
             for (id, event) in digest.recordedEvents ?? [:] {
-                guard session.events[id] == nil else { continue }
+                if let previous = session.events[id] {
+                    let enriched = previous.reconciled(with: event)
+                    session.events[id] = enriched
+                    if enriched != previous,
+                       let legacyKey = session.legacy.keys.first(where: { session.legacy[$0]?.seenEvents.contains(id) == true }),
+                       var legacy = session.legacy[legacyKey] {
+                        var increment = enriched
+                        _ = increment.tokens.removing(previous.tokens)
+                        increment.weight = max(0, enriched.weight - previous.weight)
+                        Self.subtract(increment, from: &legacy.remaining, messages: 0)
+                        session.legacy[legacyKey] = legacy
+                    }
+                    continue
+                }
                 // A complete replay can recover IDs for an old aggregate.
                 // Suffix-only reads cannot overlap that aggregate and add whole.
                 let legacyKey = session.legacy[stream] != nil ? stream : session.legacy.keys.sorted().first {
@@ -180,21 +205,21 @@ struct UsageLedgerArchive: Codable, Equatable {
 
     /// Subtract only the overlap in the same minute, retaining all unrecovered
     /// legacy history. Coverage counts remain counts, never invented zeroes.
-    private static func subtract(_ event: UsageRecordedEvent, from digest: inout UsageSessionDigest) {
+    private static func subtract(_ event: UsageRecordedEvent, from digest: inout UsageSessionDigest, messages: Int = 1) {
         var removed = UsageTimeBucket()
         if let date = event.date {
             let key = String(Int(date.timeIntervalSince1970 / 60))
             guard var bucket = digest.activityMinutes[key] else { return }
             removed.tokens = bucket.tokens.removing(event.tokens)
             removed.weight = min(bucket.weight, event.weight)
-            removed.messages = min(bucket.messages, 1)
+            removed.messages = min(bucket.messages, messages)
             bucket.weight -= removed.weight
             bucket.messages -= removed.messages
             digest.activityMinutes[key] = bucket
         } else {
             removed.tokens = digest.tokens.removing(event.tokens)
             removed.weight = min(digest.weight, event.weight)
-            removed.messages = min(digest.messages, 1)
+            removed.messages = min(digest.messages, messages)
             digest.weight -= removed.weight
             digest.messages -= removed.messages
             return

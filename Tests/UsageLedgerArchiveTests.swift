@@ -284,4 +284,97 @@ final class UsageLedgerArchiveTests: XCTestCase {
         XCTAssertEqual(replayed.tokens, captured.tokens)
     }
 
+    func testFileBudgetProgressesAcrossSourcesAndPersistsCursorAcrossRestarts() async throws {
+        for index in 0..<3 { try write([line("a-\(index)", session: "session-\(index)")], name: "first/a-\(index).jsonl") }
+        try write([line("b", session: "session-b")], name: "second/b.jsonl")
+        var limits = UsageLedgerLimits.default
+        limits.maxFiles = 3
+        func boundedLedger() -> UsageLedger {
+            UsageLedger(sources: [.init(projectsRoot: source.appendingPathComponent("first"), managedAccountID: nil),
+                                   .init(projectsRoot: source.appendingPathComponent("second"), managedAccountID: nil)],
+                        cacheURL: cacheURL, limits: limits, calendar: calendar, archiveURL: archiveURL)
+        }
+        let first = await boundedLedger().report(now: now)
+        XCTAssertEqual(first.tokens.total, 3 * 163)
+        XCTAssertTrue(first.scan.hitLimit)
+        XCTAssertLessThanOrEqual(first.scan.filesSeen, 3)
+        let second = await boundedLedger().report(now: now)
+        XCTAssertEqual(second.tokens.total, 4 * 163)
+        XCTAssertFalse(second.scan.hitLimit)
+        XCTAssertLessThanOrEqual(second.scan.filesSeen, 3)
+        for _ in 0..<4 {
+            let repeated = await boundedLedger().report(now: now)
+            XCTAssertEqual(repeated.tokens.total, 4 * 163)
+            XCTAssertLessThanOrEqual(repeated.scan.filesSeen, 3)
+        }
+    }
+
+    func testFileBudgetProgressesWithinOneSourceAndSurvivesDeletedCursor() async throws {
+        for index in 0..<8 { try write([line("request-\(index)", session: "session-\(index)")], name: "\(index).jsonl") }
+        var limits = UsageLedgerLimits.default
+        limits.maxFiles = 2
+        let collector = ledger(limits: limits)
+        let first = await collector.report(now: now)
+        XCTAssertEqual(first.tokens.total, 2 * 163)
+        let cursor = try XCTUnwrap(UsageLedgerCache.load(from: cacheURL).scanCursor)
+        try FileManager.default.removeItem(at: URL(fileURLWithPath: cursor.filePath))
+        var last = first
+        for _ in 0..<8 {
+            last = await collector.report(now: now)
+            XCTAssertLessThanOrEqual(last.scan.filesSeen, 2)
+        }
+        // The deleted cursor's consumption was already saved, and all other
+        // sources eventually join it even though enumeration had to restart.
+        XCTAssertEqual(last.tokens.total, 8 * 163)
+    }
+
+    func testSameClaudeRequestEnrichmentNeverDoubleCountsOrRegresses() async throws {
+        let early = line("same-id", input: 12).replacingOccurrences(of: "\"output_tokens\":20", with: "\"output_tokens\":3")
+        let final = line("same-id", input: 12).replacingOccurrences(of: "\"output_tokens\":20", with: "\"output_tokens\":30")
+        try write([early])
+        let collector = ledger()
+        let first = await collector.report(now: now)
+        XCTAssertEqual(first.tokens.output, 3)
+        try write([final])
+        let enriched = await collector.report(now: now)
+        XCTAssertEqual(enriched.tokens.output, 30)
+        XCTAssertEqual(enriched.tokens.measurements, 1)
+        XCTAssertEqual(enriched.messages, 1)
+        try clearCache()
+        try write([early], name: "old-copy.jsonl")
+        let restored = await ledger().report(now: now)
+        XCTAssertEqual(restored.tokens, enriched.tokens)
+        XCTAssertEqual(restored.timeline, enriched.timeline)
+        let later = final.replacingOccurrences(of: "\"output_tokens\":30", with: "\"output_tokens\":50")
+        try write([final, later])
+        let appended = await ledger().report(now: now)
+        XCTAssertEqual(appended.tokens.output, 50)
+        XCTAssertEqual(appended.messages, 1)
+    }
+
+    func testSameCodexRequestCanGainCacheAndReasoningDetailsOnAppend() async throws {
+        let stamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-300))
+        let meta = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"thread-enriched\",\"cwd\":\"/projects/codex\"}}"
+        let early = "{\"timestamp\":\"\(stamp)\",\"type\":\"token_usage_record\",\"payload\":{\"response_id\":\"same-response\",\"usage\":{\"input_tokens\":50,\"output_tokens\":3}}}"
+        let final = "{\"timestamp\":\"\(stamp)\",\"type\":\"token_usage_record\",\"payload\":{\"response_id\":\"same-response\",\"usage\":{\"input_tokens\":50,\"cached_input_tokens\":10,\"output_tokens\":30,\"reasoning_output_tokens\":12}}}"
+        let collector = UsageLedger(sources: [.init(projectsRoot: source, managedAccountID: nil, format: .codex)],
+                                    cacheURL: cacheURL, calendar: calendar, archiveURL: archiveURL)
+        try write([meta, early])
+        let first = await collector.report(now: now)
+        XCTAssertEqual(first.tokens.total, 53)
+        XCTAssertEqual(first.tokens.coverage.cacheRead, .unavailable)
+        try write([meta, early, final])
+        let enriched = await collector.report(now: now)
+        XCTAssertEqual(enriched.tokens.input, 40)
+        XCTAssertEqual(enriched.tokens.totalInput, 50)
+        XCTAssertEqual(enriched.tokens.output, 30)
+        XCTAssertEqual(enriched.tokens.thinking, 12)
+        XCTAssertEqual(enriched.tokens.coverage.cacheRead, .complete)
+        XCTAssertEqual(enriched.tokens.coverage.reasoning, .complete)
+        XCTAssertEqual(enriched.messages, 1)
+        try write([meta, early], name: "older.jsonl")
+        let replayed = await collector.report(now: now)
+        XCTAssertEqual(replayed.tokens, enriched.tokens)
+    }
+
 }

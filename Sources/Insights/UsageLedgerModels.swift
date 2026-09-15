@@ -111,6 +111,19 @@ struct UsageTokenTotals: Codable, Equatable {
 
     static func += (lhs: inout UsageTokenTotals, rhs: UsageTokenTotals) { lhs = lhs + rhs }
 
+    func reconciled(with other: UsageTokenTotals) -> UsageTokenTotals {
+        var result = self
+        let fields: [WritableKeyPath<UsageTokenTotals, Int>] = [\.output, \.cacheCreation, \.cacheRead,
+            \.thinking, \.measurements, \.inputMeasurements, \.outputMeasurements, \.cacheCreationMeasurements,
+            \.cacheReadMeasurements, \.thinkingMeasurements, \.claudeMeasurements, \.codexMeasurements]
+        for field in fields { result[keyPath: field] = max(self[keyPath: field], other[keyPath: field]) }
+        // Codex's input includes caches. Discovering cache details must split
+        // an existing input total rather than adding those tokens again.
+        let inclusiveInput = max(totalInput, other.totalInput)
+        result.input = max(0, inclusiveInput - result.cacheCreation - result.cacheRead)
+        return result
+    }
+
     /// The same totals scaled down to a fraction of themselves, for the part of
     /// a session that falls inside a report window. Rounded, never negative.
     func scaled(by factor: Double) -> UsageTokenTotals {
@@ -254,7 +267,7 @@ struct UsageSessionDigest: Codable, Equatable {
     mutating func merge(_ other: UsageSessionDigest) {
         if let events = other.recordedEvents {
             if recordedEvents == nil { recordedEvents = [:] }
-            recordedEvents?.merge(events) { previous, _ in previous }
+            recordedEvents?.merge(events) { previous, next in previous.reconciled(with: next) }
         }
         recordedEventsComplete = recordedEventsComplete == true && other.recordedEventsComplete == true
         for (path, value) in other.projectWeights { projectWeights[path, default: 0] += value }
