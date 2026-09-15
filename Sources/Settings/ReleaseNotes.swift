@@ -30,6 +30,10 @@ struct ReleaseNote: Equatable {
 /// `testTheCurrentVersionHasANote`.
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
+        ReleaseNote(version: "0.15.0", headline: "A clearer view of your activity.", changes: [
+            .init(title: "A more refined usage view", detail: "A compact daily chart, clearer token figures and smooth transitions make your saved activity easier to explore."),
+            .init(title: "Explore each day", detail: "Select a day to see its recorded tokens. Keyboard navigation and reduced motion are supported.")
+        ]),
         ReleaseNote(version: "0.14.0", headline: "Your history, one milestone at a time.", changes: [
             .init(title: "Stamps for your saved tokens", detail: "Reach eight levels from 100,000 to one trillion recorded tokens. Your progress follows saved history, independently of the selected period."),
             .init(title: "More complete token readings", detail: "Archived Codex sessions are included. Large transcript reads and cumulative counter changes are handled more accurately.")
