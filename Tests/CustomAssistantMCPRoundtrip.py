@@ -94,6 +94,20 @@ import Darwin
     assert client.tool("report_usage", dict(reading, observedAt=(now + timedelta(days=1)).isoformat()))["isError"]
     assert client.tool("report_usage", dict(reading, observedAt=(now - timedelta(days=1)).isoformat()))["isError"]
     assert client.tool("report_usage", dict(reading, limits=[]))["isError"]
+    # A provider can block requests independently of any subscription quota.
+    restriction = {"kind": "concurrencyLimited", "scope": "Research model",
+                   "retryAt": (now + timedelta(minutes=2)).isoformat().replace("+00:00", "Z")}
+    limited = value(client.tool("report_usage", dict(reading, limits=[], rateLimit=restriction)))
+    assert limited["usage"]["limits"] == []
+    assert limited["usage"]["rateLimit"]["kind"] == "concurrencyLimited"
+    assert limited["usage"]["rateLimit"]["scope"] == "Research model"
+    assert value(client.tool("list_assistants", {}))[0]["usage"]["rateLimit"] == limited["usage"]["rateLimit"]
+    for invalid in [dict(restriction, kind="guessed"), dict(restriction, scope=""),
+                    dict(restriction, retryAt=(now - timedelta(seconds=1)).isoformat()),
+                    dict(restriction, requestsPerMinute=100)]:
+        assert client.tool("report_usage", dict(reading, limits=[], rateLimit=invalid))["isError"]
+    recovered = value(client.tool("report_usage", reading))
+    assert recovered["usage"].get("rateLimit") is None
     renamed = value(client.tool("configure_assistant", {"id": identity, "name": "Research renamed", "website": "https://example.com"}))
     assert renamed["usage"]["limits"][0]["usedPercent"] == 42.5
     assert renamed["instructions"] == profile["instructions"]

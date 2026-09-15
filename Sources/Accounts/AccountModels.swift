@@ -191,6 +191,10 @@ struct ManagedAccountState {
             return primaryWindow
         case .cursor:
             return windows.first { $0.id == "included" }
+        case .antigravity:
+            // Independent model pools have no meaningful overall percentage.
+            guard let id = AntigravityProvider.headlineID(for: windows) else { return nil }
+            return windows.first { $0.id == id }
         case .kimi:
             return windows.first { $0.id == "primary" }
         default:
