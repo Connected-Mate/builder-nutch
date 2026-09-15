@@ -2,9 +2,8 @@ import Foundation
 
 /// `Builder Nutch --dump-usage-ledger [--days N]`.
 ///
-/// The ledger has no interface yet, and a number nobody can check is a number
-/// nobody should trust. This prints the whole report as JSON so the figures can
-/// be read against `~/.claude/projects` before a single pixel is drawn.
+/// Prints the same report used by Usage so recorded figures can be checked
+/// against local Claude Code and Codex telemetry, including saved milestones.
 ///
 /// It prints titles, directories, identifiers and counts. It never prints a line
 /// of conversation. Numeric history is committed through the same archive as the app.

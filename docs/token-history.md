@@ -30,6 +30,10 @@ Repeated readings, restored files and copies are reconciled by recorded identity
 
 Writes use private permissions, an integrity check, an atomic replacement and a cross-process lock. A persistence failure is shown in Usage; it is not reported as a successful backup, and a corrupt archive is preserved for recovery. No automatic age-based purge is applied to saved history.
 
+Version 0.14 rebuilds old read checkpoints to correct transcript byte offsets and include archived Codex sessions. Cumulative readings keep their raw numeric evidence so proven counter revisions can be reconciled. A legacy aggregate is corrected only when a complete replay reproduces its original fingerprint under the older parser; deleted or unmatched history is retained. Before any proven downward correction, the original archive is kept privately alongside it as `token-history-before-counter-repair-v1.json`.
+
+The disposable index stays JSON for ordinary histories. Above 40 MB it is stored with lossless LZFSE compression, retaining its checkpoints and all numeric observations. The reader accepts both forms and bounds expanded index data to 512 MB. A failed checkpoint save is reported, rather than silently discarding scan progress. The permanent archive remains checksum-protected JSON.
+
 ## Backup and recovery
 
 This is a local archive, not synchronization between Macs. A full Mac erase also removes it unless another backup exists. To keep an external copy, quit Builder Nutch and copy the `history` directory using your usual backup tool. Keep that directory separate from session-cleaning rules.
