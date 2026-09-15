@@ -23,7 +23,7 @@ struct UsageLedgerCacheEntry: Codable, Equatable {
 /// of conversation, and nothing in it is sent anywhere.
 struct UsageLedgerCache: Codable, Equatable {
     /// Bumped when the file layout changes.
-    static let currentVersion = 3
+    static let currentVersion = 4
     /// Bumped when `UsageWeight` changes, because every cached weight was
     /// computed with the old formula and mixing the two would be nonsense.
     static let currentFormula = 1

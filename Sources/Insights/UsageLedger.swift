@@ -1,13 +1,13 @@
 import Foundation
 
-/// One place transcripts live: the shared Claude home, or one account's own
-/// isolated home under `profiles/<account uuid>/`.
+/// One place transcripts live: a Claude home, or Codex's local session store.
 struct UsageLedgerSource: Equatable {
-    /// The `projects` directory itself.
+    /// The directory recursively containing transcript JSONL files.
     var projectsRoot: URL
     /// The Builder Nutch account that owns this home, when it is an isolated
     /// profile. Nil for the shared home, where the account has to be deduced.
     var managedAccountID: String?
+    var format: UsageTranscriptFormat = .claude
 }
 
 /// Reads the transcripts and answers "where did the quota go".
@@ -78,11 +78,15 @@ struct UsageLedgerEngine {
 
                 // A file that only grew can be resumed. Anything else — smaller,
                 // or rewritten under the same size — is read from the start.
-                let resumable = cached.map { size >= $0.size } ?? false
+                // Codex's legacy cumulative fallback needs the complete series
+                // to calculate monotonic deltas. Unchanged files still use the
+                // cache; changed Codex files are deliberately rescanned whole.
+                let resumable = source.format == .claude && (cached.map { size >= $0.size } ?? false)
                 let offset = resumable ? (cached?.offset ?? 0) : 0
                 guard let outcome = try? scanner.scan(file: file, from: offset,
                                                       sessionIDHint: Self.sessionIDHint(for: file),
-                                                      managedAccountID: source.managedAccountID) else {
+                                                      managedAccountID: source.managedAccountID,
+                                                      format: source.format) else {
                     summary.filesSkipped += 1
                     if let cached { digests.append(cached.digest) }
                     continue
@@ -160,8 +164,9 @@ struct UsageLedgerEngine {
             // are the same transcript in two places.
             let tokens = digest.tokens
             let fingerprint = "\(digest.sessionID)|\(digest.messages)|\(tokens.input)|\(tokens.output)|"
-                + "\(tokens.cacheCreation)|\(tokens.cacheRead)|\(Int(digest.weight))|"
-                + "\(digest.firstActivity?.timeIntervalSince1970 ?? 0)"
+                + "\(tokens.cacheCreation)|\(tokens.cacheRead)|\(tokens.thinking)|"
+                + "\(tokens.measurements)|\(tokens.claudeMeasurements)|\(tokens.codexMeasurements)|\(Int(digest.weight))|"
+                + "\(digest.provider.rawValue)|\(digest.firstActivity?.timeIntervalSince1970 ?? 0)"
             guard seen.insert(fingerprint).inserted else { continue }
             if var existing = bySession[digest.sessionID] {
                 existing.merge(digest)
@@ -175,8 +180,9 @@ struct UsageLedgerEngine {
 
     // MARK: - Reporting
 
-    /// The report the UI will read. `days` is a rolling window, not a calendar
-    /// one, because that is how the subscription's weekly limit works.
+    /// The report the UI will read. `days` means local calendar days including
+    /// today, so every observed request belongs wholly inside or outside the
+    /// window; token counts are never prorated from elapsed time.
     func report(days: Int, now: Date, cache: inout UsageLedgerCache) -> UsageLedgerReport {
         // A day of slack: a file whose clock or flush lands just before the
         // window opens is still worth reading.
@@ -189,8 +195,9 @@ struct UsageLedgerEngine {
     /// The pure half: digests in, report out. No filesystem, no clock.
     static func report(sessions: [UsageSessionDigest], summary: UsageScanSummary, days: Int, now: Date,
                        calendar: Calendar, timeline: UsageAccountTimeline) -> UsageLedgerReport {
-        let span = Double(max(1, days)) * 86_400
-        let windowStart = now.addingTimeInterval(-span)
+        let boundedDays = max(1, days)
+        let today = calendar.startOfDay(for: now)
+        let windowStart = calendar.date(byAdding: .day, value: -(boundedDays - 1), to: today) ?? today
         var accounts: [String: AccountAccumulator] = [:]
         var overall = Accumulator()
         var overallDays: [String: Accumulator] = [:]
@@ -219,7 +226,7 @@ struct UsageLedgerEngine {
                                  tokens: $0.value.tokens, messages: $0.value.messages) }
             .sorted { $0.day < $1.day }
 
-        return UsageLedgerReport(generatedAt: now, windowStart: windowStart, windowEnd: now, days: max(1, days),
+        return UsageLedgerReport(generatedAt: now, windowStart: windowStart, windowEnd: now, days: boundedDays,
                                  totalWeight: total, tokens: overall.tokens, messages: overall.messages,
                                  sessionCount: shares.reduce(0) { $0 + $1.sessionCount },
                                  accounts: shares, timeline: timelineSlices, scan: summary)
@@ -247,7 +254,7 @@ struct UsageLedgerEngine {
         for (key, bucket) in session.hours {
             guard let hour = Int(key) else { continue }
             let date = Date(timeIntervalSince1970: Double(hour) * 3600)
-            guard date >= start.addingTimeInterval(-3599), date <= end else { continue }
+            guard date >= start, date <= end else { continue }
             window.total = window.total + bucket
             let day = formatter.string(from: date)
             window.byDay[day] = (window.byDay[day] ?? UsageHourBucket()) + bucket
@@ -267,19 +274,27 @@ struct UsageLedgerEngine {
     /// subscription; the login timeline is a deduction; after that we say so.
     static func accountKey(for session: UsageSessionDigest, activeAt date: Date?,
                            timeline: UsageAccountTimeline) -> AccountKey {
+        if session.provider == .codex {
+            // Local Codex telemetry identifies the provider, not the paying
+            // Builder Nutch account. Claude's login timeline cannot fill that
+            // gap without inventing attribution.
+            return AccountKey(key: "codex:unknown", managedAccountID: nil,
+                              vendorAccountID: nil, attribution: .unknown, provider: .codex)
+        }
         if let managed = session.managedAccountID {
             return AccountKey(key: "profile:\(managed)", managedAccountID: managed,
-                              vendorAccountID: session.vendorAccountID, attribution: .explicit)
+                              vendorAccountID: session.vendorAccountID, attribution: .explicit, provider: .claude)
         }
         if let vendor = session.vendorAccountID {
             return AccountKey(key: "vendor:\(vendor)", managedAccountID: nil,
-                              vendorAccountID: vendor, attribution: .explicit)
+                              vendorAccountID: vendor, attribution: .explicit, provider: .claude)
         }
         if let date, let deduced = timeline.accountID(at: date) {
             return AccountKey(key: "profile:\(deduced)", managedAccountID: deduced,
-                              vendorAccountID: nil, attribution: .deduced)
+                              vendorAccountID: nil, attribution: .deduced, provider: .claude)
         }
-        return AccountKey(key: "unknown", managedAccountID: nil, vendorAccountID: nil, attribution: .unknown)
+        return AccountKey(key: "unknown", managedAccountID: nil, vendorAccountID: nil,
+                          attribution: .unknown, provider: .claude)
     }
 
     struct AccountKey: Equatable {
@@ -287,6 +302,7 @@ struct UsageLedgerEngine {
         let managedAccountID: String?
         let vendorAccountID: String?
         let attribution: UsageAttribution
+        let provider: UsageTranscriptFormat
     }
 
     static func percent(_ value: Double, of total: Double) -> Double {
@@ -374,7 +390,7 @@ struct UsageLedgerEngine {
                 .sorted { $0.day < $1.day }
             return AccountUsageShare(
                 accountKey: key.key, managedAccountID: key.managedAccountID, vendorAccountID: vendorAccountID,
-                attribution: attribution, weight: totals.weight,
+                attribution: attribution, provider: key.provider, weight: totals.weight,
                 sharePercent: UsageLedgerEngine.percent(totals.weight, of: totalWeight),
                 tokens: totals.tokens, messages: totals.messages,
                 sessionCount: projects.values.reduce(0) { $0 + $1.sessions.count },
@@ -465,11 +481,13 @@ actor UsageLedger {
         return report
     }
 
-    /// Where transcripts live on this Mac: the shared Claude home, plus one home
-    /// per isolated account profile.
+    /// Where transcripts live on this Mac: Claude's shared and isolated homes,
+    /// plus Codex's local rollout sessions.
     static func defaultSources(home: URL, catalogRoot: URL) -> [UsageLedgerSource] {
         var sources = [UsageLedgerSource(projectsRoot: home.appendingPathComponent(".claude/projects", isDirectory: true),
-                                         managedAccountID: nil)]
+                                         managedAccountID: nil, format: .claude),
+                       UsageLedgerSource(projectsRoot: home.appendingPathComponent(".codex/sessions", isDirectory: true),
+                                         managedAccountID: nil, format: .codex)]
         let profiles = catalogRoot.appendingPathComponent("profiles", isDirectory: true)
         let contents = (try? FileManager.default.contentsOfDirectory(at: profiles, includingPropertiesForKeys: [.isDirectoryKey],
                                                                      options: [.skipsHiddenFiles])) ?? []
@@ -480,7 +498,7 @@ actor UsageLedger {
             guard UUID(uuidString: name) != nil else { continue }
             let projects = directory.appendingPathComponent("projects", isDirectory: true)
             guard FileManager.default.fileExists(atPath: projects.path) else { continue }
-            sources.append(UsageLedgerSource(projectsRoot: projects, managedAccountID: name.lowercased()))
+            sources.append(UsageLedgerSource(projectsRoot: projects, managedAccountID: name.lowercased(), format: .claude))
         }
         return sources
     }

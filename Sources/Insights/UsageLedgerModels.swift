@@ -1,5 +1,10 @@
 import Foundation
 
+enum UsageTranscriptFormat: String, Codable, Equatable {
+    case claude
+    case codex
+}
+
 /// How sure the ledger is about which account paid for a session.
 ///
 /// The difference matters on screen: a transcript that sits inside an account's
@@ -27,9 +32,30 @@ enum UsageAttribution: String, Codable, Equatable {
     }
 }
 
-/// Raw token counts, exactly as Claude Code recorded them. No estimate here:
-/// these are the numbers, and every weighting happens elsewhere.
+enum UsageMeasurementAvailability: String, Codable, Equatable {
+    case unavailable
+    case partial
+    case complete
+}
+
+/// How much of an aggregate was actually present in local telemetry. A missing
+/// field is not a measured zero, especially for older reasoning/cache formats.
+struct UsageTokenCoverage: Codable, Equatable {
+    let records: Int
+    let input: UsageMeasurementAvailability
+    let output: UsageMeasurementAvailability
+    let cacheCreation: UsageMeasurementAvailability
+    let cacheRead: UsageMeasurementAvailability
+    let reasoning: UsageMeasurementAvailability
+    let claudeRecords: Int
+    let codexRecords: Int
+}
+
+/// Raw token counts, exactly as Claude Code or Codex recorded them. No estimate
+/// here: these are the numbers, and every weighting happens elsewhere.
 struct UsageTokenTotals: Codable, Equatable {
+    /// Uncached, non-cache-write input. Anthropic supplies this directly;
+    /// OpenAI supplies inclusive input, which the Codex scanner normalises.
     var input = 0
     var output = 0
     var cacheCreation = 0
@@ -38,14 +64,49 @@ struct UsageTokenTotals: Codable, Equatable {
     /// weight on its own — doing so would count thinking twice.
     var thinking = 0
 
-    /// What the person would call "tokens": everything the request carried plus
-    /// everything it produced.
-    var total: Int { input + output + cacheCreation + cacheRead }
+    var measurements = 0
+    var inputMeasurements = 0
+    var outputMeasurements = 0
+    var cacheCreationMeasurements = 0
+    var cacheReadMeasurements = 0
+    var thinkingMeasurements = 0
+    var claudeMeasurements = 0
+    var codexMeasurements = 0
+
+    var totalInput: Int { input + cacheCreation + cacheRead }
+    /// Reasoning is already inside output and is deliberately not added again.
+    var total: Int { totalInput + output }
+    var measuredReasoning: Int? { thinkingMeasurements > 0 ? thinking : nil }
+
+    var coverage: UsageTokenCoverage {
+        func availability(_ measured: Int) -> UsageMeasurementAvailability {
+            guard measurements > 0, measured > 0 else { return .unavailable }
+            return measured >= measurements ? .complete : .partial
+        }
+        return UsageTokenCoverage(records: measurements,
+                                  input: availability(inputMeasurements),
+                                  output: availability(outputMeasurements),
+                                  cacheCreation: availability(cacheCreationMeasurements),
+                                  cacheRead: availability(cacheReadMeasurements),
+                                  reasoning: availability(thinkingMeasurements),
+                                  claudeRecords: claudeMeasurements,
+                                  codexRecords: codexMeasurements)
+    }
+
+    var reasoningAvailability: UsageMeasurementAvailability { coverage.reasoning }
 
     static func + (lhs: UsageTokenTotals, rhs: UsageTokenTotals) -> UsageTokenTotals {
         UsageTokenTotals(input: lhs.input + rhs.input, output: lhs.output + rhs.output,
                          cacheCreation: lhs.cacheCreation + rhs.cacheCreation,
-                         cacheRead: lhs.cacheRead + rhs.cacheRead, thinking: lhs.thinking + rhs.thinking)
+                         cacheRead: lhs.cacheRead + rhs.cacheRead, thinking: lhs.thinking + rhs.thinking,
+                         measurements: lhs.measurements + rhs.measurements,
+                         inputMeasurements: lhs.inputMeasurements + rhs.inputMeasurements,
+                         outputMeasurements: lhs.outputMeasurements + rhs.outputMeasurements,
+                         cacheCreationMeasurements: lhs.cacheCreationMeasurements + rhs.cacheCreationMeasurements,
+                         cacheReadMeasurements: lhs.cacheReadMeasurements + rhs.cacheReadMeasurements,
+                         thinkingMeasurements: lhs.thinkingMeasurements + rhs.thinkingMeasurements,
+                         claudeMeasurements: lhs.claudeMeasurements + rhs.claudeMeasurements,
+                         codexMeasurements: lhs.codexMeasurements + rhs.codexMeasurements)
     }
 
     static func += (lhs: inout UsageTokenTotals, rhs: UsageTokenTotals) { lhs = lhs + rhs }
@@ -57,7 +118,14 @@ struct UsageTokenTotals: Codable, Equatable {
         let clamped = min(1, factor)
         func part(_ value: Int) -> Int { max(0, Int((Double(value) * clamped).rounded())) }
         return UsageTokenTotals(input: part(input), output: part(output), cacheCreation: part(cacheCreation),
-                                cacheRead: part(cacheRead), thinking: part(thinking))
+                                cacheRead: part(cacheRead), thinking: part(thinking),
+                                measurements: part(measurements), inputMeasurements: part(inputMeasurements),
+                                outputMeasurements: part(outputMeasurements),
+                                cacheCreationMeasurements: part(cacheCreationMeasurements),
+                                cacheReadMeasurements: part(cacheReadMeasurements),
+                                thinkingMeasurements: part(thinkingMeasurements),
+                                claudeMeasurements: part(claudeMeasurements),
+                                codexMeasurements: part(codexMeasurements))
     }
 }
 
@@ -124,6 +192,7 @@ struct UsageHourBucket: Codable, Equatable {
 /// labels, so the order files are read in never changes the result.
 struct UsageSessionDigest: Codable, Equatable {
     var sessionID: String
+    var provider: UsageTranscriptFormat
     /// Working directories of the main conversation, by how much was spent in
     /// each. A session that moved between directories is filed where the tokens
     /// actually went, not where it happened to start — and two readings of the
@@ -149,7 +218,10 @@ struct UsageSessionDigest: Codable, Equatable {
     /// The Builder Nutch account whose profile directory holds this file.
     var managedAccountID: String?
 
-    init(sessionID: String) { self.sessionID = sessionID }
+    init(sessionID: String, provider: UsageTranscriptFormat = .claude) {
+        self.sessionID = sessionID
+        self.provider = provider
+    }
 
     /// Where the main conversation did most of its work, if anywhere.
     var projectPath: String? { Self.heaviest(projectWeights) }

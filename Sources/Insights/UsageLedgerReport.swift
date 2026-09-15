@@ -66,6 +66,7 @@ struct AccountUsageShare: Codable, Equatable {
     /// The vendor's own account identifier, when a transcript named it.
     let vendorAccountID: String?
     let attribution: UsageAttribution
+    let provider: UsageTranscriptFormat
     let weight: Double
     let sharePercent: Double
     let tokens: UsageTokenTotals

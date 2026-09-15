@@ -48,6 +48,32 @@ final class UsageLedgerTests: XCTestCase {
         "{\"type\":\"bridge-session\",\"sessionId\":\"\(session)\",\"ownerAccountUuid\":\"\(owner)\"}"
     }
 
+    private func codexMeta(session: String, cwd: String) -> String {
+        "{\"timestamp\":\"\(Self.stamp.string(from: epoch))\",\"type\":\"session_meta\",\"payload\":{" +
+            "\"id\":\"\(session)\",\"cwd\":\"\(cwd)\"}}"
+    }
+
+    private func codexRecord(response: String, at date: Date, input: Int, cached: Int, cacheWrite: Int,
+                             output: Int, reasoning: Int, thread: String? = nil) -> String {
+        let owner = thread.map { "\"thread_id\":\"\($0)\"," } ?? ""
+        return "{\"timestamp\":\"\(Self.stamp.string(from: date))\",\"type\":\"token_usage_record\",\"payload\":{" +
+            owner + "\"response_id\":\"\(response)\",\"usage\":{" +
+            "\"input_tokens\":\(input),\"cached_input_tokens\":\(cached)," +
+            "\"cache_write_input_tokens\":\(cacheWrite),\"output_tokens\":\(output)," +
+            "\"reasoning_output_tokens\":\(reasoning),\"total_tokens\":\(input + output)}," +
+            "\"thread_token_usage\":{\"input_tokens\":999999},\"turn_token_usage\":{\"input_tokens\":999999}}}"
+    }
+
+    private func codexSnapshot(at date: Date, input: Int, cached: Int, output: Int, reasoning: Int,
+                               cacheWrite: Int? = nil) -> String {
+        let write = cacheWrite.map { ",\"cache_write_input_tokens\":\($0)" } ?? ""
+        return "{\"timestamp\":\"\(Self.stamp.string(from: date))\",\"type\":\"event_msg\",\"payload\":{" +
+            "\"type\":\"token_count\",\"info\":{\"total_token_usage\":{" +
+            "\"input_tokens\":\(input),\"cached_input_tokens\":\(cached)\(write)," +
+            "\"output_tokens\":\(output),\"reasoning_output_tokens\":\(reasoning)," +
+            "\"total_tokens\":\(input + output)},\"last_token_usage\":{\"input_tokens\":999999}}}}"
+    }
+
     @discardableResult
     private func write(_ lines: [String], to relativePath: String) throws -> URL {
         let url = root.appendingPathComponent(relativePath)
@@ -143,6 +169,82 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertEqual(outcome.digest.hours.count, 1, "Two turns two minutes apart are the same hour")
         XCTAssertEqual(outcome.consumed, UInt64(try Data(contentsOf: file).count))
         XCTAssertEqual(outcome.malformedLines, 0)
+        XCTAssertEqual(outcome.digest.tokens.reasoningAvailability, .complete)
+        XCTAssertEqual(outcome.digest.tokens.measuredReasoning, 20)
+        XCTAssertEqual(outcome.digest.tokens.coverage.claudeRecords, 2)
+    }
+
+    func testMissingClaudeThinkingRemainsUnknownAndAggregatesAsPartialCoverage() throws {
+        let session = "11111111-1111-1111-1111-111111111112"
+        let withoutThinking =
+            "{\"type\":\"assistant\",\"sessionId\":\"\(session)\",\"cwd\":\"/tmp/P\"," +
+            "\"timestamp\":\"\(Self.stamp.string(from: epoch))\",\"message\":{\"model\":\"claude\",\"usage\":{" +
+            "\"input_tokens\":4,\"output_tokens\":6,\"cache_read_input_tokens\":0," +
+            "\"cache_creation_input_tokens\":0}}}"
+        let file = try write([
+            withoutThinking,
+            assistant(session: session, cwd: "/tmp/P", at: epoch.addingTimeInterval(1), input: 5, output: 7)
+        ], to: "projects/slug/\(session).jsonl")
+
+        let tokens = try UsageTranscriptScanner().scan(file: file, from: 0, sessionIDHint: session,
+                                                       managedAccountID: nil).digest.tokens
+        XCTAssertEqual(tokens.thinking, 7, "Reported thinking is capped to its containing output")
+        XCTAssertEqual(tokens.measuredReasoning, 7)
+        XCTAssertEqual(tokens.reasoningAvailability, .partial)
+        XCTAssertEqual(tokens.coverage.records, 2)
+    }
+
+    func testCodexExactRecordsAreNormalisedDeduplicatedAndNeverMixAggregates() throws {
+        let session = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        let exact = codexRecord(response: "resp_one", at: epoch, input: 100, cached: 60,
+                                cacheWrite: 20, output: 30, reasoning: 10, thread: session)
+        let child = codexRecord(response: "resp_child", at: epoch, input: 50_000, cached: 40_000,
+                                cacheWrite: 0, output: 5_000, reasoning: 2_000,
+                                thread: "cccccccc-cccc-cccc-cccc-cccccccccccc")
+        let file = try write([
+            codexMeta(session: session, cwd: "/Users/x/Projects/CodexApp"),
+            codexSnapshot(at: epoch, input: 8_000, cached: 7_000, output: 900, reasoning: 500),
+            exact,
+            child,
+            exact
+        ], to: "codex/rollout.jsonl")
+
+        let digest = try UsageTranscriptScanner().scan(file: file, from: 0, sessionIDHint: "rollout",
+                                                       managedAccountID: nil, format: .codex).digest
+        XCTAssertEqual(digest.sessionID, "codex:\(session)")
+        XCTAssertEqual(digest.projectPath, "/Users/x/Projects/CodexApp")
+        XCTAssertEqual(digest.messages, 1)
+        XCTAssertEqual(digest.tokens.input, 20)
+        XCTAssertEqual(digest.tokens.cacheRead, 60)
+        XCTAssertEqual(digest.tokens.cacheCreation, 20)
+        XCTAssertEqual(digest.tokens.totalInput, 100)
+        XCTAssertEqual(digest.tokens.output, 30)
+        XCTAssertEqual(digest.tokens.thinking, 10)
+        XCTAssertEqual(digest.tokens.total, 130)
+        XCTAssertEqual(digest.tokens.reasoningAvailability, .complete)
+        XCTAssertEqual(digest.tokens.coverage.codexRecords, 1)
+    }
+
+    func testLegacyCodexCumulativeSnapshotsBecomeMonotonicDeltasWithResetHandling() throws {
+        let session = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        let file = try write([
+            codexMeta(session: session, cwd: "/tmp/Legacy"),
+            codexSnapshot(at: epoch, input: 100, cached: 80, output: 20, reasoning: 5),
+            codexSnapshot(at: epoch.addingTimeInterval(60), input: 150, cached: 120, output: 30, reasoning: 8),
+            codexSnapshot(at: epoch.addingTimeInterval(61), input: 150, cached: 120, output: 30, reasoning: 8),
+            codexSnapshot(at: epoch.addingTimeInterval(120), input: 20, cached: 0, output: 4, reasoning: 1)
+        ], to: "codex/legacy.jsonl")
+
+        let tokens = try UsageTranscriptScanner().scan(file: file, from: 0, sessionIDHint: "legacy",
+                                                       managedAccountID: nil, format: .codex).digest.tokens
+        XCTAssertEqual(tokens.totalInput, 170)
+        XCTAssertEqual(tokens.input, 50)
+        XCTAssertEqual(tokens.cacheRead, 120)
+        XCTAssertEqual(tokens.output, 34)
+        XCTAssertEqual(tokens.thinking, 9)
+        XCTAssertEqual(tokens.measurements, 3, "An unchanged cumulative snapshot contributes no usage")
+        XCTAssertEqual(tokens.coverage.cacheCreation, .unavailable)
+        XCTAssertEqual(tokens.reasoningAvailability, .complete)
     }
 
     func testMalformedUnknownAndEmptyLinesCostOneLineAndNothingMore() throws {
@@ -516,6 +618,20 @@ final class UsageLedgerTests: XCTestCase {
         let unattributed = report([orphan])
         XCTAssertEqual(unattributed.accounts.first?.attribution, .unknown)
         XCTAssertEqual(unattributed.accounts.first?.accountKey, "unknown")
+    }
+
+    func testCodexUsageNeverBorrowsClaudeAccountTimelineAttribution() throws {
+        var codex = digest(session: "codex:thread", project: "/p/Codex", weightPerHour: 100, hours: [epoch])
+        codex.provider = .codex
+        let timeline = UsageAccountTimeline(entries: [
+            .init(start: epoch.addingTimeInterval(-3_600), accountID: "claude-account")
+        ])
+
+        let account = try XCTUnwrap(report([codex], timeline: timeline).accounts.first)
+        XCTAssertEqual(account.accountKey, "codex:unknown")
+        XCTAssertEqual(account.provider, .codex)
+        XCTAssertEqual(account.attribution, .unknown)
+        XCTAssertNil(account.managedAccountID)
     }
 
     func testAnAccountIsOnlyAsSureAsItsLeastSureSession() throws {

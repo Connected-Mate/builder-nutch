@@ -1,6 +1,6 @@
 import Foundation
 
-/// Reads one Claude Code transcript and turns it into a digest.
+/// Reads one Claude Code or Codex transcript and turns it into a digest.
 ///
 /// Everything in these files was written by another program and, through it, by
 /// whatever the person and the models typed. It is **data**: values are read,
@@ -27,10 +27,12 @@ struct UsageTranscriptScanner {
     }
 
     /// Reads `file` from `offset` and returns what it found after that point.
-    func scan(file: URL, from offset: UInt64, sessionIDHint: String, managedAccountID: String?) throws -> Outcome {
+    func scan(file: URL, from offset: UInt64, sessionIDHint: String, managedAccountID: String?,
+              format: UsageTranscriptFormat = .claude) throws -> Outcome {
         var digest = UsageSessionDigest(sessionID: sessionIDHint)
         digest.managedAccountID = managedAccountID
         var outcome = Outcome(digest: digest, consumed: offset)
+        var codex = CodexState(sessionIDHint: sessionIDHint, managedAccountID: managedAccountID)
 
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
@@ -59,7 +61,7 @@ struct UsageTranscriptScanner {
                     line.removeAll(keepingCapacity: true)
                 } else {
                     line.append(contentsOf: slice)
-                    consume(line: line, into: &outcome)
+                    consume(line: line, format: format, into: &outcome, codex: &codex)
                     line.removeAll(keepingCapacity: true)
                 }
                 outcome.consumed = position
@@ -88,19 +90,28 @@ struct UsageTranscriptScanner {
                 break
             }
         }
+        if format == .codex {
+            outcome.digest = codex.sawExactRecord ? codex.exact : codex.fallback
+        }
         return outcome
     }
 
     /// One JSON line. Unparseable lines are counted and skipped: a transcript
     /// written by a newer Claude Code, or half-flushed to disk, must cost us the
     /// line and nothing more.
-    private func consume(line: Data, into outcome: inout Outcome) {
+    private func consume(line: Data, format: UsageTranscriptFormat, into outcome: inout Outcome,
+                         codex: inout CodexState) {
         guard line.count > 2, Self.mayCarryUsage(line) else { return }
         guard let object = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any] else {
             outcome.malformedLines += 1
             return
         }
         guard let type = object["type"] as? String else { return }
+
+        if format == .codex {
+            consumeCodex(object: object, type: type, state: &codex)
+            return
+        }
 
         if let session = UsageText.identifier(object["sessionId"]) { outcome.digest.sessionID = session }
 
@@ -124,12 +135,29 @@ struct UsageTranscriptScanner {
               let usage = message["usage"] as? [String: Any] else { return }
 
         var tokens = UsageTokenTotals()
-        tokens.input = Self.count(usage["input_tokens"])
-        tokens.output = Self.count(usage["output_tokens"])
-        tokens.cacheCreation = Self.count(usage["cache_creation_input_tokens"])
-        tokens.cacheRead = Self.count(usage["cache_read_input_tokens"])
+        tokens.measurements = 1
+        tokens.claudeMeasurements = 1
+        if let value = Self.countIfPresent(usage["input_tokens"]) {
+            tokens.input = value
+            tokens.inputMeasurements = 1
+        }
+        if let value = Self.countIfPresent(usage["output_tokens"]) {
+            tokens.output = value
+            tokens.outputMeasurements = 1
+        }
+        if let value = Self.countIfPresent(usage["cache_creation_input_tokens"]) {
+            tokens.cacheCreation = value
+            tokens.cacheCreationMeasurements = 1
+        }
+        if let value = Self.countIfPresent(usage["cache_read_input_tokens"]) {
+            tokens.cacheRead = value
+            tokens.cacheReadMeasurements = 1
+        }
         if let details = usage["output_tokens_details"] as? [String: Any] {
-            tokens.thinking = min(tokens.output, Self.count(details["thinking_tokens"]))
+            if let value = Self.countIfPresent(details["thinking_tokens"]) {
+                tokens.thinking = min(tokens.output, value)
+                tokens.thinkingMeasurements = 1
+            }
         }
         guard tokens.total > 0 else { return }
 
@@ -169,6 +197,169 @@ struct UsageTranscriptScanner {
         outcome.digest = digest
     }
 
+    // MARK: - Codex
+
+    /// New Codex rollouts persist one exact record per completed model request.
+    /// Older rollouts only persist cumulative snapshots; those are converted to
+    /// monotonic deltas, and discarded if exact records exist anywhere in the
+    /// same file. Aggregate thread/turn fields are never counted.
+    private struct CodexState {
+        var exact: UsageSessionDigest
+        var fallback: UsageSessionDigest
+        var previousCumulative: CodexCounters?
+        var responseIDs: Set<String> = []
+        var projectPath: String?
+        var model: String?
+        var threadID: String?
+        var sawExactRecord = false
+
+        init(sessionIDHint: String, managedAccountID: String?) {
+            exact = UsageSessionDigest(sessionID: "codex:\(sessionIDHint)", provider: .codex)
+            fallback = UsageSessionDigest(sessionID: "codex:\(sessionIDHint)", provider: .codex)
+            exact.managedAccountID = managedAccountID
+            fallback.managedAccountID = managedAccountID
+        }
+
+        mutating func setSessionID(_ raw: Any?) {
+            guard let id = UsageText.identifier(raw) else { return }
+            threadID = id
+            exact.sessionID = "codex:\(id)"
+            fallback.sessionID = "codex:\(id)"
+        }
+    }
+
+    private struct CodexCounters {
+        var inclusiveInput: Int
+        var cachedInput: Int
+        var cacheWriteInput: Int
+        var output: Int
+        var reasoningOutput: Int
+        var hasCachedInput: Bool
+        var hasCacheWriteInput: Bool
+        var hasReasoningOutput: Bool
+
+        init?(_ usage: [String: Any]) {
+            guard let input = UsageTranscriptScanner.countIfPresent(usage["input_tokens"]),
+                  let output = UsageTranscriptScanner.countIfPresent(usage["output_tokens"]) else { return nil }
+            inclusiveInput = input
+            cachedInput = UsageTranscriptScanner.countIfPresent(usage["cached_input_tokens"]) ?? 0
+            cacheWriteInput = UsageTranscriptScanner.countIfPresent(usage["cache_write_input_tokens"]) ?? 0
+            reasoningOutput = UsageTranscriptScanner.countIfPresent(usage["reasoning_output_tokens"]) ?? 0
+            self.output = output
+            hasCachedInput = UsageTranscriptScanner.countIfPresent(usage["cached_input_tokens"]) != nil
+            hasCacheWriteInput = UsageTranscriptScanner.countIfPresent(usage["cache_write_input_tokens"]) != nil
+            hasReasoningOutput = UsageTranscriptScanner.countIfPresent(usage["reasoning_output_tokens"]) != nil
+        }
+
+        func delta(after previous: CodexCounters?) -> CodexCounters {
+            guard let previous,
+                  inclusiveInput >= previous.inclusiveInput,
+                  cachedInput >= previous.cachedInput,
+                  cacheWriteInput >= previous.cacheWriteInput,
+                  output >= previous.output,
+                  reasoningOutput >= previous.reasoningOutput else { return self }
+            return CodexCounters(inclusiveInput: inclusiveInput - previous.inclusiveInput,
+                                 cachedInput: cachedInput - previous.cachedInput,
+                                 cacheWriteInput: cacheWriteInput - previous.cacheWriteInput,
+                                 output: output - previous.output,
+                                 reasoningOutput: reasoningOutput - previous.reasoningOutput,
+                                 hasCachedInput: hasCachedInput,
+                                 hasCacheWriteInput: hasCacheWriteInput,
+                                 hasReasoningOutput: hasReasoningOutput)
+        }
+
+        private init(inclusiveInput: Int, cachedInput: Int, cacheWriteInput: Int, output: Int,
+                     reasoningOutput: Int, hasCachedInput: Bool, hasCacheWriteInput: Bool,
+                     hasReasoningOutput: Bool) {
+            self.inclusiveInput = inclusiveInput
+            self.cachedInput = cachedInput
+            self.cacheWriteInput = cacheWriteInput
+            self.output = output
+            self.reasoningOutput = reasoningOutput
+            self.hasCachedInput = hasCachedInput
+            self.hasCacheWriteInput = hasCacheWriteInput
+            self.hasReasoningOutput = hasReasoningOutput
+        }
+
+        func totals() -> UsageTokenTotals {
+            // OpenAI input is inclusive. Official cache accounting subtracts
+            // both cache reads and writes to obtain ordinary input.
+            let read = min(inclusiveInput, cachedInput)
+            let write = min(max(0, inclusiveInput - read), cacheWriteInput)
+            return UsageTokenTotals(
+                input: max(0, inclusiveInput - read - write), output: output,
+                cacheCreation: write, cacheRead: read, thinking: min(output, reasoningOutput),
+                measurements: 1, inputMeasurements: 1, outputMeasurements: 1,
+                cacheCreationMeasurements: hasCacheWriteInput ? 1 : 0,
+                cacheReadMeasurements: hasCachedInput ? 1 : 0,
+                thinkingMeasurements: hasReasoningOutput ? 1 : 0,
+                claudeMeasurements: 0, codexMeasurements: 1)
+        }
+    }
+
+    private func consumeCodex(object: [String: Any], type: String, state: inout CodexState) {
+        switch type {
+        case "session_meta":
+            guard let payload = object["payload"] as? [String: Any] else { return }
+            state.setSessionID(payload["id"] ?? payload["session_id"])
+            if let raw = UsageText.clean(payload["cwd"], limit: limits.maxPathCharacters) {
+                state.projectPath = UsageProjectPath.normalize(raw)
+            }
+        case "turn_context":
+            guard let payload = object["payload"] as? [String: Any] else { return }
+            state.model = UsageText.clean(payload["model"], limit: 80) ?? state.model
+        case "token_usage_record":
+            guard let payload = object["payload"] as? [String: Any],
+                  let usage = payload["usage"] as? [String: Any],
+                  let counters = CodexCounters(usage) else { return }
+            // A parent rollout can mention child-thread aggregate usage. The
+            // child's own rollout is scanned separately, so only records owned
+            // by this file's thread are accepted here.
+            if let owner = UsageText.identifier(payload["thread_id"]),
+               let threadID = state.threadID, owner != threadID { return }
+            if let responseID = UsageText.identifier(payload["response_id"]),
+               !state.responseIDs.insert(responseID).inserted { return }
+            state.sawExactRecord = true
+            recordCodex(counters.totals(), at: UsageText.date(object["timestamp"]), into: &state.exact,
+                        projectPath: state.projectPath, model: state.model)
+        case "event_msg":
+            guard let payload = object["payload"] as? [String: Any],
+                  payload["type"] as? String == "token_count",
+                  let info = payload["info"] as? [String: Any],
+                  let usage = info["total_token_usage"] as? [String: Any],
+                  let cumulative = CodexCounters(usage) else { return }
+            let delta = cumulative.delta(after: state.previousCumulative)
+            state.previousCumulative = cumulative
+            guard delta.inclusiveInput > 0 || delta.output > 0 else { return }
+            recordCodex(delta.totals(), at: UsageText.date(object["timestamp"]), into: &state.fallback,
+                        projectPath: state.projectPath, model: state.model)
+        default:
+            break
+        }
+    }
+
+    private func recordCodex(_ tokens: UsageTokenTotals, at date: Date?, into digest: inout UsageSessionDigest,
+                             projectPath: String?, model: String?) {
+        guard tokens.total > 0 else { return }
+        let weight = UsageWeight.weight(tokens, model: model)
+        digest.tokens += tokens
+        digest.weight += weight
+        digest.messages += 1
+        if let model { digest.modelWeights[model, default: 0] += weight }
+        if let projectPath { digest.projectWeights[projectPath, default: 0] += weight }
+        guard let date else { return }
+        digest.firstActivity = min(digest.firstActivity ?? date, date)
+        digest.lastActivity = max(digest.lastActivity ?? date, date)
+        let key = String(Int(date.timeIntervalSince1970 / 3600))
+        if digest.hours[key] != nil || digest.hours.count < limits.maxHoursPerSession {
+            var bucket = digest.hours[key] ?? UsageHourBucket()
+            bucket.tokens += tokens
+            bucket.weight += weight
+            bucket.messages += 1
+            digest.hours[key] = bucket
+        }
+    }
+
     /// A cheap byte test that skips the attachments and tool results, which are
     /// most of the bytes on disk and none of the usage.
     static func mayCarryUsage(_ line: Data) -> Bool {
@@ -176,16 +367,21 @@ struct UsageTranscriptScanner {
         return false
     }
 
-    private static let markers: [Data] = ["\"usage\"", "\"ai-title\"", "\"bridge-session\""]
+    private static let markers: [Data] = ["\"usage\"", "\"ai-title\"", "\"bridge-session\"",
+                                         "\"token_count\"", "\"session_meta\"", "\"turn_context\""]
         .compactMap { $0.data(using: .utf8) }
 
     /// Token counts arrive as JSON numbers. Anything else — a string, a bool, a
     /// negative, a float — is not a count and is read as zero rather than
     /// throwing away the whole turn.
     static func count(_ raw: Any?) -> Int {
-        guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return 0 }
+        countIfPresent(raw) ?? 0
+    }
+
+    static func countIfPresent(_ raw: Any?) -> Int? {
+        guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
         let value = number.doubleValue
-        guard value.isFinite, value >= 0, value < 1e12 else { return 0 }
+        guard value.isFinite, value >= 0, value < 1e12, value.rounded(.towardZero) == value else { return nil }
         return Int(value)
     }
 }
