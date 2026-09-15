@@ -30,6 +30,9 @@ struct ReleaseNote: Equatable {
 /// `testTheCurrentVersionHasANote`.
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
+        ReleaseNote(version: "0.16.1", headline: "A brighter card to share.", changes: [
+            .init(title: "Light, color and depth", detail: "A luminous dotted background, glossy black weekly card and pastel day card give your token export a new look. Your recorded figures stay the same.")
+        ]),
         ReleaseNote(version: "0.16.0", headline: "Your activity, ready to share.", changes: [
             .init(title: "A token card to share", detail: "Export a polished image of your recorded tokens this week and today. Save it or copy it directly into a post."),
             .init(title: "Only the numbers", detail: "Account names and projects stay private. Dates and partial readings remain visible on the image.")

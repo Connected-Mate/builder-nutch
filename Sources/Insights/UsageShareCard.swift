@@ -165,7 +165,7 @@ struct UsageShareCard: View {
                     if snapshot.todayAvailability != .unavailable {
                         Text("tokens")
                             .font(AppTheme.font(size: 18, weightValue: 450))
-                            .lineLimit(1).minimumScaleFactor(0.7)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
                 .frame(height: 68, alignment: .leading)

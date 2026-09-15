@@ -497,3 +497,9 @@
 "Account names and projects stay private. Dates and partial readings remain visible on the image." = "Noms de comptes et projets restent privés. Les dates et les lectures partielles restent visibles sur l’image.";
 "Today" = "Aujourd’hui";
 "This week: %@ tokens. Today: %@ tokens. Recorded %@." = "Cette semaine : %@ tokens. Aujourd’hui : %@ tokens. Relevé du %@.";
+
+/* Luminous sharing artwork */
+"A brighter card to share." = "Une carte lumineuse à partager.";
+"Light, color and depth" = "Lumière, couleur et relief";
+"A luminous dotted background, glossy black weekly card and pastel day card give your token export a new look. Your recorded figures stay the same." = "Un fond lumineux à pois, une carte noire brillante pour la semaine et une carte pastel pour la journée donnent un nouveau visage à votre export. Vos chiffres enregistrés restent les mêmes.";
+"tokens" = "tokens";

@@ -230,3 +230,9 @@
 "Account names and projects stay private. Dates and partial readings remain visible on the image." = "Account names and projects stay private. Dates and partial readings remain visible on the image.";
 "Today" = "Today";
 "This week: %@ tokens. Today: %@ tokens. Recorded %@." = "This week: %@ tokens. Today: %@ tokens. Recorded %@.";
+
+/* Luminous sharing artwork */
+"A brighter card to share." = "A brighter card to share.";
+"Light, color and depth" = "Light, color and depth";
+"A luminous dotted background, glossy black weekly card and pastel day card give your token export a new look. Your recorded figures stay the same." = "A luminous dotted background, glossy black weekly card and pastel day card give your token export a new look. Your recorded figures stay the same.";
+"tokens" = "tokens";

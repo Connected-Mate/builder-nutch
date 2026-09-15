@@ -98,7 +98,7 @@ final class UsageShareSnapshotTests: XCTestCase {
 
 @MainActor
 final class UsageShareExportTests: XCTestCase {
-    func testUnequalDailyBarsShareTheSameBaseline() throws {
+    func testArtworkKeepsLuminousBackgroundAndContrastingCards() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Europe/Paris")!
         let now = ISO8601DateFormatter().date(from: "2026-09-15T10:00:00Z")!
@@ -113,17 +113,23 @@ final class UsageShareExportTests: XCTestCase {
             accounts: [], timeline: slices, scan: UsageScanSummary())
         let data = try UsageShareExporter.pngData(snapshot: UsageShareSnapshot(report: report, calendar: calendar))
         let rep = try XCTUnwrap(NSBitmapImageRep(data: data))
-        // Sample clear columns between the labels, within the chart's vertical
-        // band. Both real bars must end on the same baseline despite unequal heights.
-        func baseline(x: Int) -> Int? {
-            (760..<980).last { y in
-                guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return false }
-                return min(color.redComponent, color.greenComponent, color.blueComponent) > 0.38
+        // The previous export lost the reference's colored light entirely.
+        // Inspect open background above the plates, not text or effects inside them.
+        var colorful = 0, sampled = 0
+        for y in stride(from: 30, to: 160, by: 20) {
+            for x in stride(from: 40, to: 2360, by: 60) {
+                let color = try XCTUnwrap(rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                let components = [color.redComponent, color.greenComponent, color.blueComponent]
+                if components.max()! - components.min()! > 0.1 { colorful += 1 }
+                sampled += 1
             }
         }
-        let left = try XCTUnwrap(baseline(x: 400))
-        let right = try XCTUnwrap(baseline(x: 1900))
-        XCTAssertEqual(left, right, accuracy: 1)
+        XCTAssertGreaterThan(Double(colorful) / Double(sampled), 0.4)
+        let weekly = try XCTUnwrap(rep.colorAt(x: 1480, y: 900)?.usingColorSpace(.deviceRGB))
+        let today = try XCTUnwrap(rep.colorAt(x: 2180, y: 900)?.usingColorSpace(.deviceRGB))
+        XCTAssertLessThan(max(weekly.redComponent, weekly.greenComponent, weekly.blueComponent), 0.35)
+        XCTAssertGreaterThan(min(today.redComponent, today.greenComponent, today.blueComponent), 0.8)
+
     }
 
     func testSevenDayArtworkRendersInEnglishAndFrenchWithLargePartialCounts() throws {
