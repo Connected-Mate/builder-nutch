@@ -24,15 +24,18 @@ struct UsageTranscriptScanner {
         var oversizedLines = 0
         var bytesRead = 0
         var truncated = false
+        var checkpoint = UsageTranscriptCheckpoint()
     }
 
     /// Reads `file` from `offset` and returns what it found after that point.
     func scan(file: URL, from offset: UInt64, sessionIDHint: String, managedAccountID: String?,
-              format: UsageTranscriptFormat = .claude) throws -> Outcome {
+              format: UsageTranscriptFormat = .claude,
+              checkpoint: UsageTranscriptCheckpoint = UsageTranscriptCheckpoint()) throws -> Outcome {
         var digest = UsageSessionDigest(sessionID: sessionIDHint)
         digest.managedAccountID = managedAccountID
         var outcome = Outcome(digest: digest, consumed: offset)
-        var codex = CodexState(sessionIDHint: sessionIDHint, managedAccountID: managedAccountID)
+        var codex = CodexState(sessionIDHint: sessionIDHint, managedAccountID: managedAccountID,
+                               checkpoint: checkpoint)
 
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
@@ -41,7 +44,8 @@ struct UsageTranscriptScanner {
         var position = offset
         var line = Data()
         var skippingLongLine = false
-        let ceiling = UInt64(limits.maxFileBytes)
+        let allowance = UInt64(max(0, limits.maxFileBytes))
+        let ceiling = offset > UInt64.max - allowance ? UInt64.max : offset + allowance
 
         while true {
             guard let chunk = try handle.read(upToCount: 256 * 1024), !chunk.isEmpty else { break }
@@ -91,7 +95,8 @@ struct UsageTranscriptScanner {
             }
         }
         if format == .codex {
-            outcome.digest = codex.sawExactRecord ? codex.exact : codex.fallback
+            outcome.digest = codex.digest
+            outcome.checkpoint = codex.checkpoint
         }
         return outcome
     }
@@ -184,14 +189,14 @@ struct UsageTranscriptScanner {
         if let date {
             digest.firstActivity = min(digest.firstActivity ?? date, date)
             digest.lastActivity = max(digest.lastActivity ?? date, date)
-            let hour = Int(date.timeIntervalSince1970 / 3600)
-            let key = String(hour)
-            if digest.hours[key] != nil || digest.hours.count < limits.maxHoursPerSession {
-                var bucket = digest.hours[key] ?? UsageHourBucket()
+            let minute = Int(date.timeIntervalSince1970 / 60)
+            let key = String(minute)
+            if digest.activityMinutes[key] != nil || digest.activityMinutes.count < limits.maxTimeBucketsPerSession {
+                var bucket = digest.activityMinutes[key] ?? UsageTimeBucket()
                 bucket.tokens += tokens
                 bucket.weight += weight
                 bucket.messages += 1
-                digest.hours[key] = bucket
+                digest.activityMinutes[key] = bucket
             }
         }
         outcome.digest = digest
@@ -200,12 +205,10 @@ struct UsageTranscriptScanner {
     // MARK: - Codex
 
     /// New Codex rollouts persist one exact record per completed model request.
-    /// Older rollouts only persist cumulative snapshots; those are converted to
-    /// monotonic deltas, and discarded if exact records exist anywhere in the
-    /// same file. Aggregate thread/turn fields are never counted.
+    /// Older cumulative snapshots become monotonic deltas until the first exact
+    /// record; later overlapping aggregates are ignored.
     private struct CodexState {
-        var exact: UsageSessionDigest
-        var fallback: UsageSessionDigest
+        var digest: UsageSessionDigest
         var previousCumulative: CodexCounters?
         var responseIDs: Set<String> = []
         var projectPath: String?
@@ -213,22 +216,35 @@ struct UsageTranscriptScanner {
         var threadID: String?
         var sawExactRecord = false
 
-        init(sessionIDHint: String, managedAccountID: String?) {
-            exact = UsageSessionDigest(sessionID: "codex:\(sessionIDHint)", provider: .codex)
-            fallback = UsageSessionDigest(sessionID: "codex:\(sessionIDHint)", provider: .codex)
-            exact.managedAccountID = managedAccountID
-            fallback.managedAccountID = managedAccountID
+        init(sessionIDHint: String, managedAccountID: String?, checkpoint: UsageTranscriptCheckpoint) {
+            let resumedID = checkpoint.codexThreadID ?? sessionIDHint
+            digest = UsageSessionDigest(sessionID: "codex:\(resumedID)", provider: .codex)
+            digest.managedAccountID = managedAccountID
+            previousCumulative = checkpoint.codexPreviousCumulative
+            responseIDs = checkpoint.codexResponseIDs
+            projectPath = checkpoint.codexProjectPath
+            model = checkpoint.codexModel
+            threadID = checkpoint.codexThreadID
+            sawExactRecord = checkpoint.codexSawExactRecord
         }
 
         mutating func setSessionID(_ raw: Any?) {
             guard let id = UsageText.identifier(raw) else { return }
             threadID = id
-            exact.sessionID = "codex:\(id)"
-            fallback.sessionID = "codex:\(id)"
+            digest.sessionID = "codex:\(id)"
+        }
+
+        var checkpoint: UsageTranscriptCheckpoint {
+            UsageTranscriptCheckpoint(codexPreviousCumulative: previousCumulative,
+                                      codexResponseIDs: responseIDs,
+                                      codexProjectPath: projectPath,
+                                      codexModel: model,
+                                      codexThreadID: threadID,
+                                      codexSawExactRecord: sawExactRecord)
         }
     }
 
-    private struct CodexCounters {
+    struct CodexCounters: Codable, Equatable {
         var inclusiveInput: Int
         var cachedInput: Int
         var cacheWriteInput: Int
@@ -320,7 +336,7 @@ struct UsageTranscriptScanner {
             if let responseID = UsageText.identifier(payload["response_id"]),
                !state.responseIDs.insert(responseID).inserted { return }
             state.sawExactRecord = true
-            recordCodex(counters.totals(), at: UsageText.date(object["timestamp"]), into: &state.exact,
+            recordCodex(counters.totals(), at: UsageText.date(object["timestamp"]), into: &state.digest,
                         projectPath: state.projectPath, model: state.model)
         case "event_msg":
             guard let payload = object["payload"] as? [String: Any],
@@ -328,10 +344,13 @@ struct UsageTranscriptScanner {
                   let info = payload["info"] as? [String: Any],
                   let usage = info["total_token_usage"] as? [String: Any],
                   let cumulative = CodexCounters(usage) else { return }
+            // Once exact per-request telemetry starts, later cumulative
+            // snapshots overlap it. Earlier cumulative history remains valid.
+            guard !state.sawExactRecord else { return }
             let delta = cumulative.delta(after: state.previousCumulative)
             state.previousCumulative = cumulative
             guard delta.inclusiveInput > 0 || delta.output > 0 else { return }
-            recordCodex(delta.totals(), at: UsageText.date(object["timestamp"]), into: &state.fallback,
+            recordCodex(delta.totals(), at: UsageText.date(object["timestamp"]), into: &state.digest,
                         projectPath: state.projectPath, model: state.model)
         default:
             break
@@ -350,13 +369,13 @@ struct UsageTranscriptScanner {
         guard let date else { return }
         digest.firstActivity = min(digest.firstActivity ?? date, date)
         digest.lastActivity = max(digest.lastActivity ?? date, date)
-        let key = String(Int(date.timeIntervalSince1970 / 3600))
-        if digest.hours[key] != nil || digest.hours.count < limits.maxHoursPerSession {
-            var bucket = digest.hours[key] ?? UsageHourBucket()
+        let key = String(Int(date.timeIntervalSince1970 / 60))
+        if digest.activityMinutes[key] != nil || digest.activityMinutes.count < limits.maxTimeBucketsPerSession {
+            var bucket = digest.activityMinutes[key] ?? UsageTimeBucket()
             bucket.tokens += tokens
             bucket.weight += weight
             bucket.messages += 1
-            digest.hours[key] = bucket
+            digest.activityMinutes[key] = bucket
         }
     }
 
@@ -384,6 +403,17 @@ struct UsageTranscriptScanner {
         guard value.isFinite, value >= 0, value < 1e12, value.rounded(.towardZero) == value else { return nil }
         return Int(value)
     }
+}
+
+/// Parser state required to resume a bounded transcript read without counting
+/// cumulative Codex telemetry again. Contains identifiers and counters only.
+struct UsageTranscriptCheckpoint: Codable, Equatable {
+    var codexPreviousCumulative: UsageTranscriptScanner.CodexCounters?
+    var codexResponseIDs: Set<String> = []
+    var codexProjectPath: String?
+    var codexModel: String?
+    var codexThreadID: String?
+    var codexSawExactRecord = false
 }
 
 /// Bounds on every string that comes out of a transcript.

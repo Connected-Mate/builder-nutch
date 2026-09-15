@@ -14,6 +14,10 @@ struct UsageLedgerCacheEntry: Codable, Equatable {
     /// where the previous one stopped.
     var offset: UInt64
     var digest: UsageSessionDigest
+    /// True means this digest is a measured floor. The next refresh resumes it
+    /// even when the file itself has not changed.
+    var truncated = false
+    var checkpoint = UsageTranscriptCheckpoint()
 }
 
 /// The on-disk index. Plain JSON, private to the user, and disposable: deleting
@@ -23,7 +27,7 @@ struct UsageLedgerCacheEntry: Codable, Equatable {
 /// of conversation, and nothing in it is sent anywhere.
 struct UsageLedgerCache: Codable, Equatable {
     /// Bumped when the file layout changes.
-    static let currentVersion = 4
+    static let currentVersion = 5
     /// Bumped when `UsageWeight` changes, because every cached weight was
     /// computed with the old formula and mixing the two would be nonsense.
     static let currentFormula = 1

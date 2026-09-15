@@ -16,7 +16,7 @@ enum UsageAttribution: String, Codable, Equatable {
     /// account that owned the session.
     case explicit
     /// Nothing in the file names an account; the app knows which account the
-    /// Mac was logged in to at that hour.
+    /// Mac was logged in to at that moment.
     case deduced
     /// Neither is available.
     case unknown
@@ -170,16 +170,15 @@ enum UsageWeight {
     }
 }
 
-/// One hour of one session. Hours rather than days because the report has to be
-/// re-bucketed into the person's local calendar (and, later, into rolling 5-hour
-/// windows) long after the transcript was read, possibly in another time zone.
-struct UsageHourBucket: Codable, Equatable {
+/// One UTC minute of one session. Minute precision preserves calendar-day
+/// boundaries in time zones whose offset is not a whole hour.
+struct UsageTimeBucket: Codable, Equatable {
     var tokens = UsageTokenTotals()
     var weight = 0.0
     var messages = 0
 
-    static func + (lhs: UsageHourBucket, rhs: UsageHourBucket) -> UsageHourBucket {
-        UsageHourBucket(tokens: lhs.tokens + rhs.tokens, weight: lhs.weight + rhs.weight,
+    static func + (lhs: UsageTimeBucket, rhs: UsageTimeBucket) -> UsageTimeBucket {
+        UsageTimeBucket(tokens: lhs.tokens + rhs.tokens, weight: lhs.weight + rhs.weight,
                         messages: lhs.messages + rhs.messages)
     }
 }
@@ -209,8 +208,8 @@ struct UsageSessionDigest: Codable, Equatable {
     var tokens = UsageTokenTotals()
     var weight = 0.0
     var messages = 0
-    /// Hours since 1970, as strings so the cache stays plain JSON.
-    var hours: [String: UsageHourBucket] = [:]
+    /// Minutes since 1970, as strings so the cache stays plain JSON.
+    var activityMinutes: [String: UsageTimeBucket] = [:]
     /// Which model did the work, by weight, so a project can say "mostly Opus".
     var modelWeights: [String: Double] = [:]
     /// The vendor's own account identifier, when the transcript names it.
@@ -252,7 +251,9 @@ struct UsageSessionDigest: Codable, Equatable {
         tokens += other.tokens
         weight += other.weight
         messages += other.messages
-        for (hour, bucket) in other.hours { hours[hour] = (hours[hour] ?? UsageHourBucket()) + bucket }
+        for (minute, bucket) in other.activityMinutes {
+            activityMinutes[minute] = (activityMinutes[minute] ?? UsageTimeBucket()) + bucket
+        }
         for (model, value) in other.modelWeights { modelWeights[model, default: 0] += value }
     }
 }
@@ -274,8 +275,8 @@ struct UsageLedgerLimits: Equatable {
     /// would show the person a report missing most of their week. It runs off
     /// the main thread, so it is allowed to take its time — once.
     var initialTimeBudget: TimeInterval = 90
-    /// Enough hours for a session that ran for three months.
-    var maxHoursPerSession = 24 * 90
+    /// Enough sparse minute buckets for a session that ran for three months.
+    var maxTimeBucketsPerSession = 24 * 90 * 60
     /// Titles and paths are attacker-controlled text; both are truncated.
     var maxTitleCharacters = 120
     var maxPathCharacters = 512
@@ -291,7 +292,7 @@ struct UsageScanSummary: Codable, Equatable {
     var filesFromCache = 0
     var filesSkipped = 0
     /// Files last written before the report's window opens. They cannot hold an
-    /// hour inside it, so they are never opened — this is what keeps a refresh
+    /// activity minute inside it, so they are never opened — this keeps a refresh
     /// to a few files instead of every transcript ever written.
     var filesOutsideWindow = 0
     var bytesRead = 0

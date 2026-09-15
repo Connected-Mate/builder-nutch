@@ -105,12 +105,12 @@ final class UsageLedgerTests: XCTestCase {
         digest.managedAccountID = managedAccountID
         digest.vendorAccountID = vendorAccountID
         for date in hours {
-            let key = String(Int(date.timeIntervalSince1970 / 3600))
-            var bucket = digest.hours[key] ?? UsageHourBucket()
+            let minuteKey = String(Int(date.timeIntervalSince1970 / 60))
+            var bucket = digest.activityMinutes[minuteKey] ?? UsageTimeBucket()
             bucket.weight += weightPerHour
             bucket.tokens += UsageTokenTotals(input: 10, output: 20, cacheCreation: 0, cacheRead: 0, thinking: 0)
             bucket.messages += 1
-            digest.hours[key] = bucket
+            digest.activityMinutes[minuteKey] = bucket
             digest.weight += weightPerHour
             digest.tokens += UsageTokenTotals(input: 10, output: 20, cacheCreation: 0, cacheRead: 0, thinking: 0)
             digest.messages += 1
@@ -166,7 +166,7 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertEqual(outcome.digest.tokens.thinking, 20)
         XCTAssertEqual(outcome.digest.firstActivity, epoch)
         XCTAssertEqual(outcome.digest.lastActivity, epoch.addingTimeInterval(120))
-        XCTAssertEqual(outcome.digest.hours.count, 1, "Two turns two minutes apart are the same hour")
+        XCTAssertEqual(outcome.digest.activityMinutes.count, 2)
         XCTAssertEqual(outcome.consumed, UInt64(try Data(contentsOf: file).count))
         XCTAssertEqual(outcome.malformedLines, 0)
         XCTAssertEqual(outcome.digest.tokens.reasoningAvailability, .complete)
@@ -203,10 +203,10 @@ final class UsageLedgerTests: XCTestCase {
                                 thread: "cccccccc-cccc-cccc-cccc-cccccccccccc")
         let file = try write([
             codexMeta(session: session, cwd: "/Users/x/Projects/CodexApp"),
-            codexSnapshot(at: epoch, input: 8_000, cached: 7_000, output: 900, reasoning: 500),
             exact,
             child,
-            exact
+            exact,
+            codexSnapshot(at: epoch, input: 8_000, cached: 7_000, output: 900, reasoning: 500)
         ], to: "codex/rollout.jsonl")
 
         let digest = try UsageTranscriptScanner().scan(file: file, from: 0, sessionIDHint: "rollout",
@@ -223,6 +223,22 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertEqual(digest.tokens.total, 130)
         XCTAssertEqual(digest.tokens.reasoningAvailability, .complete)
         XCTAssertEqual(digest.tokens.coverage.codexRecords, 1)
+    }
+
+    func testCodexFormatTransitionKeepsLegacyPrefixWithoutCountingLaterSnapshotsTwice() throws {
+        let session = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+        let file = try write([
+            codexMeta(session: session, cwd: "/tmp/Mixed"),
+            codexSnapshot(at: epoch, input: 100, cached: 0, output: 20, reasoning: 0),
+            codexRecord(response: "resp_new", at: epoch.addingTimeInterval(3_600), input: 10, cached: 0,
+                        cacheWrite: 0, output: 2, reasoning: 0, thread: session),
+            codexSnapshot(at: epoch.addingTimeInterval(3_601), input: 110, cached: 0, output: 22, reasoning: 0)
+        ], to: "codex/mixed.jsonl")
+
+        let digest = try UsageTranscriptScanner().scan(file: file, from: 0, sessionIDHint: "mixed",
+                                                       managedAccountID: nil, format: .codex).digest
+        XCTAssertEqual(digest.tokens.total, 132)
+        XCTAssertEqual(digest.messages, 2)
     }
 
     func testLegacyCodexCumulativeSnapshotsBecomeMonotonicDeltasWithResetHandling() throws {
@@ -423,7 +439,7 @@ final class UsageLedgerTests: XCTestCase {
         let digest = try XCTUnwrap(resumed.sessions.first)
         XCTAssertEqual(digest.messages, 2, "The earlier turn is kept, not re-read and not lost")
         XCTAssertEqual(digest.tokens.input, 107)
-        XCTAssertEqual(digest.hours.count, 2)
+        XCTAssertEqual(digest.activityMinutes.count, 2)
         XCTAssertLessThan(resumed.summary.bytesRead, first.summary.bytesRead,
                           "A resumed read only covers the new bytes")
     }
@@ -655,6 +671,25 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertEqual(timeline.accountID(at: epoch.addingTimeInterval(3_600)), "second")
     }
 
+    func testCalendarWindowUsesRecordedMinuteAcrossFractionalTimeZoneBoundary() throws {
+        var india = Calendar(identifier: .gregorian)
+        india.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Kolkata"))
+        let localQuarterPastMidnight = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-09-14T18:45:00Z"))
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-09-15T06:30:00Z"))
+        var session = UsageSessionDigest(sessionID: "minute")
+        let key = String(Int(localQuarterPastMidnight.timeIntervalSince1970 / 60))
+        session.activityMinutes[key] = UsageTimeBucket(
+            tokens: UsageTokenTotals(input: 100, output: 20), weight: 200, messages: 1)
+        session.tokens = UsageTokenTotals(input: 100, output: 20)
+        session.weight = 200
+        session.messages = 1
+        session.projectWeights["/tmp/Minute"] = 200
+
+        let result = UsageLedgerEngine.report(sessions: [session], summary: UsageScanSummary(), days: 1,
+                                              now: now, calendar: india, timeline: UsageAccountTimeline())
+        XCTAssertEqual(result.tokens.total, 120)
+    }
+
     func testAnEmptyLedgerIsAnEmptyReportRatherThanADivisionByZero() {
         let result = report([])
         XCTAssertEqual(result.totalWeight, 0)
@@ -666,7 +701,8 @@ final class UsageLedgerTests: XCTestCase {
 
     func testASessionWithNoUsableDirectoryIsFiledOnItsOwn() {
         var homeless = UsageSessionDigest(sessionID: "nowhere")
-        homeless.hours["\(Int(epoch.timeIntervalSince1970 / 3600))"] = UsageHourBucket(tokens: UsageTokenTotals(), weight: 10, messages: 1)
+        homeless.activityMinutes["\(Int(epoch.timeIntervalSince1970 / 60))"] = UsageTimeBucket(
+            tokens: UsageTokenTotals(), weight: 10, messages: 1)
         homeless.weight = 10
         XCTAssertEqual(homeless.resolvedProjectPath, "(unknown)")
         XCTAssertEqual(report([homeless]).accounts.first?.projects.first?.name, "(unknown)",
@@ -714,6 +750,31 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertEqual(again.scan.filesParsed, 0)
         XCTAssertEqual(again.scan.filesFromCache, 2)
         XCTAssertEqual(again.totalWeight, result.totalWeight)
+    }
+
+    func testUnchangedTruncatedTranscriptResumesAndKeepsPartialFlagUntilComplete() throws {
+        let session = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+        var lines = [codexMeta(session: session, cwd: "/tmp/Long")]
+        lines += (0..<3_000).map {
+            codexRecord(response: "resp_\($0)", at: epoch, input: 100, cached: 0,
+                        cacheWrite: 0, output: 20, reasoning: 0, thread: session)
+        }
+        try write(lines, to: "long/rollout.jsonl")
+        var limits = UsageLedgerLimits.default
+        limits.maxFileBytes = 1_000
+        let source = UsageLedgerSource(projectsRoot: root.appendingPathComponent("long"),
+                                       managedAccountID: nil, format: .codex)
+        var cache = UsageLedgerCache()
+
+        let first = engine([source], limits: limits).scan(cache: &cache)
+        XCTAssertTrue(first.summary.hitLimit)
+        XCTAssertLessThan(first.sessions.first?.messages ?? 0, 3_000)
+        XCTAssertEqual(cache.entries.values.first?.truncated, true)
+
+        let second = engine([source], limits: limits).scan(cache: &cache)
+        XCTAssertFalse(second.summary.hitLimit)
+        XCTAssertEqual(second.sessions.first?.messages, 3_000)
+        XCTAssertEqual(cache.entries.values.first?.truncated, false)
     }
 
     func testTheDumpRanksAProjectOnceHoweverManyAccountsPaidForIt() throws {

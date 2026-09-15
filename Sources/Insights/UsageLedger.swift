@@ -28,7 +28,7 @@ struct UsageLedgerEngine {
     /// Refreshes the digests, reading only what changed since the last pass.
     ///
     /// `horizon` is the oldest moment the caller cares about. A transcript last
-    /// written before it cannot contain an hour after it — writing is what moves
+    /// written before it cannot contain an activity minute after it — writing moves
     /// the date — so it is left unopened. On this Mac that turns a 470-file,
     /// half-gigabyte read into a handful of files.
     func scan(cache: inout UsageLedgerCache, horizon: Date? = nil) -> (sessions: [UsageSessionDigest], summary: UsageScanSummary) {
@@ -56,7 +56,7 @@ struct UsageLedgerEngine {
                 }
 
                 let cached = cache.entries[file.path]
-                if let cached, cached.size == size, cached.modified == modified {
+                if let cached, cached.size == size, cached.modified == modified, !cached.truncated {
                     digests.append(cached.digest)
                     summary.filesFromCache += 1
                     continue
@@ -76,32 +76,58 @@ struct UsageLedgerEngine {
                     continue
                 }
 
-                // A file that only grew can be resumed. Anything else — smaller,
-                // or rewritten under the same size — is read from the start.
-                // Codex's legacy cumulative fallback needs the complete series
-                // to calculate monotonic deltas. Unchanged files still use the
-                // cache; changed Codex files are deliberately rescanned whole.
-                let resumable = source.format == .claude && (cached.map { size >= $0.size } ?? false)
-                let offset = resumable ? (cached?.offset ?? 0) : 0
-                guard let outcome = try? scanner.scan(file: file, from: offset,
-                                                      sessionIDHint: Self.sessionIDHint(for: file),
-                                                      managedAccountID: source.managedAccountID,
-                                                      format: source.format) else {
+                // A growing file, or a previously bounded read of the same
+                // file, resumes at a complete-line checkpoint. Rewrites start
+                // over. A continuation refresh gets two bounded slices so a
+                // modest over-limit file can finish without an unbounded read.
+                let grew = cached.map { size > $0.size } ?? false
+                let continuesPartial = cached.map {
+                    $0.truncated && size == $0.size && modified == $0.modified
+                } ?? false
+                let resumable = grew || continuesPartial
+                var nextOffset = resumable ? (cached?.offset ?? 0) : 0
+                var checkpoint = resumable ? (cached?.checkpoint ?? UsageTranscriptCheckpoint())
+                                           : UsageTranscriptCheckpoint()
+                var incremental = UsageSessionDigest(sessionID: Self.sessionIDHint(for: file), provider: source.format)
+                incremental.managedAccountID = source.managedAccountID
+                var finalTruncated = false
+                var parsedSlice = false
+                let sliceCount = cached?.truncated == true ? 2 : 1
+
+                for _ in 0..<sliceCount {
+                    let before = nextOffset
+                    guard var outcome = try? scanner.scan(file: file, from: nextOffset,
+                                                          sessionIDHint: Self.sessionIDHint(for: file),
+                                                          managedAccountID: source.managedAccountID,
+                                                          format: source.format,
+                                                          checkpoint: checkpoint) else { break }
+                    parsedSlice = true
+                    if outcome.consumed >= size { outcome.truncated = false }
+                    incremental.merge(outcome.digest)
+                    nextOffset = outcome.consumed
+                    checkpoint = outcome.checkpoint
+                    finalTruncated = outcome.truncated
+                    summary.bytesRead += outcome.bytesRead
+                    summary.malformedLines += outcome.malformedLines
+                    summary.oversizedLines += outcome.oversizedLines
+                    guard outcome.truncated, nextOffset > before,
+                          ProcessInfo.processInfo.systemUptime - started <= budget else { break }
+                }
+
+                guard parsedSlice else {
                     summary.filesSkipped += 1
                     if let cached { digests.append(cached.digest) }
                     continue
                 }
 
-                var digest = outcome.digest
+                var digest = incremental
                 if resumable, let previous = cached?.digest { digest.merge(previous) }
                 digests.append(digest)
                 cache.entries[file.path] = UsageLedgerCacheEntry(size: size, modified: modified,
-                                                                 offset: outcome.consumed, digest: digest)
+                                                                 offset: nextOffset, digest: digest,
+                                                                 truncated: finalTruncated, checkpoint: checkpoint)
                 summary.filesParsed += 1
-                summary.bytesRead += outcome.bytesRead
-                summary.malformedLines += outcome.malformedLines
-                summary.oversizedLines += outcome.oversizedLines
-                if outcome.truncated { summary.hitLimit = true }
+                if finalTruncated { summary.hitLimit = true }
             }
         }
 
@@ -235,11 +261,11 @@ struct UsageLedgerEngine {
     // MARK: - Window arithmetic
 
     /// The part of a session that falls inside the report window, cut at the
-    /// hour. A session that started last month still counts for the hours it
-    /// spent this week, and only those.
+    /// recorded minute. A session that started last month still counts only for
+    /// the activity observed inside this window.
     struct SessionWindow {
-        var total = UsageHourBucket()
-        var byDay: [String: UsageHourBucket] = [:]
+        var total = UsageTimeBucket()
+        var byDay: [String: UsageTimeBucket] = [:]
         var firstActivity: Date?
         var lastActivity: Date?
         /// How much of the whole session this window represents, used to split
@@ -251,19 +277,19 @@ struct UsageLedgerEngine {
                        calendar: Calendar) -> SessionWindow? {
         var window = SessionWindow()
         let formatter = Self.dayFormatter(calendar: calendar)
-        for (key, bucket) in session.hours {
-            guard let hour = Int(key) else { continue }
-            let date = Date(timeIntervalSince1970: Double(hour) * 3600)
+        for (key, bucket) in session.activityMinutes {
+            guard let minute = Int(key) else { continue }
+            let date = Date(timeIntervalSince1970: Double(minute) * 60)
             guard date >= start, date <= end else { continue }
             window.total = window.total + bucket
             let day = formatter.string(from: date)
-            window.byDay[day] = (window.byDay[day] ?? UsageHourBucket()) + bucket
+            window.byDay[day] = (window.byDay[day] ?? UsageTimeBucket()) + bucket
             window.firstActivity = min(window.firstActivity ?? date, date)
             window.lastActivity = max(window.lastActivity ?? date, date)
         }
         guard window.total.weight > 0 else { return nil }
         window.fraction = session.weight > 0 ? min(1, window.total.weight / session.weight) : 1
-        // The exact first and last moments are known; the hour is only a bucket.
+        // Exact endpoints refine the minute bucket for display.
         if let first = session.firstActivity, first >= start, first <= end { window.firstActivity = first }
         if let last = session.lastActivity, last >= start, last <= end { window.lastActivity = last }
         return window
@@ -328,7 +354,7 @@ struct UsageLedgerEngine {
         var firstActivity: Date?
         var lastActivity: Date?
 
-        mutating func add(_ bucket: UsageHourBucket, first: Date?, last: Date?) {
+        mutating func add(_ bucket: UsageTimeBucket, first: Date?, last: Date?) {
             tokens += bucket.tokens
             weight += bucket.weight
             messages += bucket.messages
