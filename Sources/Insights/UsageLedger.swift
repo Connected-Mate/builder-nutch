@@ -554,6 +554,7 @@ private struct UsageLedgerState {
     private let archiveURL: URL
     private var lastArchive: UsageLedgerArchive?
     private var migratedCache = false
+    private var lastCapture = UsageCaptureResult(scan: UsageScanSummary(), persistence: .notCaptured)
 
     init(sources: [UsageLedgerSource], cacheURL: URL, limits: UsageLedgerLimits = .default,
          calendar: Calendar = .current, timeline: UsageAccountTimeline = UsageAccountTimeline(),
@@ -570,7 +571,14 @@ private struct UsageLedgerState {
 
     /// The default week view: today plus the six preceding local dates.
     mutating func report(days: Int = 7, now: Date = Date()) -> UsageLedgerReport {
-        let captured = capture(now: now)
+        _ = capture(now: now)
+        return cachedReport(days: days, now: now)
+    }
+
+    /// Change the viewing window using only the last saved in-memory snapshot.
+    /// Scan coverage and persistence failures remain those of the last capture.
+    func cachedReport(days: Int = 7, now: Date = Date()) -> UsageLedgerReport {
+        let captured = lastCapture
         var sessions = lastArchive?.digests ?? []
         // Titles remain disposable cache metadata, never permanent history.
         let titles = (cache?.entries.values.map(\.digest) ?? []).reduce(into: [String: String]()) { result, digest in
@@ -588,6 +596,12 @@ private struct UsageLedgerState {
     /// before scanning can prune anything, then commits new observations before
     /// replacing the disposable cache. Failures remain visible to the caller.
     mutating func capture(now: Date = Date()) -> UsageCaptureResult {
+        let result = performCapture(now: now)
+        lastCapture = result
+        return result
+    }
+
+    private mutating func performCapture(now: Date) -> UsageCaptureResult {
         var summary = UsageScanSummary()
         do {
             try Task.checkCancellation()
@@ -643,6 +657,8 @@ actor UsageLedger {
     func capture(now: Date = Date()) -> UsageCaptureResult { state.capture(now: now) }
 
     func report(days: Int = 7, now: Date = Date()) -> UsageLedgerReport { state.report(days: days, now: now) }
+
+    func cachedReport(days: Int = 7, now: Date = Date()) -> UsageLedgerReport { state.cachedReport(days: days, now: now) }
 
     /// The diagnostic command uses exactly the same transaction as the app,
     /// under the same cross-process archive lock, without a SwiftUI run loop.

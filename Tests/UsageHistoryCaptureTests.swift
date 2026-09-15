@@ -70,4 +70,62 @@ final class UsageHistoryCaptureTests: XCTestCase {
         XCTAssertEqual(model.report?.tokens.total, 0)
         XCTAssertFalse(model.isLoading)
     }
+    func testPeriodChangeUsesSavedSnapshotUntilExplicitRefresh() async throws {
+        let home = try temporary()
+        _ = try writeReading(home: home)
+        let model = UsageInsightsModel(home: home)
+        await model.refresh()
+        let first = try XCTUnwrap(model.report)
+        let catalog = home.appendingPathComponent("Library/Application Support/Codenotch Accounts")
+        let archiveURL = UsageLedger.defaultArchiveURL(catalogRoot: catalog)
+        let savedBytes = try Data(contentsOf: archiveURL)
+        _ = try writeReading(home: home, path: ".claude/projects/project/later.jsonl", id: "later-response")
+        model.days = 30
+        model.days = 7
+        model.days = 30
+        for _ in 0..<200 where model.report?.days != 30 || model.isLoading {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(model.report?.days, 30)
+        XCTAssertEqual(model.report?.tokens.total, 15, "A picker change must not capture the newly written response")
+        XCTAssertEqual(model.report?.milestones, first.milestones)
+        XCTAssertEqual(model.report?.scan, first.scan)
+        XCTAssertEqual(model.report?.persistence, first.persistence)
+        XCTAssertEqual(try Data(contentsOf: archiveURL), savedBytes)
+        await model.refresh()
+        XCTAssertEqual(model.report?.tokens.total, 30)
+        await model.shutdownAndWait()
+        model.days = 7
+        try await Task.sleep(nanoseconds: 20_000_000)
+        XCTAssertEqual(model.report?.days, 30, "A stopped model cannot publish a late period result")
+        XCTAssertFalse(model.isLoading)
+    }
+
+    func testPeriodChangePreservesLastCaptureFailure() async throws {
+        let home = try temporary()
+        _ = try writeReading(home: home)
+        let model = UsageInsightsModel(home: home)
+        await model.refresh()
+        let catalog = home.appendingPathComponent("Library/Application Support/Codenotch Accounts")
+        let archiveURL = UsageLedger.defaultArchiveURL(catalogRoot: catalog)
+        let savedBytes = try Data(contentsOf: archiveURL)
+        try Data("invalid archive fixture".utf8).write(to: archiveURL)
+        await model.refresh()
+        let failed = try XCTUnwrap(model.report)
+        XCTAssertEqual(failed.persistence.state, .failed)
+        // Restoring the file would allow a fresh capture to succeed. Merely
+        // changing the period must retain the previous capture's failed status.
+        try savedBytes.write(to: archiveURL)
+        model.days = 30
+        for _ in 0..<200 where model.report?.days != 30 || model.isLoading {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(model.report?.days, 30)
+        XCTAssertEqual(model.report?.persistence, failed.persistence)
+        XCTAssertEqual(model.report?.scan, failed.scan)
+        XCTAssertEqual(model.report?.milestones, failed.milestones)
+        XCTAssertNotNil(model.failure)
+        await model.shutdownAndWait()
+    }
+
 }

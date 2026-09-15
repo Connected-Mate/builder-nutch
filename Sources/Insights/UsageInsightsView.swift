@@ -7,13 +7,15 @@ final class UsageInsightsModel: ObservableObject {
     @Published private(set) var report: UsageLedgerReport?
     @Published private(set) var isLoading = false
     @Published private(set) var failure: String?
-    @Published var days = 7 { didSet { if days != oldValue { Task { await refresh() } } } }
+    @Published var days = 7 { didSet { if days != oldValue { Task { await updatePeriod() } } } }
 
     private let ledger: UsageLedger
     private let home: URL
     private let catalogRoot: URL
     private var lastRefresh: Date?
     private var refreshTask: Task<UsageLedgerReport, Never>?
+    private var periodTask: Task<UsageLedgerReport, Never>?
+    private var reportGeneration = 0
     private var backgroundTask: Task<Void, Never>?
     private var stopped = false
 
@@ -44,6 +46,8 @@ final class UsageInsightsModel: ObservableObject {
         guard !stopped else { return }
         if let refreshTask { _ = await refreshTask.value; return }
         isLoading = true
+        reportGeneration += 1
+        let generation = reportGeneration
         let days = self.days, ledger = self.ledger, home = self.home, catalogRoot = self.catalogRoot
         let task = Task {
             // Discovery is cheap but still file I/O. Read fresh homes and login
@@ -59,25 +63,56 @@ final class UsageInsightsModel: ObservableObject {
         refreshTask = task
         let result = await task.value
         refreshTask = nil
-        isLoading = false
+        isLoading = periodTask != nil
+        guard !stopped, generation == reportGeneration else { return }
+        apply(result)
+        lastRefresh = now
+        if self.days != days { await updatePeriod() }
+    }
+
+    /// Coalesce rapid picker changes without rediscovering homes or rereading
+    /// source/archive files. A capture already in flight applies the latest
+    /// requested period after it has delivered its saved snapshot.
+    private func updatePeriod() async {
+        guard !stopped, refreshTask == nil, periodTask == nil else { return }
+        guard let report else { await refresh(); return }
+        let requestedDays = days, now = report.generatedAt
+        reportGeneration += 1
+        let generation = reportGeneration
+        isLoading = true
+        let ledger = self.ledger
+        let task = Task { await ledger.cachedReport(days: requestedDays, now: now) }
+        periodTask = task
+        let result = await task.value
+        periodTask = nil
+        isLoading = refreshTask != nil
         guard !stopped else { return }
+        guard generation == reportGeneration else {
+            if refreshTask == nil, self.report?.days != days { await updatePeriod() }
+            return
+        }
+        if days == requestedDays { apply(result) }
+        else { await updatePeriod() }
+    }
+
+    private func apply(_ result: UsageLedgerReport) {
         report = result
         failure = result.persistence.state == .failed
             ? NSLocalizedString("This reading could not be saved. Previously saved history is kept. Try refreshing.", comment: "Durable usage write failure")
             : nil
-        lastRefresh = now
-        if self.days != days { await refresh() }
     }
 
     func stop() {
         stopped = true
         refreshTask?.cancel()
+        periodTask?.cancel()
         backgroundTask?.cancel()
     }
 
     func shutdownAndWait() async {
         stop()
         if let refreshTask { _ = await refreshTask.value }
+        if let periodTask { _ = await periodTask.value }
     }
 
 }
