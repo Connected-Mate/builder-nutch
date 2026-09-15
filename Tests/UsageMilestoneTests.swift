@@ -75,4 +75,49 @@ final class UsageMilestoneTests: XCTestCase {
         XCTAssertNil(large.next)
         XCTAssertEqual(large.fractionToNext, 1)
     }
+
+    func testSavedProgressSurvivesPeriodChangesSourceDeletionAndRestart() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("milestone-history-\(UUID().uuidString)")
+        let source = root.appendingPathComponent("sessions")
+        let cache = root.appendingPathComponent("cache/usage.json")
+        let archive = root.appendingPathComponent("history/usage.json")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = source.appendingPathComponent("old.jsonl")
+        let timestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-400 * 86_400))
+        let record: [String: Any] = ["type": "assistant", "uuid": "milestone-old-request", "sessionId": "milestone-old-session",
+                                     "timestamp": timestamp, "cwd": "/projects/history",
+                                     "message": ["model": "claude-sonnet-5", "usage": ["input_tokens": 1_000_000, "output_tokens": 0]]]
+        var data = try JSONSerialization.data(withJSONObject: record)
+        data.append(0x0A)
+        try data.write(to: file)
+        func collector() -> UsageLedger {
+            UsageLedger(sources: [.init(projectsRoot: source, managedAccountID: nil)],
+                        cacheURL: cache, archiveURL: archive)
+        }
+        let ledger = collector()
+        let week = await ledger.report(days: 7, now: now)
+        XCTAssertEqual(week.sessionCount, 0)
+        XCTAssertEqual(week.milestones?.level, 2)
+        XCTAssertEqual(week.milestones?.totalTokens, 1_000_000)
+        let month = await ledger.report(days: 30, now: now)
+        XCTAssertEqual(month.milestones, week.milestones)
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.removeItem(at: cache)
+        let restarted = await collector().report(days: 7, now: now)
+        XCTAssertEqual(restarted.milestones, week.milestones)
+        XCTAssertEqual(restarted.persistence.state, .saved)
+    }
+
+    func testUnreadableHistoryDoesNotPretendNoStampsHaveBeenReached() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("milestone-invalid-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let archive = root.appendingPathComponent("history.json")
+        try Data("invalid archive".utf8).write(to: archive)
+        let ledger = UsageLedger(sources: [], cacheURL: root.appendingPathComponent("cache/usage.json"), archiveURL: archive)
+        let report = await ledger.report(now: now)
+        XCTAssertEqual(report.persistence.state, .failed)
+        XCTAssertNil(report.milestones)
+    }
 }

@@ -30,6 +30,10 @@ struct ReleaseNote: Equatable {
 /// `testTheCurrentVersionHasANote`.
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
+        ReleaseNote(version: "0.14.0", headline: "Your history, one milestone at a time.", changes: [
+            .init(title: "Stamps for your saved tokens", detail: "Reach eight levels from 100,000 to one trillion recorded tokens. Your progress follows saved history, independently of the selected period."),
+            .init(title: "More complete token readings", detail: "Archived Codex sessions are included. Large transcript reads and cumulative counter changes are handled more accurately.")
+        ]),
         ReleaseNote(version: "0.13.0", headline: "Your token history stays with you.", changes: [
             .init(title: "Keep your timeline after cleaning sessions", detail: "Recorded tokens are saved separately on this Mac and remain after the original Claude Code or Codex files are removed."),
             .init(title: "Automatic recording", detail: "Builder Nutch saves available token activity while it is open, even with the accounts window closed. Restored sessions are not counted twice.")

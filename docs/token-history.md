@@ -8,6 +8,14 @@ The running app records at launch, every minute, on wake and when account profil
 
 Only locally available telemetry can be recorded. Files deleted before Builder Nutch ever reads them cannot be reconstructed. Partial scans and fields the assistant did not report remain identified as incomplete. Recording stops when Builder Nutch quits.
 
+Claude Code projects and Codex active and archived sessions are read. Input, output, cache creation/read and reasoning are kept when reported by the assistant. Cache counts are included in input; reasoning is a subset of output and is never added to the total a second time. Missing fields remain unavailable, rather than becoming invented measurements.
+
+## Consumption stamps
+
+Usage has a small Stamps disclosure for cumulative consumption. Eight levels correspond to 100,000; 1 million; 10 million; 100 million; 1 billion; 10 billion; 100 billion; and 1 trillion recorded tokens. The next threshold and collection of reached/locked stamps stay inside the same screen.
+
+Progress is derived from all saved history, independently of the 7- or 30-day chart. Changing periods or deleting source sessions does not reset it. Stamps represent recorded tokens, not skill, monetary cost or remaining subscription allowance. Correcting a proven counting error also corrects the associated progress. An achievement date is shown only when the saved timing establishes when the threshold was crossed; old totals with incomplete timing still count without an invented date.
+
 ## Storage and migration
 
 The private archive lives at:
