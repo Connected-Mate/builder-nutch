@@ -546,3 +546,17 @@
 "Your daily token share is ready" = "Votre carte du jour vous attend";
 
 "Open Builder Nutch to preview it before sharing." = "Ouvrez Builder Nutch pour la voir et la partager.";
+"White" = "Blanc";
+"Pearl" = "Perle";
+"Silver" = "Argent";
+"Gold" = "Or";
+"Platinum" = "Platine";
+"Titanium" = "Titane";
+"Graphite" = "Graphite";
+"Obsidian" = "Obsidienne";
+"Black" = "Noir";
+"Lifetime level" = "Niveau cumulé";
+"Next level" = "Prochain niveau";
+"All levels reached" = "Tous les niveaux atteints";
+"Progress to next level" = "Progression vers le prochain niveau";
+"Next: %@ · %@ tokens" = "À suivre : %@ · %@ tokens";

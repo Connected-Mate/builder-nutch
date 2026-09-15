@@ -281,3 +281,17 @@
 "Your daily token share is ready" = "Your daily token share is ready";
 
 "Open Builder Nutch to preview it before sharing." = "Open Builder Nutch to preview it before sharing.";
+"White" = "White";
+"Pearl" = "Pearl";
+"Silver" = "Silver";
+"Gold" = "Gold";
+"Platinum" = "Platinum";
+"Titanium" = "Titanium";
+"Graphite" = "Graphite";
+"Obsidian" = "Obsidian";
+"Black" = "Black";
+"Lifetime level" = "Lifetime level";
+"Next level" = "Next level";
+"All levels reached" = "All levels reached";
+"Progress to next level" = "Progress to next level";
+"Next: %@ · %@ tokens" = "Next: %@ · %@ tokens";

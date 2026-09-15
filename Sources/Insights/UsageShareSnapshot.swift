@@ -38,6 +38,8 @@ struct UsageShareSnapshot: Equatable {
     let todayRanking: [UsageShareProviderTotal]
     let projectName: String?
     let isProject: Bool
+    /// Frozen lifetime level, never recomputed from a period or project scope.
+    let podiumTier: UsagePodiumTier?
 
     var isPartial: Bool {
         availability != .complete || todayAvailability != .complete
@@ -135,6 +137,7 @@ struct UsageShareSnapshot: Equatable {
         }
 
         self.generatedAt = report.generatedAt
+        self.podiumTier = report.milestones?.podiumTier
         self.weekStart = weekStart
         self.monthStart = monthStart
         self.today = today

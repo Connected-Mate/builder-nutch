@@ -45,6 +45,24 @@ final class UsageShareSnapshotTests: XCTestCase {
         XCTAssertFalse(week.isPartial)
     }
 
+    func testLifetimePodiumTierIsFrozenAcrossPeriodsAndProjectScopes() {
+        let now = date("2026-09-15T10:00:00Z")
+        var value = report(now: now, slices: [slice("2026-09-15", input: 1)])
+        var lifetime = UsageSessionDigest(sessionID: "private-lifetime")
+        lifetime.tokens = UsageTokenTotals(input: 100_000_000)
+        value.milestones = UsageMilestoneProgress(sessions: [lifetime], now: now)
+        for period in UsageSharePeriod.allCases {
+            for path: String? in [nil, "/private/missing-project"] {
+                let snapshot = UsageShareSnapshot(report: value, period: period, projectPath: path)
+                XCTAssertEqual(snapshot.podiumTier, .platinum)
+            }
+        }
+        value.milestones = nil
+        XCTAssertNil(UsageShareSnapshot(report: value).podiumTier, "Never infer lifetime level from selected usage")
+        value.milestones = UsageMilestoneProgress(sessions: [], now: now)
+        XCTAssertNil(UsageShareSnapshot(report: value).podiumTier, "No earned badge without recorded consumption")
+    }
+
     func testMondayAndLocalMidnightUseReportTimeNotCurrentClock() {
         let now = date("2026-09-13T22:30:00Z") // Monday in Paris, Sunday in UTC.
         let snapshot = UsageShareSnapshot(report: report(now: now, slices: [slice("2026-09-14", input: 100)]), calendar: calendar)
@@ -100,15 +118,16 @@ final class UsageShareSnapshotTests: XCTestCase {
 
 @MainActor
 final class UsageShareExportTests: XCTestCase {
-    private func fixture(claude: Int = 2_000_000_000, codex: Int = 900_000_000, partial: Bool = false) -> UsageLedgerReport {
+    private func fixture(claude: Int = 2_000_000_000, codex: Int = 900_000_000, partial: Bool = false,
+                         output: Int = 45_678_901, activeDays: [Int] = [1, 26, 31]) -> UsageLedgerReport {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Europe/Paris")!
         let now = ISO8601DateFormatter().date(from: "2026-10-31T15:00:00Z")!
         var sessions: [UsageSessionDigest] = []
         for (provider, input) in [(UsageTranscriptFormat.claude, claude), (.codex, codex)] where input > 0 {
-            for day in [1, 26, 31] {
+            for day in activeDays {
                 let timestamp = ISO8601DateFormatter().date(from: String(format: "2026-10-%02dT12:00:00Z", day))!
-                let tokens = UsageTokenTotals(input: input, output: 45_678_901, thinking: 7_000,
+                let tokens = UsageTokenTotals(input: input, output: output, thinking: min(7_000, output),
                     measurements: 1, inputMeasurements: 1, outputMeasurements: 1,
                     cacheCreationMeasurements: 1, cacheReadMeasurements: 1, thinkingMeasurements: 1,
                     claudeMeasurements: provider == .claude ? 1 : 0,
@@ -165,6 +184,26 @@ final class UsageShareExportTests: XCTestCase {
                 XCTAssertEqual(rep.pixelsWide, 2400); XCTAssertEqual(rep.pixelsHigh, 1260)
                 let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
                 attachment.name = "Podium \(language) \(period.rawValue)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+        }
+    }
+
+    func testAllLifetimeTierArtworkRendersInEnglishAndFrench() throws {
+        for language in ["en", "fr"] {
+            for tier in UsagePodiumTier.allCases {
+                var report = fixture(claude: max(1, tier.threshold), codex: 0, output: 0, activeDays: [31])
+                var lifetime = UsageSessionDigest(sessionID: "public-example")
+                lifetime.tokens = UsageTokenTotals(input: max(1, tier.threshold))
+                report.milestones = UsageMilestoneProgress(sessions: [lifetime], now: report.generatedAt)
+                let snapshot = UsageShareSnapshot(report: report, period: .week)
+                XCTAssertEqual(snapshot.podiumTier, tier)
+                let data = try UsageShareExporter.pngData(snapshot: snapshot, locale: Locale(identifier: language))
+                let rep = try XCTUnwrap(NSBitmapImageRep(data: data))
+                XCTAssertEqual(rep.pixelsWide, 2400); XCTAssertEqual(rep.pixelsHigh, 1260)
+                let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
+                attachment.name = "AI Podium level \(tier.rawValue) \(language)"
                 attachment.lifetime = .keepAlways
                 add(attachment)
             }

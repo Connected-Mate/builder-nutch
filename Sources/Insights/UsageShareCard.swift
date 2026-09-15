@@ -8,13 +8,25 @@ struct UsageShareCard: View {
     let snapshot: UsageShareSnapshot
     @Environment(\.locale) private var locale
     private var accent: Color { UsageSharePalette.accent(for: snapshot.todayRanking.first?.provider) }
+    private var statisticsInk: Color { snapshot.podiumTier?.foreground ?? UsageSharePalette.ink }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             UsageShareBackdrop(provider: snapshot.todayRanking.first?.provider)
             HStack(alignment: .firstTextBaseline) {
-                Text(verbatim: "Builder Nutch")
+                Text(verbatim: "AI Podium")
                     .font(AppTheme.font(size: 25, weightValue: 650)).tracking(-0.5)
+                if let tier = snapshot.podiumTier {
+                    Text("Lifetime level")
+                        .font(AppTheme.font(size: 15, weightValue: 450))
+                        .foregroundStyle(UsageSharePalette.muted)
+                        .padding(.leading, 12)
+                    Text(verbatim: "\(tier.rawValue) · \(tier.name(locale: locale))")
+                        .font(AppTheme.font(size: 16, weightValue: 650))
+                        .padding(.horizontal, 12).padding(.vertical, 5)
+                        .foregroundStyle(tier.foreground)
+                        .background(tier.surface, in: Capsule())
+                }
                 Spacer()
                 Text(date(snapshot.today, template: "d MMM yyyy"))
                     .font(AppTheme.font(size: 17, weightValue: 450))
@@ -40,7 +52,7 @@ struct UsageShareCard: View {
                 if snapshot.isProject, let projectName = snapshot.projectName {
                     Text("Project")
                         .font(AppTheme.font(size: 16, weightValue: 500))
-                        .foregroundStyle(UsageSharePalette.muted)
+                        .foregroundStyle(statisticsInk)
                     Text(verbatim: projectName)
                         .font(AppTheme.font(size: 30, weightValue: 650))
                         .lineLimit(1).truncationMode(.middle).minimumScaleFactor(0.7)
@@ -59,7 +71,7 @@ struct UsageShareCard: View {
                 Text(periodDateLabel)
             }
             .font(AppTheme.font(size: 16, weightValue: 450))
-            .foregroundStyle(UsageSharePalette.muted)
+            .foregroundStyle(statisticsInk)
             .lineLimit(1).minimumScaleFactor(0.65)
             .padding(.top, 5)
 
@@ -71,7 +83,7 @@ struct UsageShareCard: View {
                 if snapshot.availability != .unavailable {
                     Text("tokens")
                         .font(AppTheme.font(size: 29, weightValue: 400))
-                        .foregroundStyle(UsageSharePalette.muted)
+                        .foregroundStyle(statisticsInk)
                         .fixedSize(horizontal: true, vertical: false)
                 }
                 Spacer(minLength: 0)
@@ -80,10 +92,10 @@ struct UsageShareCard: View {
             .padding(.top, 22)
             exactReading(snapshot.tokens.total, availability: snapshot.availability)
                 .font(AppTheme.font(size: 18, weightValue: 450))
-                .foregroundStyle(UsageSharePalette.muted)
+                .foregroundStyle(statisticsInk)
 
             Spacer(minLength: 20)
-            Rectangle().fill(UsageSharePalette.edge.opacity(0.5)).frame(height: 1)
+            Rectangle().fill(statisticsInk.opacity(0.25)).frame(height: 1)
             HStack(alignment: .top, spacing: 20) {
                 supportingMetric(.month, tokens: snapshot.monthTokens, availability: snapshot.monthAvailability)
                 supportingMetric(.week, tokens: snapshot.weekTokens, availability: snapshot.weekAvailability)
@@ -92,7 +104,19 @@ struct UsageShareCard: View {
             .padding(.top, 20)
         }
         .padding(.horizontal, 38).padding(.vertical, 32)
-        .background { plateSurface(radius: 44) }
+        .foregroundStyle(statisticsInk)
+        .background {
+            if let tier = snapshot.podiumTier {
+                RoundedRectangle(cornerRadius: 44, style: .continuous)
+                    .fill(tier.surface)
+                    .overlay(RoundedRectangle(cornerRadius: 44, style: .continuous)
+                        .strokeBorder(tier.foreground.opacity(0.22), lineWidth: 1.5))
+                    .shadow(color: .black.opacity(0.8), radius: 5, x: 0, y: 9)
+                    .shadow(color: .black.opacity(0.7), radius: 24, x: 0, y: 24)
+            } else {
+                plateSurface(radius: 44)
+            }
+        }
     }
 
     private func supportingMetric(_ period: UsageSharePeriod, tokens: UsageTokenTotals,
@@ -100,7 +124,7 @@ struct UsageShareCard: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(periodTitle(period))
                 .font(AppTheme.font(size: 15, weightValue: 500))
-                .foregroundStyle(UsageSharePalette.muted)
+                .foregroundStyle(statisticsInk)
                 .lineLimit(1).minimumScaleFactor(0.7)
             Text(count(tokens.total, availability: availability, compact: true))
                 .font(AppTheme.font(size: 27, weightValue: 650))
@@ -224,6 +248,7 @@ struct UsageShareCard: View {
 
     private var footer: some View {
         HStack(alignment: .top, spacing: 24) {
+            Text(verbatim: "Builder Nutch")
             Group {
                 if snapshot.isPartial || snapshot.weekAvailability != .complete || snapshot.monthAvailability != .complete {
                     Text("Partial history · ≥ means at least")

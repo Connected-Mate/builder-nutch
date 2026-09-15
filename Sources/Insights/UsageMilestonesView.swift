@@ -18,10 +18,13 @@ struct UsageMilestonesView: View {
                 if progress.next != nil {
                     ProgressView(value: progress.fractionToNext)
                         .tint(AppTheme.ink)
-                        .accessibilityLabel(Text("Progress to next stamp"))
+                        .accessibilityLabel(Text("Progress to next level"))
                 }
 
                 VStack(spacing: 0) {
+                    stampRow(UsageMilestoneStamp(level: 0, threshold: 0,
+                                                reached: progress.podiumTier != nil, reachedAt: nil))
+                    Rectangle().fill(AppTheme.line).frame(height: 1).accessibilityHidden(true)
                     ForEach(progress.stamps) { stamp in
                         stampRow(stamp)
                         if stamp.id != progress.stamps.last?.id {
@@ -36,10 +39,13 @@ struct UsageMilestonesView: View {
             HStack(spacing: 8) {
                 Image(systemName: "seal")
                     .foregroundStyle(AppTheme.muted).accessibilityHidden(true)
-                Text("Stamps")
+                Text(verbatim: "AI Podium")
                     .font(AppTheme.font(size: 12, weightValue: 550))
-                Text(levelLabel(progress.level))
-                    .foregroundStyle(AppTheme.muted)
+                if let tier = progress.podiumTier {
+                    UsagePodiumBadge(tier: tier)
+                } else {
+                    Text("No recorded data").foregroundStyle(AppTheme.muted)
+                }
                 Spacer(minLength: 4)
                 Text(nextLabel)
                     .foregroundStyle(AppTheme.muted)
@@ -55,23 +61,20 @@ struct UsageMilestonesView: View {
 
     private var nextLabel: String {
         guard let next = progress.next else {
-            return NSLocalizedString("All stamps collected", comment: "Final usage milestone reached")
+            return NSLocalizedString("All levels reached", comment: "Final usage milestone reached")
         }
-        return String(format: NSLocalizedString("Next: %@ tokens", comment: "Next usage milestone threshold"),
-                      compact(next.threshold))
+        let name = UsagePodiumTier(rawValue: next.level)?.name(locale: .current) ?? ""
+        return String(format: NSLocalizedString("Next: %@ · %@ tokens", comment: "Next lifetime level and threshold"),
+                      name, compact(next.threshold))
     }
 
     private func stampRow(_ stamp: UsageMilestoneStamp) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: stamp.reached ? "checkmark.seal.fill" : "seal")
-                .font(AppTheme.font(size: 18))
-                .foregroundStyle(stamp.reached ? AppTheme.ink : AppTheme.muted)
-                .frame(width: 24)
-                .accessibilityHidden(true)
+            if let tier = UsagePodiumTier(rawValue: stamp.level) {
+                UsagePodiumBadge(tier: tier).frame(width: 110, alignment: .leading)
+            }
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text(levelLabel(stamp.level))
-                        .font(AppTheme.font(size: 12, weightValue: 550))
                     Text(String(format: NSLocalizedString("%@ tokens", comment: "Usage milestone threshold"),
                                 compact(stamp.threshold)))
                         .foregroundStyle(AppTheme.muted)
@@ -94,13 +97,9 @@ struct UsageMilestonesView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func levelLabel(_ level: Int) -> String {
-        String(format: NSLocalizedString("Level %d", comment: "Usage milestone level"), level)
-    }
-
     private func stampStatus(_ stamp: UsageMilestoneStamp) -> LocalizedStringKey {
         if stamp.reached { return "Reached" }
-        return stamp.id == progress.next?.id ? "Next stamp" : "Locked"
+        return stamp.id == progress.next?.id || stamp.level == 0 ? "Next level" : "Locked"
     }
 
     private func compact(_ value: Int) -> String {
