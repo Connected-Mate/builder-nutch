@@ -45,6 +45,19 @@ struct UsageStatisticsView: View {
             details
         }
         .foregroundStyle(AppTheme.ink)
+        .padding(16)
+        .background {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(LinearGradient(colors: [AppTheme.soft, AppTheme.surface, .black.opacity(0.3)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(LinearGradient(colors: [AppTheme.muted.opacity(0.35), AppTheme.line.opacity(0.4)],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing)))
+                .shadow(color: .black.opacity(0.22), radius: 2, y: 3)
+                .shadow(color: .black.opacity(0.22), radius: 14, y: 12)
+        }
+        .padding(.horizontal, -12)
+        .padding(.bottom, 12)
         .opacity(entered || reduceMotion ? 1 : 0)
         .offset(y: entered || reduceMotion ? 0 : 4)
         .onAppear { withAnimation(motion) { entered = true } }
@@ -226,9 +239,12 @@ struct UsageStatisticsView: View {
                             .padding(.horizontal, 1)
                     }
                     RoundedRectangle(cornerRadius: count <= 7 ? 3 : 1.5)
-                        .fill(active ? AppTheme.ink : AppTheme.muted)
+                        .fill(LinearGradient(colors: [active ? AppTheme.ink : AppTheme.muted,
+                                                       active ? AppTheme.muted : AppTheme.muted.opacity(0.55)],
+                                             startPoint: .top, endPoint: .bottom))
                         .frame(width: min(count <= 7 ? 24 : 10, max(1, geometry.size.width - 4)),
                                height: geometry.size.height * CGFloat(day.fraction(of: peak)))
+                        .shadow(color: .black.opacity(0.35), radius: 3, x: 1, y: 3)
                         .scaleEffect(y: entered || reduceMotion ? 1 : 0, anchor: .bottom)
                         .animation(reduceMotion ? nil : motion?.delay(Double(index) * 0.012), value: entered)
                 }

@@ -212,6 +212,33 @@ final class UsageShareExportTests: XCTestCase {
         }
     }
 
+    func testTierFinishesKeepTextReadableAcrossTheReadingArea() throws {
+        func luminance(_ color: NSColor) -> Double {
+            let linear = [color.redComponent, color.greenComponent, color.blueComponent].map { component in
+                component <= 0.04045 ? component / 12.92 : pow((component + 0.055) / 1.055, 2.4)
+            }
+            return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
+        }
+        for tier in UsagePodiumTier.allCases {
+            let renderer = ImageRenderer(content: UsagePodiumFinish(tier: tier).frame(width: 682, height: 418))
+            let rep = NSBitmapImageRep(cgImage: try XCTUnwrap(renderer.cgImage))
+            let hex = tier.foregroundHex
+            // WCAG luminance is defined in sRGB, not the Mac's display/device
+            // profile (whose gamma can make the same pixels appear brighter).
+            let foreground = NSColor(srgbRed: CGFloat((hex >> 16) & 255) / 255,
+                                     green: CGFloat((hex >> 8) & 255) / 255,
+                                     blue: CGFloat(hex & 255) / 255, alpha: 1)
+            let ink = luminance(foreground)
+            for y in stride(from: 32, through: 386, by: 18) {
+                for x in stride(from: 38, through: 644, by: 24) {
+                    let background = luminance(try XCTUnwrap(rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)))
+                    XCTAssertGreaterThanOrEqual((max(ink, background) + 0.05) / (min(ink, background) + 0.05),
+                                                4.5, "\(tier.nameKey) at \(x),\(y)")
+                }
+            }
+        }
+    }
+
     func testPNGDimensionsAndPrivateClipboardRoundTrip() throws {
         let now = ISO8601DateFormatter().date(from: "2026-09-15T10:00:00Z")!
         let report = UsageLedgerEngine.report(sessions: [], summary: UsageScanSummary(), days: 7, now: now,

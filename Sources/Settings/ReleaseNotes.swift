@@ -30,6 +30,9 @@ struct ReleaseNote: Equatable {
 /// `testTheCurrentVersionHasANote`.
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
+        ReleaseNote(version: "0.19.1", headline: "More depth. Your AI Podium.", changes: [
+            .init(title: "A richer finish", detail: "Sculpted reflections, deeper shadows and stronger provider lighting bring your AI Podium to life. Usage and level badges share the same refined finish.")
+        ]),
         ReleaseNote(version: "0.19.0", headline: "Your AI. Your next level.", changes: [
             .init(title: "Nine AI Podium levels", detail: "Your saved tokens take you from White to Black, through Silver, Gold and Platinum. Levels stay with your lifetime history."),
             .init(title: "A finish for your level", detail: "Your AI Podium image now carries your level and its color. Choose a period or project, then copy or save to share.")

@@ -25,7 +25,8 @@ struct UsageShareCard: View {
                         .font(AppTheme.font(size: 16, weightValue: 650))
                         .padding(.horizontal, 12).padding(.vertical, 5)
                         .foregroundStyle(tier.foreground)
-                        .background(tier.surface, in: Capsule())
+                        .background(UsagePodiumFinish(tier: tier, radius: 100))
+                        .shadow(color: .black.opacity(0.5), radius: 4, y: 3)
                 }
                 Spacer()
                 Text(date(snapshot.today, template: "d MMM yyyy"))
@@ -107,18 +108,10 @@ struct UsageShareCard: View {
         .foregroundStyle(statisticsInk)
         .background {
             if let tier = snapshot.podiumTier {
-                RoundedRectangle(cornerRadius: 44, style: .continuous)
-                    .fill(tier.surface)
-                    .overlay(RoundedRectangle(cornerRadius: 44, style: .continuous)
-                        .fill(LinearGradient(stops: [
-                            .init(color: .white.opacity(tier.rawValue <= 4 ? 0.22 : 0.05), location: 0),
-                            .init(color: .clear, location: 0.48),
-                            .init(color: .black.opacity(0.08), location: 1)
-                        ], startPoint: .topLeading, endPoint: .bottomTrailing)))
-                    .overlay(RoundedRectangle(cornerRadius: 44, style: .continuous)
-                        .strokeBorder(tier.foreground.opacity(0.22), lineWidth: 1.5))
-                    .shadow(color: .black.opacity(0.8), radius: 5, x: 0, y: 9)
-                    .shadow(color: .black.opacity(0.7), radius: 24, x: 0, y: 24)
+                UsagePodiumFinish(tier: tier)
+                    .shadow(color: .black.opacity(0.9), radius: 2, x: 0, y: 5)
+                    .shadow(color: .black.opacity(0.75), radius: 12, x: 0, y: 16)
+                    .shadow(color: .black.opacity(0.65), radius: 32, x: 0, y: 30)
             } else {
                 plateSurface(radius: 44)
             }
@@ -185,12 +178,15 @@ struct UsageShareCard: View {
     private func medallion(_ entry: UsageShareProviderTotal, rank: Int, size: CGFloat) -> some View {
         ZStack {
             Circle().fill(UsageSharePalette.black)
-            Circle().fill(RadialGradient(colors: [accent.opacity(rank == 1 ? 0.42 : 0.17), .clear],
+            Circle().fill(RadialGradient(colors: [accent.opacity(rank == 1 ? 0.75 : 0.28), .clear],
                                          center: .topLeading, startRadius: 0, endRadius: size))
+            Circle().fill(LinearGradient(colors: [.clear, .black.opacity(0.75)],
+                                          startPoint: .center, endPoint: .bottom))
             Circle().strokeBorder(LinearGradient(colors: [accent.opacity(0.95), UsageSharePalette.edge.opacity(0.25),
                                                            accent.opacity(0.65)],
                                                  startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 2)
-            Circle().strokeBorder(accent.opacity(0.20), lineWidth: 1).padding(7)
+            Circle().strokeBorder(LinearGradient(colors: [accent.opacity(0.65), .clear, accent.opacity(0.22)],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.5).padding(7)
             ProviderGlyphView(glyph: entry.provider == .claude ? .claude : .openai, size: size * 0.51)
                 .foregroundStyle(entry.provider == .claude ? UsageSharePalette.claude : UsageSharePalette.ink)
             Text(verbatim: "\(rank)")
@@ -201,8 +197,9 @@ struct UsageShareCard: View {
                 .offset(x: size * 0.32, y: size * 0.34)
         }
         .frame(width: size, height: size)
-        .shadow(color: accent.opacity(rank == 1 ? 0.2 : 0.06), radius: rank == 1 ? 20 : 8)
-        .shadow(color: .black.opacity(0.8), radius: 8, x: 0, y: 10)
+        .shadow(color: accent.opacity(rank == 1 ? 0.35 : 0.10), radius: rank == 1 ? 24 : 10)
+        .shadow(color: .black.opacity(0.95), radius: 3, x: 0, y: 7)
+        .shadow(color: .black.opacity(0.75), radius: 12, x: 0, y: 17)
     }
 
     private func rankingReading(_ entry: UsageShareProviderTotal, rank: Int) -> some View {
@@ -224,9 +221,11 @@ struct UsageShareCard: View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return ZStack {
             shape.fill(UsageSharePalette.black)
+            shape.fill(RadialGradient(colors: [accent.opacity(0.24), .clear],
+                                      center: .topLeading, startRadius: 0, endRadius: 340))
             shape.fill(LinearGradient(stops: [.init(color: .black, location: 0),
                                               .init(color: .black.opacity(0), location: 0.6),
-                                              .init(color: accent.opacity(0.13), location: 1)],
+                                              .init(color: accent.opacity(0.20), location: 1)],
                                       startPoint: .topLeading, endPoint: .bottomTrailing))
             shape.strokeBorder(LinearGradient(stops: [.init(color: accent.opacity(0.75), location: 0),
                                                        .init(color: UsageSharePalette.edge.opacity(0.38), location: 0.3),
@@ -234,8 +233,9 @@ struct UsageShareCard: View {
                                                        .init(color: accent.opacity(0.45), location: 1)],
                                                startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.5)
         }
-        .shadow(color: .black.opacity(0.8), radius: 5, x: 0, y: 9)
-        .shadow(color: .black.opacity(0.7), radius: 24, x: 0, y: 24)
+        .shadow(color: .black.opacity(0.95), radius: 3, x: 0, y: 7)
+        .shadow(color: .black.opacity(0.8), radius: 14, x: 0, y: 20)
+        .shadow(color: .black.opacity(0.6), radius: 32, x: 0, y: 30)
     }
 
     private func exactReading(_ value: Int, availability: UsageMeasurementAvailability) -> some View {

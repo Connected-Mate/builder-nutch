@@ -75,8 +75,11 @@ struct UsageShareView: View {
                     .scaleEffect(previewWidth / UsageShareCard.width, anchor: .topLeading)
                     .frame(width: previewWidth, height: previewWidth / ratio, alignment: .topLeading)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.muted.opacity(0.22)))
-                    .shadow(color: .black.opacity(0.65), radius: 24, y: 12)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(LinearGradient(
+                        colors: [AppTheme.muted.opacity(0.55), AppTheme.line.opacity(0.3)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing)))
+                    .shadow(color: .black.opacity(0.75), radius: 3, y: 5)
+                    .shadow(color: .black.opacity(0.75), radius: 28, y: 20)
                     .frame(maxWidth: .infinity)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(Text("Token consumption image preview"))

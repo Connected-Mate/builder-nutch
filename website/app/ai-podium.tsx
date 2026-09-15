@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ArrowDown, ArrowLeft, ArrowUpRight, Check, Download } from 'lucide-react';
 import { podiumTiers } from './podium-tiers';
 
@@ -7,9 +7,21 @@ const download = 'https://github.com/Connected-Mate/builder-nutch/releases/lates
 
 export default function AIPodium() {
   const [selected, setSelected] = useState(6);
+  const pickerRef = useRef<HTMLFieldSetElement>(null);
   const tier = podiumTiers[selected];
   const next = podiumTiers[selected + 1];
   const tierStyle = { '--tier-surface': tier.color, '--tier-ink': tier.ink } as CSSProperties;
+
+  useEffect(() => {
+    const picker = pickerRef.current;
+    const choice = picker?.querySelector<HTMLButtonElement>('[aria-pressed="true"]');
+    if (!picker || !choice) return;
+    const rail = picker.getBoundingClientRect(), item = choice.getBoundingClientRect();
+    if (item.left < rail.left || item.right > rail.right) {
+      // Scroll the level strip only; never move the page away from the artwork.
+      picker.scrollLeft += item.left - rail.left - (rail.width - item.width) / 2;
+    }
+  }, [selected]);
 
   return (
     <div className="ai-podium-page">
@@ -44,9 +56,9 @@ export default function AIPodium() {
             <h2 id="levels-title">From White to Black.</h2>
             <p>Nine levels. Based on all your saved tokens.</p>
           </div>
-          <fieldset className="tier-picker" aria-label="Explore token levels">
+          <fieldset ref={pickerRef} className="tier-picker" aria-label="Explore token levels">
             {podiumTiers.map((item, index) => (
-              <button key={item.id} type="button" className="tier-choice"
+              <button key={item.id} type="button" className="tier-choice" data-tier={item.id}
                 style={{ '--tier-surface': item.color, '--tier-ink': item.ink } as CSSProperties}
                 aria-pressed={selected === index} aria-controls="tier-preview"
                 onClick={() => setSelected(index)}>
@@ -56,7 +68,7 @@ export default function AIPodium() {
             ))}
           </fieldset>
           <div className="tier-preview-heading" id="tier-preview" aria-live="polite" aria-atomic="true">
-            <div className="tier-active" style={tierStyle}><span>{String(tier.level).padStart(2, '0')}</span>{tier.name}</div>
+            <div className="tier-active" data-tier={tier.id} style={tierStyle}><span>{String(tier.level).padStart(2, '0')}</span>{tier.name}</div>
             <p>{tier.level === 0 ? 'Unlocked with your first recorded token.' : `Reached at ${tier.threshold} lifetime tokens.`}
               {' '}{next ? `Next: ${next.name} at ${next.threshold}.` : 'The final level.'}</p>
             <span className="podium-example-label">Example preview</span>

@@ -24,11 +24,11 @@ struct UsageShareBackdrop: View {
     var body: some View {
         ZStack {
             Color.black
-            light(width: 650, height: 610, opacity: 0.48)
-                .position(x: 1060, y: 255)
-            light(width: 800, height: 260, opacity: 0.25)
+            light(width: 650, height: 610, opacity: 0.82)
+                .position(x: 1110, y: 155)
+            light(width: 800, height: 260, opacity: 0.48)
                 .rotationEffect(.degrees(-16)).position(x: 590, y: 540)
-            light(width: 490, height: 400, opacity: 0.18)
+            light(width: 490, height: 400, opacity: 0.36)
                 .position(x: 45, y: 160)
             texture
             LinearGradient(stops: [.init(color: .clear, location: 0.74),
