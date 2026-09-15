@@ -40,7 +40,9 @@ struct UsageLedgerEngine {
         var seenPaths: Set<String> = []
 
         for source in sources {
-            for file in transcripts(in: source.projectsRoot, summary: &summary) {
+            if Task.isCancelled { summary.hitLimit = true; break }
+            for file in transcripts(in: source.projectsRoot, summary: &summary, deadline: started + budget) {
+                if Task.isCancelled { summary.hitLimit = true; break }
                 guard summary.filesSeen < limits.maxFiles else {
                     summary.hitLimit = true
                     break
@@ -85,7 +87,8 @@ struct UsageLedgerEngine {
                 let continuesPartial = cached.map {
                     $0.truncated && size == $0.size && modified == $0.modified
                 } ?? false
-                let resumable = grew || continuesPartial
+                let resumable = (grew || continuesPartial) && cached?.resumeFingerprint != nil
+                    && cached?.resumeFingerprint == UsageLedgerCache.resumeFingerprint(for: file, offset: cached?.offset ?? 0)
                 var nextOffset = resumable ? (cached?.offset ?? 0) : 0
                 var checkpoint = resumable ? (cached?.checkpoint ?? UsageTranscriptCheckpoint())
                                            : UsageTranscriptCheckpoint()
@@ -97,9 +100,10 @@ struct UsageLedgerEngine {
                 var continuationBytesRead = 0
 
                 while true {
+                    if Task.isCancelled { summary.hitLimit = true; break }
                     let before = nextOffset
                     guard var outcome = try? scanner.scan(file: file, from: nextOffset,
-                                                          sessionIDHint: Self.sessionIDHint(for: file),
+                                                          sessionIDHint: resumable ? (cached?.digest.sessionID ?? Self.sessionIDHint(for: file)) : Self.sessionIDHint(for: file),
                                                           managedAccountID: source.managedAccountID,
                                                           format: source.format,
                                                           checkpoint: checkpoint) else { break }
@@ -144,7 +148,8 @@ struct UsageLedgerEngine {
                 digests.append(digest)
                 cache.entries[file.path] = UsageLedgerCacheEntry(size: size, modified: modified,
                                                                  offset: nextOffset, digest: digest,
-                                                                 truncated: finalTruncated, checkpoint: checkpoint)
+                                                                 truncated: finalTruncated, checkpoint: checkpoint,
+                                                                 resumeFingerprint: UsageLedgerCache.resumeFingerprint(for: file, offset: nextOffset))
                 summary.filesParsed += 1
                 if finalTruncated { summary.hitLimit = true }
             }
@@ -161,7 +166,7 @@ struct UsageLedgerEngine {
     /// Every `.jsonl` under a projects root, subagent transcripts included —
     /// their tokens are as real as anyone else's. Tool results are skipped
     /// wholesale: they are most of the bytes and none of the usage.
-    private func transcripts(in root: URL, summary: inout UsageScanSummary) -> [URL] {
+    private func transcripts(in root: URL, summary: inout UsageScanSummary, deadline: TimeInterval) -> [URL] {
         let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey]
         guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: keys,
                                                           options: [.skipsHiddenFiles, .skipsPackageDescendants]) else {
@@ -169,6 +174,10 @@ struct UsageLedgerEngine {
         }
         var files: [URL] = []
         while let url = walker.nextObject() as? URL {
+            if Task.isCancelled || ProcessInfo.processInfo.systemUptime > deadline {
+                summary.hitLimit = true
+                break
+            }
             guard files.count < limits.maxFiles else {
                 summary.hitLimit = true
                 break
@@ -333,6 +342,14 @@ struct UsageLedgerEngine {
         if let vendor = session.vendorAccountID {
             return AccountKey(key: "vendor:\(vendor)", managedAccountID: nil,
                               vendorAccountID: vendor, attribution: .explicit, provider: .claude)
+        }
+        if let attribution = session.archivedAttribution {
+            if let account = session.archivedAccountID {
+                return AccountKey(key: "profile:\(account)", managedAccountID: account,
+                                  vendorAccountID: nil, attribution: attribution, provider: .claude)
+            }
+            return AccountKey(key: "unknown", managedAccountID: nil, vendorAccountID: nil,
+                              attribution: .unknown, provider: .claude)
         }
         if let date, let deduced = timeline.accountID(at: date) {
             return AccountKey(key: "profile:\(deduced)", managedAccountID: deduced,
@@ -504,26 +521,110 @@ struct UsageLedgerEngine {
     }
 }
 
-/// The app-facing ledger. An actor so a refresh — hundreds of files, tens of
-/// megabytes — can never run on the main thread and stall the notch.
-actor UsageLedger {
-    private let engine: UsageLedgerEngine
+private struct UsageLedgerState {
+    private var engine: UsageLedgerEngine
     private let cacheURL: URL
     private var cache: UsageLedgerCache?
+    private let archiveURL: URL
+    private var lastArchive: UsageLedgerArchive?
+    private var migratedCache = false
 
     init(sources: [UsageLedgerSource], cacheURL: URL, limits: UsageLedgerLimits = .default,
-         calendar: Calendar = .current, timeline: UsageAccountTimeline = UsageAccountTimeline()) {
+         calendar: Calendar = .current, timeline: UsageAccountTimeline = UsageAccountTimeline(),
+         archiveURL: URL? = nil) {
         self.engine = UsageLedgerEngine(sources: sources, limits: limits, calendar: calendar, timeline: timeline)
         self.cacheURL = cacheURL
+        self.archiveURL = archiveURL ?? UsageLedger.defaultArchiveURL(catalogRoot: cacheURL.deletingLastPathComponent().deletingLastPathComponent())
+    }
+
+    mutating func updateSources(_ sources: [UsageLedgerSource], timeline: UsageAccountTimeline) {
+        engine.sources = sources
+        engine.timeline = timeline
     }
 
     /// The default week view: today plus the six preceding local dates.
-    func report(days: Int = 7, now: Date = Date()) -> UsageLedgerReport {
-        var current = cache ?? UsageLedgerCache.load(from: cacheURL)
-        let report = engine.report(days: days, now: now, cache: &current)
-        cache = current
-        current.save(to: cacheURL)
+    mutating func report(days: Int = 7, now: Date = Date()) -> UsageLedgerReport {
+        let captured = capture(now: now)
+        var sessions = lastArchive?.digests ?? []
+        // Titles remain disposable cache metadata, never permanent history.
+        let titles = (cache?.entries.values.map(\.digest) ?? []).reduce(into: [String: String]()) { result, digest in
+            if let title = digest.title { result[digest.sessionID] = title }
+        }
+        for index in sessions.indices { sessions[index].title = titles[sessions[index].sessionID] }
+        var report = UsageLedgerEngine.report(sessions: sessions, summary: captured.scan, days: days, now: now,
+                                              calendar: engine.calendar, timeline: engine.timeline)
+        report.persistence = captured.persistence
         return report
+    }
+
+    /// Bounded background collection across all ages. It commits the old cache
+    /// before scanning can prune anything, then commits new observations before
+    /// replacing the disposable cache. Failures remain visible to the caller.
+    mutating func capture(now: Date = Date()) -> UsageCaptureResult {
+        var summary = UsageScanSummary()
+        do {
+            try Task.checkCancellation()
+            var current = cache ?? UsageLedgerCache.load(from: cacheURL)
+            if !migratedCache {
+                let migration = try UsageLedgerCache.loadForArchive(from: cacheURL)
+                lastArchive = try UsageLedgerArchiveStore.update(at: archiveURL, now: now) { archive in
+                    archive.absorb(Array(migration.entries.values.map(\.digest)) + Array(current.entries.values.map(\.digest)),
+                                   timeline: engine.timeline)
+                }
+                migratedCache = true
+            }
+            try Task.checkCancellation()
+            var boundedEngine = engine
+            boundedEngine.limits.initialTimeBudget = min(engine.limits.initialTimeBudget, engine.limits.timeBudget)
+            let scanned = boundedEngine.scan(cache: &current)
+            summary = scanned.summary
+            try Task.checkCancellation()
+            lastArchive = try UsageLedgerArchiveStore.update(at: archiveURL, now: now) { archive in
+                archive.absorb(current.entries.values.map(\.digest), timeline: engine.timeline)
+            }
+            cache = current
+            current.save(to: cacheURL)
+            return UsageCaptureResult(scan: summary, persistence: UsagePersistenceStatus(state: .saved, savedAt: lastArchive?.savedAt))
+        } catch {
+            // Keep the last successfully decoded archive available in this
+            // process; never claim pending observations have been saved.
+            if lastArchive == nil { lastArchive = try? UsageLedgerArchiveStore.read(from: archiveURL) }
+            return UsageCaptureResult(scan: summary,
+                                      persistence: UsagePersistenceStatus(state: .failed, savedAt: lastArchive?.savedAt,
+                                                                          message: error.localizedDescription))
+        }
+    }
+
+}
+
+/// App-facing actor: all collection and disk work stays off the main thread.
+actor UsageLedger {
+    private var state: UsageLedgerState
+
+    init(sources: [UsageLedgerSource], cacheURL: URL, limits: UsageLedgerLimits = .default,
+         calendar: Calendar = .current, timeline: UsageAccountTimeline = UsageAccountTimeline(),
+         archiveURL: URL? = nil) {
+        state = UsageLedgerState(sources: sources, cacheURL: cacheURL, limits: limits,
+                                 calendar: calendar, timeline: timeline, archiveURL: archiveURL)
+    }
+
+    func updateSources(_ sources: [UsageLedgerSource], timeline: UsageAccountTimeline) {
+        state.updateSources(sources, timeline: timeline)
+    }
+
+    func capture(now: Date = Date()) -> UsageCaptureResult { state.capture(now: now) }
+
+    func report(days: Int = 7, now: Date = Date()) -> UsageLedgerReport { state.report(days: days, now: now) }
+
+    /// The diagnostic command uses exactly the same transaction as the app,
+    /// under the same cross-process archive lock, without a SwiftUI run loop.
+    static func persistentReport(sources: [UsageLedgerSource], cacheURL: URL, days: Int = 7,
+                                 now: Date = Date(), limits: UsageLedgerLimits = .default,
+                                 calendar: Calendar = .current, timeline: UsageAccountTimeline = .init(),
+                                 archiveURL: URL? = nil) -> UsageLedgerReport {
+        var state = UsageLedgerState(sources: sources, cacheURL: cacheURL, limits: limits,
+                                     calendar: calendar, timeline: timeline, archiveURL: archiveURL)
+        return state.report(days: days, now: now)
     }
 
     /// Where transcripts live on this Mac: Claude's shared and isolated homes,
@@ -546,6 +647,11 @@ actor UsageLedger {
             sources.append(UsageLedgerSource(projectsRoot: projects, managedAccountID: name.lowercased(), format: .claude))
         }
         return sources
+    }
+
+    static func defaultArchiveURL(catalogRoot: URL) -> URL {
+        catalogRoot.appendingPathComponent("history", isDirectory: true)
+            .appendingPathComponent("token-history-v1.json")
     }
 
     static func defaultCacheURL(catalogRoot: URL) -> URL {

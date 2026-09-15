@@ -216,10 +216,21 @@ struct UsageSessionDigest: Codable, Equatable {
     var vendorAccountID: String?
     /// The Builder Nutch account whose profile directory holds this file.
     var managedAccountID: String?
+    /// Numeric observations only. Optional for migration from the v5 cache.
+    var transcriptComponentID: String?
+    var recordedEvents: [String: UsageRecordedEvent]?
+    /// False when an old aggregate cache supplied the prefix of this digest.
+    var recordedEventsComplete: Bool?
+    /// Freeze deductions when captured so deleting login history cannot
+    /// silently move saved consumption to a different account.
+    var archivedAccountID: String?
+    var archivedAttribution: UsageAttribution?
 
     init(sessionID: String, provider: UsageTranscriptFormat = .claude) {
         self.sessionID = sessionID
         self.provider = provider
+        self.recordedEvents = [:]
+        self.recordedEventsComplete = true
     }
 
     /// Where the main conversation did most of its work, if anywhere.
@@ -241,6 +252,11 @@ struct UsageSessionDigest: Codable, Equatable {
     }
 
     mutating func merge(_ other: UsageSessionDigest) {
+        if let events = other.recordedEvents {
+            if recordedEvents == nil { recordedEvents = [:] }
+            recordedEvents?.merge(events) { previous, _ in previous }
+        }
+        recordedEventsComplete = recordedEventsComplete == true && other.recordedEventsComplete == true
         for (path, value) in other.projectWeights { projectWeights[path, default: 0] += value }
         for (path, value) in other.fallbackProjectWeights { fallbackProjectWeights[path, default: 0] += value }
         title = title ?? other.title

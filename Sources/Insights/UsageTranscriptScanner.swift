@@ -33,6 +33,7 @@ struct UsageTranscriptScanner {
               checkpoint: UsageTranscriptCheckpoint = UsageTranscriptCheckpoint()) throws -> Outcome {
         var digest = UsageSessionDigest(sessionID: sessionIDHint)
         digest.managedAccountID = managedAccountID
+        digest.transcriptComponentID = UsageLedgerCache.componentID(for: file)
         var outcome = Outcome(digest: digest, consumed: offset)
         var codex = CodexState(sessionIDHint: sessionIDHint, managedAccountID: managedAccountID,
                                checkpoint: checkpoint)
@@ -48,6 +49,7 @@ struct UsageTranscriptScanner {
         let ceiling = offset > UInt64.max - allowance ? UInt64.max : offset + allowance
 
         while true {
+            try Task.checkCancellation()
             guard let chunk = try handle.read(upToCount: 256 * 1024), !chunk.isEmpty else { break }
             outcome.bytesRead += chunk.count
 
@@ -199,6 +201,12 @@ struct UsageTranscriptScanner {
                 digest.activityMinutes[key] = bucket
             }
         }
+        let event = UsageRecordedEvent(tokens: tokens, weight: weight, date: date,
+                                       projectPath: UsageText.clean(object["cwd"], limit: limits.maxPathCharacters).map(UsageProjectPath.normalize),
+                                       model: model, sidechain: isSidechain)
+        let requestID = UsageText.identifier(object["uuid"]) ?? UsageText.identifier(message["id"])
+        let id = event.identity(sessionID: digest.sessionID, provider: .claude, requestID: requestID)
+        digest.recordedEvents?[id] = event
         outcome.digest = digest
     }
 
@@ -337,7 +345,8 @@ struct UsageTranscriptScanner {
                !state.responseIDs.insert(responseID).inserted { return }
             state.sawExactRecord = true
             recordCodex(counters.totals(), at: UsageText.date(object["timestamp"]), into: &state.digest,
-                        projectPath: state.projectPath, model: state.model)
+                        projectPath: state.projectPath, model: state.model,
+                        requestID: UsageText.identifier(payload["response_id"]))
         case "event_msg":
             guard let payload = object["payload"] as? [String: Any],
                   payload["type"] as? String == "token_count",
@@ -351,16 +360,21 @@ struct UsageTranscriptScanner {
             state.previousCumulative = cumulative
             guard delta.inclusiveInput > 0 || delta.output > 0 else { return }
             recordCodex(delta.totals(), at: UsageText.date(object["timestamp"]), into: &state.digest,
-                        projectPath: state.projectPath, model: state.model)
+                        projectPath: state.projectPath, model: state.model,
+                        requestID: "cumulative:\(cumulative.inclusiveInput):\(cumulative.cachedInput):\(cumulative.cacheWriteInput):\(cumulative.output):\(cumulative.reasoningOutput):\(object["timestamp"] as? String ?? "")")
         default:
             break
         }
     }
 
     private func recordCodex(_ tokens: UsageTokenTotals, at date: Date?, into digest: inout UsageSessionDigest,
-                             projectPath: String?, model: String?) {
+                             projectPath: String?, model: String?, requestID: String? = nil) {
         guard tokens.total > 0 else { return }
         let weight = UsageWeight.weight(tokens, model: model)
+        let event = UsageRecordedEvent(tokens: tokens, weight: weight, date: date,
+                                       projectPath: projectPath, model: model, sidechain: false)
+        let id = event.identity(sessionID: digest.sessionID, provider: .codex, requestID: requestID)
+        digest.recordedEvents?[id] = event
         digest.tokens += tokens
         digest.weight += weight
         digest.messages += 1

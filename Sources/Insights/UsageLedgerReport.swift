@@ -96,6 +96,7 @@ struct UsageLedgerReport: Codable, Equatable {
     /// Every day in the window, across all accounts.
     let timeline: [UsageDaySlice]
     let scan: UsageScanSummary
+    var persistence: UsagePersistenceStatus = .notCaptured
 
     static let empty = UsageLedgerReport(
         generatedAt: .distantPast, windowStart: .distantPast, windowEnd: .distantPast, days: 0,

@@ -7,7 +7,7 @@ import Foundation
 /// be read against `~/.claude/projects` before a single pixel is drawn.
 ///
 /// It prints titles, directories, identifiers and counts. It never prints a line
-/// of conversation, and it writes nothing but its own cache.
+/// of conversation. Numeric history is committed through the same archive as the app.
 enum UsageLedgerDump {
     static let flag = "--dump-usage-ledger"
 
@@ -19,12 +19,10 @@ enum UsageLedgerDump {
         let catalog = (try? AccountStorage(root: catalogRoot))
             .flatMap { try? $0.load() }
 
-        var engine = UsageLedgerEngine(sources: UsageLedger.defaultSources(home: home, catalogRoot: catalogRoot))
-        engine.timeline = timeline(from: catalog)
-
-        var cache = UsageLedgerCache.load(from: UsageLedger.defaultCacheURL(catalogRoot: catalogRoot))
-        let report = engine.report(days: days, now: now, cache: &cache)
-        cache.save(to: UsageLedger.defaultCacheURL(catalogRoot: catalogRoot))
+        let report = UsageLedger.persistentReport(
+            sources: UsageLedger.defaultSources(home: home, catalogRoot: catalogRoot),
+            cacheURL: UsageLedger.defaultCacheURL(catalogRoot: catalogRoot), days: days, now: now,
+            timeline: timeline(from: catalog))
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -35,6 +33,10 @@ enum UsageLedgerDump {
         }
         FileHandle.standardOutput.write(data)
         FileHandle.standardOutput.write(Data("\n".utf8))
+        if report.persistence.state == .failed {
+            FileHandle.standardError.write(Data(((report.persistence.message ?? "Could not save token history.") + "\n").utf8))
+            return 1
+        }
         return 0
     }
 
