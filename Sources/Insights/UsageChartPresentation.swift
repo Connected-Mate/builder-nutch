@@ -21,8 +21,19 @@ struct UsageChartDay: Identifiable, Equatable {
         // are a lower bound, not a falsely complete total.
         if partialHistory { return .partial }
         if tokens.measurements > 0,
-           tokens.coverage.input != .complete || tokens.coverage.output != .complete { return .partial }
+           inputAvailability(tokens) != .complete || tokens.coverage.output != .complete { return .partial }
         return .complete
+    }
+
+    static func inputAvailability(_ tokens: UsageTokenTotals) -> UsageMeasurementAvailability {
+        let coverage = tokens.coverage
+        // Codex's input count is already inclusive: missing cache breakdowns
+        // do not make that known total incomplete. Claude adds separate fields.
+        let onlyCodex = tokens.measurements > 0 && tokens.codexMeasurements == tokens.measurements
+        if coverage.input == .complete,
+           onlyCodex || (coverage.cacheCreation == .complete && coverage.cacheRead == .complete) { return .complete }
+        if coverage.input != .unavailable || coverage.cacheCreation != .unavailable || coverage.cacheRead != .unavailable { return .partial }
+        return .unavailable
     }
 
     static func availability(_ measured: UsageMeasurementAvailability, partialHistory: Bool) -> UsageMeasurementAvailability {

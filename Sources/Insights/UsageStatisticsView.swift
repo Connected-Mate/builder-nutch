@@ -93,7 +93,7 @@ struct UsageStatisticsView: View {
             .accessibilityLabel(Text("Recorded tokens"))
             .accessibilityValue(Text(tokensText(report.tokens.total, availability: totalAvailability)))
 
-            metric("Input", value: report.tokens.totalInput, availability: report.tokens.coverage.input,
+            metric("Input", value: report.tokens.totalInput, availability: UsageChartDay.inputAvailability(report.tokens),
                    note: "Includes cache")
             VStack(alignment: .leading, spacing: 8) {
                 metric("Output", value: report.tokens.output, availability: report.tokens.coverage.output)

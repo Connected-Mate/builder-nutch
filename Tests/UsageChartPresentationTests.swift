@@ -34,4 +34,27 @@ final class UsageChartPresentationTests: XCTestCase {
         XCTAssertEqual(day.fraction(of: 1_000), 0.001, accuracy: 0.000001)
         XCTAssertEqual(day.fraction(of: -1), 0)
     }
+
+    func testMissingClaudeCacheMakesInputAndTotalLowerBounds() {
+        let tokens = UsageTokenTotals(input: 100, output: 20, measurements: 1,
+                                      inputMeasurements: 1, outputMeasurements: 1, claudeMeasurements: 1)
+        XCTAssertEqual(UsageChartDay.inputAvailability(tokens), .partial)
+        XCTAssertEqual(UsageChartDay.totalAvailability(tokens, partialHistory: false), .partial)
+        XCTAssertEqual(tokens.total, 120)
+    }
+
+    func testCodexInclusiveInputStaysExactWithoutCacheBreakdown() {
+        let tokens = UsageTokenTotals(input: 100, output: 20, measurements: 1,
+                                      inputMeasurements: 1, outputMeasurements: 1, codexMeasurements: 1)
+        XCTAssertEqual(UsageChartDay.inputAvailability(tokens), .complete)
+        XCTAssertEqual(UsageChartDay.totalAvailability(tokens, partialHistory: false), .complete)
+        XCTAssertEqual(tokens.coverage.cacheRead, .unavailable)
+    }
+
+    func testUnreportedActiveInputIsNotAZeroMeasurement() {
+        let tokens = UsageTokenTotals(output: 20, measurements: 1, outputMeasurements: 1)
+        XCTAssertEqual(UsageChartDay.inputAvailability(tokens), .unavailable)
+        XCTAssertEqual(UsageChartDay.totalAvailability(tokens, partialHistory: false), .partial)
+        XCTAssertEqual(UsageChartDay.totalAvailability(UsageTokenTotals(), partialHistory: false), .complete)
+    }
 }
