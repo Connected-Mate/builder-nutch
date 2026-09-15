@@ -231,7 +231,7 @@ export default function Home() {
         </section>
         <section className="podium-section shell" id="ai-podium" aria-labelledby="podium-title">
           <div className="podium-intro">
-            <span className="eyebrow">AI PODIUM</span>
+            <span className="eyebrow"><span className="podium-index" aria-hidden="true">01—09</span> AI PODIUM</span>
             <h2 id="podium-title">Your day.<br />Your AI Podium.</h2>
             <p>
               You built something. Show the AI behind it. Your token totals and
@@ -249,6 +249,7 @@ export default function Home() {
           <figure className="podium-preview">
             <a href={asset('screenshots/podium-level-6.png')} target="_blank" rel="noreferrer"
               aria-label="View a full-size AI Podium example">
+              <span className="podium-preview-label" aria-hidden="true">GRAPHITE · LEVEL 06</span>
               <img src={asset('screenshots/podium-level-6.png')} width={2400} height={1260}
                 loading="lazy" alt="AI Podium example exported from Builder Nutch: token totals on the left and today’s AI ranking with provider logos on the right, on a black background lit in the leading AI’s colors." />
             </a>

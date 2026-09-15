@@ -35,7 +35,7 @@ export default function AIPodium() {
             <div className="podium-hero-copy">
               <p>Your token activity, your most-used AI, your place on the scale.</p>
               <p>From White to Black, your level grows with your saved history. Turn your day, week, month or project into an image you can share.</p>
-              <a className="quiet-link" href="#levels">Explore the levels <ArrowDown size={16} /></a>
+              <a className="quiet-link" href="#tier-preview">See today’s podium <ArrowDown size={16} /></a>
             </div>
           </div>
         </section>
@@ -62,6 +62,10 @@ export default function AIPodium() {
             <span className="podium-example-label">Example preview</span>
           </div>
           <figure className="podium-showcase">
+            <div className="podium-showcase-kicker" aria-hidden="true">
+              <span>AI PODIUM / {String(tier.level).padStart(2, '0')}</span>
+              <span>{tier.name.toUpperCase()} FINISH</span>
+            </div>
             <a href={asset(`screenshots/podium-level-${tier.level}.png`)} target="_blank" rel="noreferrer" aria-label="Open full-size AI Podium example">
               <img src={asset(`screenshots/podium-level-${tier.level}.png`)} width={2400} height={1260}
                 alt={`${tier.name} AI Podium example: recorded token totals and the most-used AI, ranked by daily use.`} fetchPriority="high" />
