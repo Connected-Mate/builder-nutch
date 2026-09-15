@@ -18,9 +18,13 @@ enum UsagePodiumTier: Int, CaseIterable, Identifiable {
     var foreground: Color { Color(hex: foregroundHex) }
 
     func name(locale: Locale) -> String {
+        Self.localized(nameKey, locale: locale)
+    }
+
+    static func localized(_ key: String, locale: Locale) -> String {
         let language = locale.language.languageCode?.identifier ?? "en"
         let bundle = Bundle.main.path(forResource: language, ofType: "lproj").flatMap(Bundle.init(path:)) ?? .main
-        return bundle.localizedString(forKey: nameKey, value: nameKey, table: nil)
+        return bundle.localizedString(forKey: key, value: key, table: nil)
     }
 }
 

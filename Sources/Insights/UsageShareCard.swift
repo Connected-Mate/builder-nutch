@@ -110,6 +110,12 @@ struct UsageShareCard: View {
                 RoundedRectangle(cornerRadius: 44, style: .continuous)
                     .fill(tier.surface)
                     .overlay(RoundedRectangle(cornerRadius: 44, style: .continuous)
+                        .fill(LinearGradient(stops: [
+                            .init(color: .white.opacity(tier.rawValue <= 4 ? 0.22 : 0.05), location: 0),
+                            .init(color: .clear, location: 0.48),
+                            .init(color: .black.opacity(0.08), location: 1)
+                        ], startPoint: .topLeading, endPoint: .bottomTrailing)))
+                    .overlay(RoundedRectangle(cornerRadius: 44, style: .continuous)
                         .strokeBorder(tier.foreground.opacity(0.22), lineWidth: 1.5))
                     .shadow(color: .black.opacity(0.8), radius: 5, x: 0, y: 9)
                     .shadow(color: .black.opacity(0.7), radius: 24, x: 0, y: 24)

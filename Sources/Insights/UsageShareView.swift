@@ -37,7 +37,7 @@ struct UsageShareView: View {
                                    max(240, (available.size.height - 184) * ratio))
             VStack(spacing: 12) {
                 HStack {
-                    Text("Share your activity").font(AppTheme.font(size: 18, weightValue: 550))
+                    Text(verbatim: "AI Podium").font(AppTheme.font(size: 18, weightValue: 550))
                     Spacer()
                     Button(action: onClose) {
                         Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
@@ -141,9 +141,14 @@ struct UsageShareView: View {
         let ranking = snapshot.todayRanking.enumerated().map { index, entry in
             "\(index + 1). \(entry.provider == .claude ? "Claude" : "Codex")"
         }.joined(separator: ", ")
+        let tierSummary = snapshot.podiumTier.map { tier in
+            " " + String(format: UsagePodiumTier.localized("Lifetime level: %d · %@", locale: locale),
+                         tier.rawValue, tier.name(locale: locale))
+        } ?? ""
         return String(format: NSLocalizedString("%@ · %@: %@ tokens. Recorded %@.", comment: "Accessible scoped token export"),
                       scope, NSLocalizedString(periodKey, comment: "Share period"), count, formatter.string(from: snapshot.generatedAt))
             + (ranking.isEmpty ? "" : " " + NSLocalizedString("Today’s AI podium", comment: "Daily provider ranking") + ": " + ranking)
+            + tierSummary
     }
 
     private func copy() {

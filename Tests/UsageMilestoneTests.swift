@@ -2,6 +2,15 @@ import XCTest
 @testable import Codenotch
 
 final class UsageMilestoneTests: XCTestCase {
+    func testPodiumSentencesFollowTheSelectedAppLocale() {
+        let french = Locale(identifier: "fr")
+        let english = Locale(identifier: "en")
+        XCTAssertEqual(UsagePodiumTier.gold.name(locale: french), "Or")
+        XCTAssertEqual(UsagePodiumTier.gold.name(locale: english), "Gold")
+        XCTAssertEqual(UsagePodiumTier.localized("Next: %@", locale: french), "Suivant : %@")
+        XCTAssertEqual(UsagePodiumTier.localized("Lifetime level: %d · %@", locale: french), "Niveau cumulé : %d · %@")
+        XCTAssertEqual(UsagePodiumTier.localized("Next: %@", locale: english), "Next: %@")
+    }
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
     func testPodiumTiersUseExactExistingLifetimeBoundaries() {
@@ -103,11 +112,14 @@ final class UsageMilestoneTests: XCTestCase {
         let empty = UsageMilestoneProgress(sessions: [], now: now)
         XCTAssertEqual(empty.totalTokens, 0)
         XCTAssertEqual(empty.level, 0)
+        XCTAssertNil(empty.podiumTier)
+        XCTAssertEqual(empty.nextPodiumTier, .white)
         XCTAssertEqual(empty.fractionToNext, 0)
         let large = UsageMilestoneProgress(sessions: [session("a", input: .max), session("b", input: .max)], now: now)
         XCTAssertEqual(large.totalTokens, .max)
         XCTAssertEqual(large.level, 8)
         XCTAssertNil(large.next)
+        XCTAssertNil(large.nextPodiumTier)
         XCTAssertEqual(large.fractionToNext, 1)
     }
 

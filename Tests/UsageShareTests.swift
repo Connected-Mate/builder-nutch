@@ -193,11 +193,13 @@ final class UsageShareExportTests: XCTestCase {
     func testAllLifetimeTierArtworkRendersInEnglishAndFrench() throws {
         for language in ["en", "fr"] {
             for tier in UsagePodiumTier.allCases {
-                var report = fixture(claude: max(1, tier.threshold), codex: 0, output: 0, activeDays: [31])
+                let total = max(1, tier.threshold)
+                let codex = total / 4
+                var report = fixture(claude: total - codex, codex: codex, output: 0, activeDays: [31])
                 var lifetime = UsageSessionDigest(sessionID: "public-example")
                 lifetime.tokens = UsageTokenTotals(input: max(1, tier.threshold))
                 report.milestones = UsageMilestoneProgress(sessions: [lifetime], now: report.generatedAt)
-                let snapshot = UsageShareSnapshot(report: report, period: .week)
+                let snapshot = UsageShareSnapshot(report: report, period: .day)
                 XCTAssertEqual(snapshot.podiumTier, tier)
                 let data = try UsageShareExporter.pngData(snapshot: snapshot, locale: Locale(identifier: language))
                 let rep = try XCTUnwrap(NSBitmapImageRep(data: data))

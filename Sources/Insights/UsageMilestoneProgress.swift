@@ -23,6 +23,7 @@ struct UsageMilestoneProgress: Codable, Equatable {
     var level: Int { stamps.last(where: \.reached)?.level ?? 0 }
     /// No recorded consumption must not look like an earned White badge.
     var podiumTier: UsagePodiumTier? { totalTokens > 0 ? UsagePodiumTier(rawValue: level) : nil }
+    var nextPodiumTier: UsagePodiumTier? { UsagePodiumTier(rawValue: (podiumTier?.rawValue ?? -1) + 1) }
     var next: UsageMilestoneStamp? { stamps.first { !$0.reached } }
     var fractionToNext: Double {
         guard let next else { return 1 }

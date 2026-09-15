@@ -291,6 +291,13 @@
 "Obsidian" = "Obsidian";
 "Black" = "Black";
 "Lifetime level" = "Lifetime level";
+"Your AI. Your next level." = "Your AI. Your next level.";
+"Nine AI Podium levels" = "Nine AI Podium levels";
+"Your saved tokens take you from White to Black, through Silver, Gold and Platinum. Levels stay with your lifetime history." = "Your saved tokens take you from White to Black, through Silver, Gold and Platinum. Levels stay with your lifetime history.";
+"A finish for your level" = "A finish for your level";
+"Your AI Podium image now carries your level and its color. Choose a period or project, then copy or save to share." = "Your AI Podium image now carries your level and its color. Choose a period or project, then copy or save to share.";
+"Next: %@" = "Next: %@";
+"Lifetime level: %d · %@" = "Lifetime level: %d · %@";
 "Next level" = "Next level";
 "All levels reached" = "All levels reached";
 "Progress to next level" = "Progress to next level";

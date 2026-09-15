@@ -4,18 +4,19 @@ import SwiftUI
 /// selected above. The native disclosure keeps the ledger useful at small sizes.
 struct UsageMilestonesView: View {
     let progress: UsageMilestoneProgress
+    @Environment(\.locale) private var locale
     @State private var isExpanded = false
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
             VStack(alignment: .leading, spacing: 12) {
-                Text(String(format: NSLocalizedString("Saved history · %@ tokens", comment: "Cumulative milestone total"),
-                            progress.totalTokens.formatted()))
+                Text(String(format: UsagePodiumTier.localized("Saved history · %@ tokens", locale: locale),
+                            progress.totalTokens.formatted(.number.locale(locale))))
                     .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
 
-                if progress.next != nil {
+                if progress.podiumTier != nil && progress.next != nil {
                     ProgressView(value: progress.fractionToNext)
                         .tint(AppTheme.ink)
                         .accessibilityLabel(Text("Progress to next level"))
@@ -60,11 +61,14 @@ struct UsageMilestonesView: View {
     }
 
     private var nextLabel: String {
-        guard let next = progress.next else {
-            return NSLocalizedString("All levels reached", comment: "Final usage milestone reached")
+        guard let next = progress.nextPodiumTier else {
+            return UsagePodiumTier.localized("All levels reached", locale: locale)
         }
-        let name = UsagePodiumTier(rawValue: next.level)?.name(locale: .current) ?? ""
-        return String(format: NSLocalizedString("Next: %@ · %@ tokens", comment: "Next lifetime level and threshold"),
+        let name = next.name(locale: locale)
+        if next == .white {
+            return String(format: UsagePodiumTier.localized("Next: %@", locale: locale), name)
+        }
+        return String(format: UsagePodiumTier.localized("Next: %@ · %@ tokens", locale: locale),
                       name, compact(next.threshold))
     }
 
@@ -75,14 +79,14 @@ struct UsageMilestonesView: View {
             }
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text(String(format: NSLocalizedString("%@ tokens", comment: "Usage milestone threshold"),
+                    Text(String(format: UsagePodiumTier.localized("%@ tokens", locale: locale),
                                 compact(stamp.threshold)))
                         .foregroundStyle(AppTheme.muted)
                         .help(stamp.threshold.formatted())
                 }
                 if stamp.reached, let date = stamp.reachedAt {
-                    Text(String(format: NSLocalizedString("Reached on %@", comment: "Known milestone crossing date"),
-                                date.formatted(date: .abbreviated, time: .omitted)))
+                    Text(String(format: UsagePodiumTier.localized("Reached on %@", locale: locale),
+                                date.formatted(.dateTime.locale(locale).day().month(.abbreviated).year())))
                         .foregroundStyle(AppTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -99,10 +103,10 @@ struct UsageMilestonesView: View {
 
     private func stampStatus(_ stamp: UsageMilestoneStamp) -> LocalizedStringKey {
         if stamp.reached { return "Reached" }
-        return stamp.id == progress.next?.id || stamp.level == 0 ? "Next level" : "Locked"
+        return stamp.id == progress.nextPodiumTier?.rawValue ? "Next level" : "Locked"
     }
 
     private func compact(_ value: Int) -> String {
-        value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
+        value.formatted(.number.locale(locale).notation(.compactName).precision(.fractionLength(0...1)))
     }
 }

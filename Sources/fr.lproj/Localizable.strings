@@ -556,6 +556,13 @@
 "Obsidian" = "Obsidienne";
 "Black" = "Noir";
 "Lifetime level" = "Niveau cumulé";
+"Your AI. Your next level." = "Votre IA. Votre prochain niveau.";
+"Nine AI Podium levels" = "Neuf niveaux AI Podium";
+"Your saved tokens take you from White to Black, through Silver, Gold and Platinum. Levels stay with your lifetime history." = "Vos tokens sauvegardés vous font passer de Blanc à Noir, en passant par Argent, Or et Platine. Les niveaux suivent votre historique cumulé.";
+"A finish for your level" = "Une finition pour votre niveau";
+"Your AI Podium image now carries your level and its color. Choose a period or project, then copy or save to share." = "Votre image AI Podium affiche désormais votre niveau et sa couleur. Choisissez une période ou un projet, puis copiez ou enregistrez l’image pour la partager.";
+"Next: %@" = "Suivant : %@";
+"Lifetime level: %d · %@" = "Niveau cumulé : %d · %@";
 "Next level" = "Prochain niveau";
 "All levels reached" = "Tous les niveaux atteints";
 "Progress to next level" = "Progression vers le prochain niveau";

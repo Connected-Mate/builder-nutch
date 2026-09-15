@@ -176,7 +176,7 @@ export default function Home() {
         </a>
         <nav aria-label="Main navigation">
           <a href="#how-it-works">How it works</a>
-          <a href="#ai-podium">AI Podium</a>
+          <a href={asset('ai-podium/')}>AI Podium</a>
           <a href={repository} className="github-link">
             GitHub <ArrowUpRight size={15} />
           </a>
@@ -242,14 +242,14 @@ export default function Home() {
               <li><Check size={17} /> Today’s top AI, ranked by recorded tokens</li>
               <li><Check size={17} /> A daily reminder at 17:30 to share your day</li>
             </ul>
-            <a className="quiet-link" href={download}>
-              Make your AI Podium <ArrowUpRight size={16} />
+            <a className="quiet-link" href={asset('ai-podium/')}>
+              Discover AI Podium <ArrowUpRight size={16} />
             </a>
           </div>
           <figure className="podium-preview">
-            <a href={asset('screenshots/ai-podium.png')} target="_blank" rel="noreferrer"
+            <a href={asset('screenshots/podium-level-6.png')} target="_blank" rel="noreferrer"
               aria-label="View a full-size AI Podium example">
-              <img src={asset('screenshots/ai-podium.png')} width={2400} height={1260}
+              <img src={asset('screenshots/podium-level-6.png')} width={2400} height={1260}
                 loading="lazy" alt="AI Podium example exported from Builder Nutch: token totals on the left and today’s AI ranking with provider logos on the right, on a black background lit in the leading AI’s colors." />
             </a>
             <figcaption>Example data · Exported from the Mac app · 2400 × 1260 PNG</figcaption>
