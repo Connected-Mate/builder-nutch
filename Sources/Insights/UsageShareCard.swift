@@ -1,246 +1,211 @@
 import SwiftUI
 
-/// Fixed, opaque export art: every light and reflection is drawn into the image.
-/// Keep this independent of native window materials and the manager's palette.
+/// Fixed, opaque export artwork. Preview and PNG use this identical composition.
 struct UsageShareCard: View {
     static let width: CGFloat = 1200
     static let height: CGFloat = 630
 
     let snapshot: UsageShareSnapshot
     @Environment(\.locale) private var locale
+    private var accent: Color { UsageSharePalette.accent(for: snapshot.todayRanking.first?.provider) }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            UsageShareBackdrop()
+            UsageShareBackdrop(provider: snapshot.todayRanking.first?.provider)
+            HStack(alignment: .firstTextBaseline) {
+                Text(verbatim: "Builder Nutch")
+                    .font(AppTheme.font(size: 25, weightValue: 650)).tracking(-0.5)
+                Spacer()
+                Text(date(snapshot.today, template: "d MMM yyyy"))
+                    .font(AppTheme.font(size: 17, weightValue: 450))
+                    .foregroundStyle(UsageSharePalette.muted)
+            }
+            .frame(width: 1088).offset(x: 56, y: 47)
 
-            weeklyCard
-                .frame(width: 724, height: 370)
-                .offset(x: 56, y: 128)
-
-            todayCard
-                .frame(width: 326, height: 370)
-                .offset(x: 816, y: 128)
-
+            statisticsPlate
+                .frame(width: 682, height: 418).offset(x: 56, y: 108)
+            podiumPlate
+                .frame(width: 380, height: 418).offset(x: 766, y: 108)
             footer
-                .frame(width: 1086, height: 44)
-                .offset(x: 56, y: 548)
+                .frame(width: 1088, height: 48).offset(x: 56, y: 558)
         }
         .frame(width: Self.width, height: Self.height)
         .foregroundStyle(UsageSharePalette.ink)
         .environment(\.colorScheme, .dark)
     }
 
-    private var weeklyCard: some View {
-        let shape = RoundedRectangle(cornerRadius: 54, style: .continuous)
+    private var statisticsPlate: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                if snapshot.isProject {
+                    Text("Project")
+                        .font(AppTheme.font(size: 16, weightValue: 500))
+                        .foregroundStyle(UsageSharePalette.muted)
+                    Text(verbatim: snapshot.projectName ?? "")
+                        .font(AppTheme.font(size: 30, weightValue: 650))
+                        .lineLimit(1).truncationMode(.middle).minimumScaleFactor(0.7)
+                } else {
+                    Text(periodTitle(snapshot.period))
+                        .font(AppTheme.font(size: 30, weightValue: 650))
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(height: 39, alignment: .leading)
+            HStack(spacing: 10) {
+                if snapshot.isProject {
+                    Text(periodTitle(snapshot.period))
+                }
+                Text(periodDateLabel)
+            }
+            .font(AppTheme.font(size: 16, weightValue: 450))
+            .foregroundStyle(UsageSharePalette.muted)
+            .lineLimit(1).minimumScaleFactor(0.65)
+            .padding(.top, 5)
+
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                Text(count(snapshot.tokens.total, availability: snapshot.availability, compact: true))
+                    .font(AppTheme.font(size: 92, weightValue: 700))
+                    .tracking(-3).monospacedDigit()
+                    .lineLimit(1).minimumScaleFactor(0.40).layoutPriority(1)
+                if snapshot.availability != .unavailable {
+                    Text("tokens")
+                        .font(AppTheme.font(size: 29, weightValue: 400))
+                        .foregroundStyle(UsageSharePalette.muted)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(height: 112, alignment: .leading)
+            .padding(.top, 22)
+            exactReading(snapshot.tokens.total, availability: snapshot.availability)
+                .font(AppTheme.font(size: 18, weightValue: 450))
+                .foregroundStyle(UsageSharePalette.muted)
+
+            Spacer(minLength: 20)
+            Rectangle().fill(UsageSharePalette.edge.opacity(0.5)).frame(height: 1)
+            HStack(alignment: .top, spacing: 20) {
+                supportingMetric(.month, tokens: snapshot.monthTokens, availability: snapshot.monthAvailability)
+                supportingMetric(.week, tokens: snapshot.weekTokens, availability: snapshot.weekAvailability)
+                supportingMetric(.day, tokens: snapshot.todayTokens, availability: snapshot.todayAvailability)
+            }
+            .padding(.top, 20)
+        }
+        .padding(.horizontal, 38).padding(.vertical, 32)
+        .background { plateSurface(radius: 44) }
+    }
+
+    private func supportingMetric(_ period: UsageSharePeriod, tokens: UsageTokenTotals,
+                                  availability: UsageMeasurementAvailability) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(periodTitle(period))
+                .font(AppTheme.font(size: 15, weightValue: 500))
+                .foregroundStyle(UsageSharePalette.muted)
+                .lineLimit(1).minimumScaleFactor(0.7)
+            Text(count(tokens.total, availability: availability, compact: true))
+                .font(AppTheme.font(size: 27, weightValue: 650))
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.48)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var podiumPlate: some View {
+        ZStack(alignment: .topLeading) {
+            plateSurface(radius: 44)
+            Text("Today’s AI podium")
+                .font(AppTheme.font(size: 20, weightValue: 650))
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .frame(width: 316, alignment: .leading).offset(x: 32, y: 30)
+            if snapshot.todayRanking.isEmpty {
+                VStack(spacing: 10) {
+                    Text("No recorded data")
+                        .font(AppTheme.font(size: 23, weightValue: 550))
+                    Text("Today")
+                        .font(AppTheme.font(size: 16, weightValue: 450))
+                        .foregroundStyle(UsageSharePalette.muted)
+                }
+                .multilineTextAlignment(.center)
+                .frame(width: 300, height: 250).offset(x: 40, y: 96)
+            } else {
+                podiumMarks
+                    .frame(width: 380, height: 212).offset(y: 64)
+                VStack(spacing: 10) {
+                    ForEach(Array(snapshot.todayRanking.prefix(3).enumerated()), id: \.offset) { index, entry in
+                        rankingReading(entry, rank: index + 1)
+                    }
+                }
+                .frame(width: 316, alignment: .leading).offset(x: 32, y: 292)
+            }
+        }
+    }
+
+    private var podiumMarks: some View {
+        ZStack {
+            // Lower ranks sit behind #1; their marks remain authentic and legible.
+            ForEach(Array(snapshot.todayRanking.prefix(3).enumerated()), id: \.offset) { index, entry in
+                medallion(entry, rank: index + 1, size: index == 0 ? 160 : 106)
+                    .position(x: index == 0 ? 190 : (index == 1 ? 92 : 288),
+                              y: index == 0 ? 100 : 157)
+                    .zIndex(index == 0 ? 3 : 1)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func medallion(_ entry: UsageShareProviderTotal, rank: Int, size: CGFloat) -> some View {
+        ZStack {
+            Circle().fill(UsageSharePalette.black)
+            Circle().fill(RadialGradient(colors: [accent.opacity(rank == 1 ? 0.42 : 0.17), .clear],
+                                         center: .topLeading, startRadius: 0, endRadius: size))
+            Circle().strokeBorder(LinearGradient(colors: [accent.opacity(0.95), UsageSharePalette.edge.opacity(0.25),
+                                                           accent.opacity(0.65)],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 2)
+            Circle().strokeBorder(accent.opacity(0.20), lineWidth: 1).padding(7)
+            ProviderGlyphView(glyph: entry.provider == .claude ? .claude : .openai, size: size * 0.51)
+                .foregroundStyle(entry.provider == .claude ? UsageSharePalette.claude : UsageSharePalette.ink)
+            Text(verbatim: "\(rank)")
+                .font(AppTheme.font(size: rank == 1 ? 23 : 17, weightValue: 700))
+                .frame(width: rank == 1 ? 38 : 28, height: rank == 1 ? 38 : 28)
+                .background(UsageSharePalette.black, in: Circle())
+                .overlay(Circle().strokeBorder(accent.opacity(0.65), lineWidth: 1))
+                .offset(x: size * 0.32, y: size * 0.34)
+        }
+        .frame(width: size, height: size)
+        .shadow(color: accent.opacity(rank == 1 ? 0.2 : 0.06), radius: rank == 1 ? 20 : 8)
+        .shadow(color: .black.opacity(0.8), radius: 8, x: 0, y: 10)
+    }
+
+    private func rankingReading(_ entry: UsageShareProviderTotal, rank: Int) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(verbatim: "0\(rank)")
+                .font(AppTheme.font(size: 14, weightValue: 500))
+                .foregroundStyle(UsageSharePalette.muted)
+            Text(verbatim: entry.provider == .claude ? "Claude" : "Codex")
+                .font(AppTheme.font(size: 18, weightValue: rank == 1 ? 650 : 500))
+            Spacer(minLength: 8)
+            Text(count(entry.tokens.total, availability: entry.availability))
+                .font(AppTheme.font(size: 16, weightValue: 550))
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.55)
+        }
+        .frame(height: 25)
+    }
+
+    private func plateSurface(radius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return ZStack {
             shape.fill(UsageSharePalette.black)
-            shape.fill(LinearGradient(stops: [
-                .init(color: .black, location: 0),
-                .init(color: .black, location: 0.38),
-                .init(color: UsageSharePalette.edge.opacity(0.44), location: 0.81),
-                .init(color: UsageSharePalette.edge.opacity(0.22), location: 1)
-            ], startPoint: .leading, endPoint: .trailing))
-            shape.fill(LinearGradient(colors: [UsageSharePalette.ink.opacity(0.055), .clear, .clear],
-                                      startPoint: .topTrailing, endPoint: .bottomLeading))
-
-            VStack(alignment: .leading, spacing: 24) {
-                weeklyHeader
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(alignment: .firstTextBaseline, spacing: 16) {
-                        Text(count(snapshot.weekTokens.total, availability: snapshot.weekAvailability, compact: true))
-                            .font(AppTheme.font(size: 90, weightValue: 700))
-                            .tracking(-4)
-                            .monospacedDigit()
-                            .lineLimit(1).minimumScaleFactor(0.48)
-                            .layoutPriority(1)
-                        if snapshot.weekAvailability != .unavailable {
-                            Text("tokens")
-                                .font(AppTheme.font(size: 34, weightValue: 400))
-                                .foregroundStyle(UsageSharePalette.muted)
-                                .lineLimit(1).minimumScaleFactor(0.7)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .frame(height: 98, alignment: .leading)
-
-                    exactReading(snapshot.weekTokens.total, availability: snapshot.weekAvailability)
-                        .font(AppTheme.font(size: 18, weightValue: 450))
-                        .foregroundStyle(UsageSharePalette.muted)
-                }
-                .padding(.horizontal, 2)
-            }
-            .padding(.horizontal, 42)
-            .padding(.vertical, 36)
-
-            shape.strokeBorder(LinearGradient(stops: [
-                .init(color: UsageSharePalette.ink.opacity(0.63), location: 0),
-                .init(color: UsageSharePalette.edge, location: 0.29),
-                .init(color: UsageSharePalette.ink.opacity(0.13), location: 0.55),
-                .init(color: UsageSharePalette.ink.opacity(0.45), location: 1)
-            ], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 2.5)
+            shape.fill(LinearGradient(stops: [.init(color: .black, location: 0),
+                                              .init(color: .black.opacity(0), location: 0.6),
+                                              .init(color: accent.opacity(0.13), location: 1)],
+                                      startPoint: .topLeading, endPoint: .bottomTrailing))
+            shape.strokeBorder(LinearGradient(stops: [.init(color: accent.opacity(0.75), location: 0),
+                                                       .init(color: UsageSharePalette.edge.opacity(0.38), location: 0.3),
+                                                       .init(color: UsageSharePalette.edge.opacity(0.12), location: 0.6),
+                                                       .init(color: accent.opacity(0.45), location: 1)],
+                                               startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.5)
         }
-        .compositingGroup()
-        .shadow(color: .black.opacity(0.72), radius: 6, x: 0, y: 9)
-        .shadow(color: .black.opacity(0.54), radius: 24, x: 0, y: 24)
-    }
-
-    private var weeklyHeader: some View {
-        HStack(spacing: 22) {
-            goldEmblem
-                .frame(width: 82, height: 82)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(verbatim: "Builder Nutch")
-                    .font(AppTheme.font(size: 36, weightValue: 700))
-                    .tracking(-1)
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("This week")
-                        .font(AppTheme.font(size: 19, weightValue: 550))
-                    Text(weekDateLabel)
-                        .font(AppTheme.font(size: 15, weightValue: 400))
-                        .foregroundStyle(UsageSharePalette.muted)
-                }
-                .lineLimit(1).minimumScaleFactor(0.72)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 22)
-        .frame(height: 132)
-        .background {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .fill(LinearGradient(colors: [.black.opacity(0.92), UsageSharePalette.edge.opacity(0.20)],
-                                     startPoint: .top, endPoint: .bottom))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 30, style: .continuous)
-                        .strokeBorder(LinearGradient(colors: [UsageSharePalette.ink.opacity(0.32),
-                                                               UsageSharePalette.ink.opacity(0.11),
-                                                               UsageSharePalette.ink.opacity(0.27)],
-                                                     startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
-                }
-        }
-    }
-
-    private var goldEmblem: some View {
-        ZStack {
-            Circle()
-                .fill(UsageSharePalette.gold.opacity(0.60))
-                .blur(radius: 16)
-                .padding(5)
-            Circle()
-                .fill(LinearGradient(colors: [UsageSharePalette.paper, UsageSharePalette.gold,
-                                               UsageSharePalette.amber, UsageSharePalette.paper],
-                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                .overlay(Circle().strokeBorder(UsageSharePalette.paper.opacity(0.9), lineWidth: 1.5))
-            Circle()
-                .fill(RadialGradient(colors: [UsageSharePalette.paper, UsageSharePalette.gold,
-                                             UsageSharePalette.amber],
-                                     center: .init(x: 0.28, y: 0.18), startRadius: 1, endRadius: 76))
-                .overlay(Circle().strokeBorder(UsageSharePalette.forest.opacity(0.28), lineWidth: 1))
-                .padding(5)
-            Circle().strokeBorder(UsageSharePalette.paper.opacity(0.76), lineWidth: 1).padding(8)
-            Image(systemName: "bolt.fill")
-                .font(.system(size: 40, weight: .bold))
-                .foregroundStyle(UsageSharePalette.forest)
-                .shadow(color: UsageSharePalette.paper.opacity(0.92), radius: 0, x: 0, y: 1.5)
-                .rotationEffect(.degrees(-8))
-        }
-        .accessibilityHidden(true)
-    }
-
-    private var todayCard: some View {
-        let shape = RoundedRectangle(cornerRadius: 48, style: .continuous)
-        return VStack(spacing: 0) {
-            pastelHeader
-                .frame(height: 158)
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Today")
-                    .font(AppTheme.font(size: 23, weightValue: 700))
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(count(snapshot.todayTokens.total, availability: snapshot.todayAvailability, compact: true))
-                        .font(AppTheme.font(size: 57, weightValue: 700))
-                        .tracking(-2)
-                        .monospacedDigit()
-                        .lineLimit(1).minimumScaleFactor(0.42)
-                        .layoutPriority(1)
-                    if snapshot.todayAvailability != .unavailable {
-                        Text("tokens")
-                            .font(AppTheme.font(size: 18, weightValue: 450))
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
-                }
-                .frame(height: 68, alignment: .leading)
-                exactReading(snapshot.todayTokens.total, availability: snapshot.todayAvailability)
-                    .font(AppTheme.font(size: 15, weightValue: 450))
-                    .foregroundStyle(UsageSharePalette.black.opacity(0.7))
-                Rectangle()
-                    .fill(UsageSharePalette.black.opacity(0.13))
-                    .frame(height: 1)
-                    .padding(.top, 17)
-                    .padding(.bottom, 13)
-                Text(date(snapshot.today, template: "d MMM yyyy"))
-                    .font(AppTheme.font(size: 16, weightValue: 500))
-                    .foregroundStyle(UsageSharePalette.black.opacity(0.72))
-                    .lineLimit(1).minimumScaleFactor(0.75)
-            }
-            .foregroundStyle(UsageSharePalette.black)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(.horizontal, 26)
-            .padding(.top, 18)
-            .padding(.bottom, 22)
-        }
-        .background(UsageSharePalette.paper)
-        .clipShape(shape)
-        .overlay(shape.strokeBorder(LinearGradient(colors: [UsageSharePalette.paper, UsageSharePalette.paper.opacity(0.8),
-                                                            UsageSharePalette.edge.opacity(0.65)],
-                                                  startPoint: .top, endPoint: .bottom), lineWidth: 2.5))
-        .compositingGroup()
-        .shadow(color: .black.opacity(0.48), radius: 5, x: 0, y: 8)
-        .shadow(color: .black.opacity(0.38), radius: 23, x: 0, y: 23)
-    }
-
-    private var pastelHeader: some View {
-        ZStack {
-            LinearGradient(stops: [
-                .init(color: .white, location: 0),
-                .init(color: .white, location: 0.16),
-                .init(color: UsageSharePalette.lavender, location: 0.73),
-                .init(color: UsageSharePalette.lavender, location: 1)
-            ], startPoint: .top, endPoint: .bottom)
-            RadialGradient(colors: [UsageSharePalette.mint, UsageSharePalette.mint.opacity(0)],
-                           center: .bottomTrailing, startRadius: 5, endRadius: 260)
-            RadialGradient(colors: [.white.opacity(0.72), .clear],
-                           center: .topTrailing, startRadius: 0, endRadius: 185)
-            todaySeal
-                .frame(width: 102, height: 102)
-        }
-        .accessibilityHidden(true)
-    }
-
-    private var todaySeal: some View {
-        ZStack {
-            Circle()
-                .fill(LinearGradient(colors: [UsageSharePalette.paper, UsageSharePalette.paper.opacity(0.18),
-                                               UsageSharePalette.paper.opacity(0.9)],
-                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                .overlay(Circle().strokeBorder(UsageSharePalette.paper, lineWidth: 3))
-            Circle()
-                .fill(LinearGradient(stops: [
-                    .init(color: UsageSharePalette.paper, location: 0),
-                    .init(color: .white, location: 0.28),
-                    .init(color: UsageSharePalette.lavender, location: 0.58),
-                    .init(color: UsageSharePalette.mint, location: 0.80),
-                    .init(color: UsageSharePalette.paper, location: 1)
-                ], startPoint: .topLeading, endPoint: .bottomTrailing))
-                .overlay(Circle().strokeBorder(UsageSharePalette.paper.opacity(0.86), lineWidth: 1.5))
-                .padding(10)
-                .shadow(color: UsageSharePalette.black.opacity(0.25), radius: 4, x: 0, y: 5)
-            Circle().strokeBorder(UsageSharePalette.black.opacity(0.18), lineWidth: 1).padding(15)
-            Image(systemName: "sparkles")
-                .font(.system(size: 41, weight: .semibold))
-                .foregroundStyle(UsageSharePalette.forest)
-                .shadow(color: UsageSharePalette.paper.opacity(0.85), radius: 0, x: 0, y: 1.5)
-                .rotationEffect(.degrees(-10))
-        }
+        .shadow(color: .black.opacity(0.8), radius: 5, x: 0, y: 9)
+        .shadow(color: .black.opacity(0.7), radius: 24, x: 0, y: 24)
     }
 
     private func exactReading(_ value: Int, availability: UsageMeasurementAvailability) -> some View {
@@ -248,12 +213,13 @@ struct UsageShareCard: View {
             if availability == .unavailable {
                 Text("No recorded data")
             } else {
-                Text(count(value, availability: availability))
-                    + Text(verbatim: " ") + Text("Recorded tokens")
+                HStack(spacing: 5) {
+                    Text(verbatim: count(value, availability: availability))
+                    Text("Recorded tokens")
+                }
             }
         }
-        .lineLimit(1).minimumScaleFactor(0.7)
-        .monospacedDigit()
+        .lineLimit(1).minimumScaleFactor(0.65).monospacedDigit()
     }
 
     private var footer: some View {
@@ -265,19 +231,26 @@ struct UsageShareCard: View {
                     Text("Local history · Input, cache & output")
                 }
             }
-            .lineLimit(1).minimumScaleFactor(0.8)
+            .lineLimit(1).minimumScaleFactor(0.7)
             Spacer(minLength: 0)
             Text("\(date(snapshot.generatedAt, template: "d MMM yyyy HHmm")) · \(snapshot.timeZone.identifier)")
-                .lineLimit(1).minimumScaleFactor(0.8)
+                .lineLimit(1).minimumScaleFactor(0.7)
         }
         .font(AppTheme.font(size: 15, weightValue: 500))
-        .foregroundStyle(UsageSharePalette.paper.opacity(0.95))
-        .shadow(color: .black.opacity(0.95), radius: 3, x: 0, y: 1)
+        .foregroundStyle(UsageSharePalette.muted)
     }
 
-    private var weekDateLabel: String {
-        // Both endpoints retain the year when a calendar week crosses New Year.
-        "\(date(snapshot.weekStart, template: "d MMM yyyy")) – \(date(snapshot.today, template: "d MMM yyyy"))"
+    private func periodTitle(_ period: UsageSharePeriod) -> LocalizedStringKey {
+        switch period {
+        case .day: return "Today"
+        case .week: return "This week"
+        case .month: return "This month"
+        }
+    }
+
+    private var periodDateLabel: String {
+        let end = date(snapshot.today, template: "d MMM yyyy")
+        return snapshot.period == .day ? end : "\(date(snapshot.periodStart, template: "d MMM yyyy")) – \(end)"
     }
 
     private func date(_ value: Date, template: String) -> String {
@@ -294,10 +267,9 @@ struct UsageShareCard: View {
         if compact {
             let style = IntegerFormatStyle<Int>.number.notation(.compactName)
                 .precision(.fractionLength(0...2)).locale(locale)
-            // A partial count is a lower bound: rounding it upward would overstate it.
+            // A partial count is a lower bound: never round it upward.
             number = availability == .partial
-                ? value.formatted(style.rounded(rule: .down))
-                : value.formatted(style)
+                ? value.formatted(style.rounded(rule: .down)) : value.formatted(style)
         } else {
             number = value.formatted(.number.grouping(.automatic).locale(locale))
         }
