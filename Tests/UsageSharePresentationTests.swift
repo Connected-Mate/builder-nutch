@@ -37,8 +37,10 @@ final class UsageSharePresentationTests: XCTestCase {
         var second: CheckedContinuation<UsageLedgerReport?, Never>?
         presentation.open(projectPath: "/first") { await withCheckedContinuation { first = $0 } }
         await waitFor { first != nil }
+        let firstID = presentation.requestID
         presentation.open(projectPath: "/second") { await withCheckedContinuation { second = $0 } }
         await waitFor { second != nil }
+        XCTAssertNotEqual(presentation.requestID, firstID)
         second?.resume(returning: value)
         await waitFor { presentation.report != nil }
         first?.resume(returning: nil)

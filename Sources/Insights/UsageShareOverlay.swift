@@ -19,6 +19,9 @@ struct UsageShareOverlay: View {
                                hidePersonalDetails: hidePersonalDetails,
                                onSavingChange: { presentation.isSaving = $0 },
                                onClose: presentation.close)
+                    // A notification resets period/project even if its cached
+                    // load finishes before SwiftUI renders the loading state.
+                    .id(presentation.requestID)
             } else {
                 VStack(spacing: 16) {
                     if presentation.failed {

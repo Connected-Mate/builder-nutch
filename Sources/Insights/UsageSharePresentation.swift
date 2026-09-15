@@ -9,7 +9,7 @@ final class UsageSharePresentation: ObservableObject {
     @Published private(set) var projectPath: String?
     @Published private(set) var failed = false
     @Published var isSaving = false
-    private var requestID = UUID()
+    @Published private(set) var requestID = UUID()
     private var task: Task<Void, Never>?
 
     func open(projectPath: String? = nil,
