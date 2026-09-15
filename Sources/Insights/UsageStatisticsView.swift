@@ -13,9 +13,14 @@ struct UsageStatisticsView: View {
     @FocusState private var focusedDay: String?
     @Namespace private var chartSelection
 
-    private var chartDays: [UsageChartDay] {
-        UsageChartDay.make(keys: UsageInsightsView.dayKeys(from: report.windowStart, to: report.windowEnd),
-                           timeline: report.timeline, partialHistory: report.scan.hitLimit)
+    private let chartDays: [UsageChartDay]
+
+    init(report: UsageLedgerReport, days: Binding<Int>, isLoading: Bool) {
+        self.report = report
+        self._days = days
+        self.isLoading = isLoading
+        chartDays = UsageChartDay.make(keys: UsageInsightsView.dayKeys(from: report.windowStart, to: report.windowEnd),
+                                      timeline: report.timeline, partialHistory: report.scan.hitLimit)
     }
 
     private var activeDay: UsageChartDay? {
@@ -147,15 +152,17 @@ struct UsageStatisticsView: View {
     private var chart: some View {
         let entries = chartDays
         let peak = entries.map { $0.tokens.total }.max() ?? 0
-        return VStack(spacing: 4) {
-            HStack {
-                Text("0")
+        return HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .trailing, spacing: 0) {
+                if peak > 0 { Text(UsageInsightsView.compact(peak)) }
                 Spacer()
-                Text(UsageInsightsView.compact(peak))
+                Text("0")
             }
             .font(AppTheme.font(size: 9)).foregroundStyle(AppTheme.muted)
+            .frame(width: 36, height: 88, alignment: .trailing)
             .accessibilityHidden(true)
 
+            VStack(spacing: 4) {
             HStack(alignment: .bottom, spacing: 0) {
                 ForEach(Array(entries.enumerated()), id: \.element.id) { index, day in
                     dayButton(day, peak: peak, count: entries.count, index: index)
@@ -196,6 +203,7 @@ struct UsageStatisticsView: View {
                 }
             }
             .frame(height: 14).accessibilityHidden(true)
+            }
         }
         .onHover { if !$0 { hoveredDay = nil } }
     }
@@ -307,13 +315,22 @@ struct UsageStatisticsView: View {
     }
 
     private func dateLabel(_ key: String, template: String) -> String {
-        let parser = DateFormatter()
-        parser.locale = Locale(identifier: "en_US_POSIX")
-        parser.dateFormat = "yyyy-MM-dd"
-        guard let date = parser.date(from: key) else { return key }
+        guard let date = Self.dayParser.date(from: key) else { return key }
+        let cacheKey = Locale.current.identifier + template
+        if let formatter = Self.dateFormatters[cacheKey] { return formatter.string(from: date) }
         let formatter = DateFormatter()
         formatter.locale = .current
         formatter.setLocalizedDateFormatFromTemplate(template)
+        Self.dateFormatters[cacheKey] = formatter
         return formatter.string(from: date)
     }
+
+    private static var dateFormatters: [String: DateFormatter] = [:]
+    private static let dayParser: DateFormatter = {
+        let parser = DateFormatter()
+        parser.calendar = .current
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.dateFormat = "yyyy-MM-dd"
+        return parser
+    }()
 }
