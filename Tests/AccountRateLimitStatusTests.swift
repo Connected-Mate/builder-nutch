@@ -20,6 +20,43 @@ final class AccountRateLimitStatusTests: XCTestCase {
         XCTAssertEqual(state.rateLimitStatus(at: now.addingTimeInterval(60)).kind, .refreshRequired)
     }
 
+    func testUsagePollingPauseCannotHideIndependentFreshProviderRestriction() {
+        for model in [nil, "Model A"] as [String?] {
+            let observed = now.addingTimeInterval(-20)
+            let state = ManagedAccountState(isConnected: true, refreshedAt: observed,
+                usageCheckFailedAt: now, usageCheckRetryAt: now.addingTimeInterval(3600),
+                providerRestriction: .init(label: "Confirmed restriction", modelName: model, observedAt: observed))
+            let status = state.rateLimitStatus(at: now)
+            XCTAssertEqual(status.kind, model == nil ? .providerRestricted : .modelRestricted)
+            XCTAssertEqual(status.observedAt, observed)
+            XCTAssertNil(status.retryAt, "Polling retry time must never become a provider restriction reset")
+            XCTAssertEqual(state.rateLimitStatus(at: now.addingTimeInterval(281)).kind, .usageCheckPaused)
+        }
+    }
+
+    func testUsagePollingPauseCannotHideRecentExplicitWindowLock() {
+        let observed = now.addingTimeInterval(-20)
+        let reset = now.addingTimeInterval(60)
+        let state = ManagedAccountState(isConnected: true, windows: [
+            .init(id: "model", label: "Model lock", usedFraction: 0.04,
+                  resetsAt: reset, modelName: "Model A", blocked: true)], refreshedAt: observed,
+            usageCheckFailedAt: now, usageCheckRetryAt: now.addingTimeInterval(3600))
+        let status = state.rateLimitStatus(at: now)
+        XCTAssertEqual(status.kind, .modelRestricted)
+        XCTAssertEqual(status.retryAt, reset)
+        XCTAssertEqual(status.observedAt, observed)
+        XCTAssertTrue(!state.isFresh(at: now), "The failed refresh still prevents automatic selection")
+        XCTAssertEqual(state.rateLimitStatus(at: reset).kind, .usageCheckPaused)
+    }
+
+    func testPollingFailureDoesNotPromoteLastFullPercentageToConfirmedLock() {
+        let state = ManagedAccountState(isConnected: true, windows: [
+            .init(id: "model", label: "Model weekly", usedFraction: 1, modelName: "Model A")],
+            refreshedAt: now.addingTimeInterval(-20), usageCheckFailedAt: now,
+            usageCheckRetryAt: now.addingTimeInterval(3600))
+        XCTAssertEqual(state.rateLimitStatus(at: now).kind, .usageCheckPaused)
+    }
+
     func testBothSpentWindowsWaitForTheLaterReset() {
         let state = ManagedAccountState(isConnected: true, windows: [
             .init(id: "five_hour", label: "5h", usedFraction: 1, resetsAt: now.addingTimeInterval(60)),

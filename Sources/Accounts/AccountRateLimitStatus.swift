@@ -34,11 +34,11 @@ extension ManagedAccountState {
     /// This projection reports only observed restrictions and labels polling
     /// backoff separately. A passed reset requires a fresh measurement.
     func rateLimitStatus(at now: Date = Date()) -> AccountRateLimitStatus {
-        if usageCheckFailedAt != nil {
-            return AccountRateLimitStatus(kind: usageCheckRetryAt.map { $0 > now } == true ? .usageCheckPaused : .refreshRequired,
-                retryAt: usageCheckRetryAt.flatMap { $0 > now ? $0 : nil }, observedAt: usageCheckFailedAt)
+        let checkPause = usageCheckFailedAt.map { failedAt in
+            AccountRateLimitStatus(kind: usageCheckRetryAt.map { $0 > now } == true ? .usageCheckPaused : .refreshRequired,
+                retryAt: usageCheckRetryAt.flatMap { $0 > now ? $0 : nil }, observedAt: failedAt)
         }
-        guard isConnected else { return AccountRateLimitStatus(kind: .notReported) }
+        guard isConnected else { return checkPause ?? AccountRateLimitStatus(kind: .notReported) }
         let spent = windows.filter { ($0.usedFraction ?? 0) >= 1 || $0.isBlocked }
         let freshRestriction = providerRestriction.flatMap { restriction -> AccountProviderRestriction? in
             let age = now.timeIntervalSince(restriction.observedAt)
@@ -46,7 +46,17 @@ extension ManagedAccountState {
         }
         // Expired shared windows cannot hide a still-active model restriction.
         // Each independent evidence source expires on its own timestamp.
-        let active = isFresh(at: now) ? spent.filter { $0.resetsAt.map { $0 > now } ?? true } : []
+        let recentObservation = refreshedAt.map {
+            let age = now.timeIntervalSince($0)
+            return age >= -5 && age <= 300
+        } == true
+        let active = spent.filter { window in
+            // A failed quota poll invalidates percentage-based availability,
+            // but does not revoke an explicit vendor lock already observed.
+            // Keep that lock only until its original observation/reset expires.
+            (isFresh(at: now) || (window.isBlocked && recentObservation))
+                && (window.resetsAt.map { $0 > now } ?? true)
+        }
         let shared = active.filter { !$0.isModelSpecific }
         let applicable = shared.isEmpty ? active : shared
         if !applicable.isEmpty {
@@ -67,6 +77,7 @@ extension ManagedAccountState {
             return AccountRateLimitStatus(kind: restriction.modelName == nil ? .providerRestricted : .modelRestricted,
                 affectedLabels: [restriction.label], observedAt: restriction.observedAt)
         }
+        if let checkPause { return checkPause }
         if !spent.isEmpty || providerRestriction != nil {
             return AccountRateLimitStatus(kind: .refreshRequired,
                 affectedLabels: spent.map(\.label) + (providerRestriction.map { [$0.label] } ?? []),
