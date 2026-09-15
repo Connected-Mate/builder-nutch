@@ -97,6 +97,8 @@ struct UsageLedgerReport: Codable, Equatable {
     let timeline: [UsageDaySlice]
     let scan: UsageScanSummary
     var persistence: UsagePersistenceStatus = .notCaptured
+    /// Lifetime progress uses saved history, never the selected 7/30-day total.
+    var milestones: UsageMilestoneProgress? = nil
 
     static let empty = UsageLedgerReport(
         generatedAt: .distantPast, windowStart: .distantPast, windowEnd: .distantPast, days: 0,
