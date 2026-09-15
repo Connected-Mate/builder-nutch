@@ -98,7 +98,7 @@ struct UsageInsightsView: View {
             }
             Group {
                 if let report = model.report {
-                    if report.sessionCount == 0 && !report.scan.hitLimit {
+                    if report.sessionCount == 0 && !report.scan.hitLimit && report.milestones == nil {
                         empty
                     } else {
                         content(report)
@@ -129,9 +129,14 @@ struct UsageInsightsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 overview(report)
-                projects(report)
-                DisclosureGroup("By account") { accounts(report).padding(.top, 12) }
-                    .font(AppTheme.font(size: 12, weightValue: 550))
+                if report.sessionCount == 0 && !report.scan.hitLimit {
+                    Text("No sessions in this period.")
+                        .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
+                } else {
+                    projects(report)
+                    DisclosureGroup("By account") { accounts(report).padding(.top, 12) }
+                        .font(AppTheme.font(size: 12, weightValue: 550))
+                }
                 footnote(report)
             }
             .padding(24)
@@ -163,6 +168,9 @@ struct UsageInsightsView: View {
                 .pickerStyle(.segmented).labelsHidden().frame(width: 150).controlSize(.small)
                 .disabled(model.isLoading)
                 if model.isLoading { ProgressView().controlSize(.small) }
+            }
+            if let milestones = report.milestones {
+                UsageMilestonesView(progress: milestones)
             }
             tokenSummary(report.tokens, partialHistory: report.scan.hitLimit)
             dayStrip(report)
