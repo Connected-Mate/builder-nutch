@@ -113,7 +113,7 @@ struct UsageInsightsView: View {
                 .disabled(model.isLoading)
                 if model.isLoading { ProgressView().controlSize(.small) }
             }
-            tokenSummary(report.tokens)
+            tokenSummary(report.tokens, partialHistory: report.scan.hitLimit)
             dayStrip(report)
             DisclosureGroup("Token details") {
                 VStack(alignment: .leading, spacing: 8) {
@@ -132,12 +132,14 @@ struct UsageInsightsView: View {
         }
     }
 
-    private func tokenSummary(_ tokens: UsageTokenTotals) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            tokenMetric("Input", value: Self.tokenDisplay(tokens.totalInput, availability: tokens.coverage.input, compact: true),
-                        exact: Self.tokenDisplay(tokens.totalInput, availability: tokens.coverage.input))
-            tokenMetric("Output", value: Self.tokenDisplay(tokens.output, availability: tokens.coverage.output, compact: true),
-                        exact: Self.tokenDisplay(tokens.output, availability: tokens.coverage.output))
+    private func tokenSummary(_ tokens: UsageTokenTotals, partialHistory: Bool) -> some View {
+        let inputCoverage: UsageMeasurementAvailability = partialHistory && tokens.coverage.input == .complete ? .partial : tokens.coverage.input
+        let outputCoverage: UsageMeasurementAvailability = partialHistory && tokens.coverage.output == .complete ? .partial : tokens.coverage.output
+        return HStack(alignment: .top, spacing: 16) {
+            tokenMetric("Input", value: Self.tokenDisplay(tokens.totalInput, availability: inputCoverage, compact: true),
+                        exact: Self.tokenDisplay(tokens.totalInput, availability: inputCoverage))
+            tokenMetric("Output", value: Self.tokenDisplay(tokens.output, availability: outputCoverage, compact: true),
+                        exact: Self.tokenDisplay(tokens.output, availability: outputCoverage))
             tokenMetric("Reasoning", value: tokens.measuredReasoning.map {
                 (tokens.reasoningAvailability == .partial ? "≥ " : "") + Self.compact($0)
             } ?? "—", exact: Self.tokenDisplay(tokens.thinking, availability: tokens.reasoningAvailability),
@@ -356,6 +358,7 @@ struct UsageInsightsView: View {
 
     static func compact(_ value: Int) -> String {
         switch value {
+        case 1_000_000_000...: return String(format: NSLocalizedString("%.1f B", comment: "Compact billions of tokens"), Double(value) / 1_000_000_000)
         case 1_000_000...: return String(format: "%.1f M", Double(value) / 1_000_000)
         case 10_000...: return String(format: "%.0f k", Double(value) / 1_000)
         case 1_000...: return String(format: "%.1f k", Double(value) / 1_000)
