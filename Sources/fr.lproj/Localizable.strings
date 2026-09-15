@@ -508,3 +508,15 @@
 "A cooler light." = "Une lumière plus douce.";
 "White gradients" = "Des dégradés blancs";
 "White light replaces the warm yellow tones in the sharing background and day card." = "Le blanc remplace les tons jaunes du fond et de la carte du jour dans votre image à partager.";
+
+/* Provider-led usage sharing */
+"This month" = "Ce mois-ci";
+"Today’s AI podium" = "Le podium IA du jour";
+"All projects" = "Tous les projets";
+"Project %d" = "Projet %d";
+"Export project" = "Exporter ce projet";
+"The selected project name appears on the image. Accounts stay private." = "Le nom du projet choisi apparaît sur l’image. Les comptes restent privés.";
+"%@ · %@: %@ tokens. Recorded %@." = "%@ · %@ : %@ tokens. Relevé du %@.";
+"Your AI, your activity." = "Vos IA, votre activité.";
+"A podium for your day" = "Le podium de votre journée";
+"Your most-used AI sets the color of your share card. Export your day, week or month, for all activity or one project." = "L’IA la plus utilisée donne sa couleur à votre carte. Exportez votre journée, semaine ou mois, pour toute votre activité ou un projet.";

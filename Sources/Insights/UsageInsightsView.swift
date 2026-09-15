@@ -102,6 +102,16 @@ final class UsageInsightsModel: ObservableObject {
             : nil
     }
 
+    /// Reuse saved readings for a complete calendar month without moving the
+    /// Usage chart or starting another scan of the person's session files.
+    func reportForSharing() async -> UsageLedgerReport? {
+        guard !stopped else { return nil }
+        if let refreshTask { _ = await refreshTask.value }
+        if report == nil { await refresh() }
+        guard !stopped, !Task.isCancelled, let report else { return nil }
+        return await ledger.cachedReport(days: 31, now: report.generatedAt)
+    }
+
     func stop() {
         stopped = true
         refreshTask?.cancel()
@@ -122,7 +132,10 @@ struct UsageInsightsView: View {
     @ObservedObject var model: UsageInsightsModel
     let hidePersonalDetails: Bool
     @State private var expandedProjects: Set<String> = []
-    @State private var shareSnapshot: UsageShareSnapshot?
+    @State private var shareReport: UsageLedgerReport?
+    @State private var shareProjectPath: String?
+    @State private var preparingShare = false
+    @State private var shareTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -133,8 +146,9 @@ struct UsageInsightsView: View {
                     .padding(24)
             }
             Group {
-                if let shareSnapshot {
-                    UsageShareView(snapshot: shareSnapshot) { self.shareSnapshot = nil }
+                if let shareReport {
+                    UsageShareView(report: shareReport, initialProjectPath: shareProjectPath,
+                                   hidePersonalDetails: hidePersonalDetails) { self.shareReport = nil }
                 } else if let report = model.report {
                     if report.sessionCount == 0 && !report.scan.hitLimit && report.milestones == nil {
                         empty
@@ -150,6 +164,7 @@ struct UsageInsightsView: View {
             }
             .task { await model.refreshIfStale() }
         }
+        .onDisappear { shareTask?.cancel(); shareTask = nil; preparingShare = false }
     }
 
     private var empty: some View {
@@ -185,8 +200,8 @@ struct UsageInsightsView: View {
 
     private func overview(_ report: UsageLedgerReport) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            UsageStatisticsView(report: report, days: $model.days, isLoading: model.isLoading) {
-                shareSnapshot = UsageShareSnapshot(report: report)
+            UsageStatisticsView(report: report, days: $model.days, isLoading: model.isLoading || preparingShare) {
+                openShare()
             }
             if let milestones = report.milestones {
                 UsageMilestonesView(progress: milestones)
@@ -234,6 +249,11 @@ struct UsageInsightsView: View {
                 Text(project.payers.joined(separator: ", "))
                 tokenDetail("Input", value: project.tokens.totalInput, availability: project.tokens.coverage.input)
                 tokenDetail("Output", value: project.tokens.output, availability: project.tokens.coverage.output)
+                Button { openShare(projectPath: project.path) } label: {
+                    Label("Export project", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(AppButtonStyle(compact: true))
+                .disabled(preparingShare)
             }
             .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
             .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
@@ -299,6 +319,19 @@ struct UsageInsightsView: View {
     }
 
     // MARK: - Helpers
+
+    private func openShare(projectPath: String? = nil) {
+        guard !preparingShare else { return }
+        preparingShare = true
+        shareTask = Task {
+            let report = await model.reportForSharing()
+            guard !Task.isCancelled else { return }
+            preparingShare = false
+            guard let report else { return }
+            shareProjectPath = projectPath
+            shareReport = report
+        }
+    }
 
     struct RankedProject {
         let path: String

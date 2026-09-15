@@ -170,4 +170,19 @@ final class UsageShareScopeTests: XCTestCase {
         XCTAssertEqual(monthSnapshot.monthAvailability, .partial)
         XCTAssertTrue(monthSnapshot.isPartial)
     }
+    func testProjectPickerDisambiguatesSameNamesWithoutChangingExportName() {
+        let first = project(path: "/private/one/apps/App", days: [day("2026-09-15", 100)])
+        let second = project(path: "/private/two/apps/App", days: [day("2026-09-15", 200)])
+        let value = report(now: date("2026-09-15T10:00:00Z"), days: 31, timeline: [], accounts: [
+            account(.claude, key: "one", projects: [first, second], days: []),
+            account(.codex, key: "two", projects: [first], days: [])
+        ])
+        let choices = UsageShareProjectChoice.make(report: value)
+        XCTAssertEqual(choices.count, 2, "A project split across accounts has one selection")
+        XCTAssertEqual(Set(choices.map(\.displayName)), ["one/apps/App", "two/apps/App"])
+        let snapshot = UsageShareSnapshot(report: value, projectPath: second.path)
+        XCTAssertEqual(snapshot.projectName, "App")
+        XCTAssertEqual(snapshot.tokens.total, 200)
+    }
+
 }

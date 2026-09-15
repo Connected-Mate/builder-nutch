@@ -35,7 +35,9 @@ final class UsageShareSnapshotTests: XCTestCase {
                       slice("2026-09-15", input: 200), slice("2026-09-16", input: 80_000)]
         let week = UsageShareSnapshot(report: report(now: now, days: 7, slices: slices), calendar: calendar)
         let month = UsageShareSnapshot(report: report(now: now, slices: slices), calendar: calendar)
-        XCTAssertEqual(week, month)
+        XCTAssertEqual(week.weekTokens, month.weekTokens)
+        XCTAssertEqual(week.todayTokens, month.todayTokens)
+        XCTAssertEqual(week.weekAvailability, month.weekAvailability)
         XCTAssertEqual(week.days.map(\.id), ["2026-09-14", "2026-09-15"])
         XCTAssertEqual(week.weekTokens.total, 340)
         XCTAssertEqual(week.todayTokens.total, 220)
@@ -98,59 +100,74 @@ final class UsageShareSnapshotTests: XCTestCase {
 
 @MainActor
 final class UsageShareExportTests: XCTestCase {
-    func testArtworkKeepsLuminousBackgroundAndContrastingCards() throws {
+    private func fixture(claude: Int = 2_000_000_000, codex: Int = 900_000_000, partial: Bool = false) -> UsageLedgerReport {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Europe/Paris")!
-        let now = ISO8601DateFormatter().date(from: "2026-09-15T10:00:00Z")!
-        let start = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now))!
-        let slices = [3_000, 1_000].enumerated().map { index, value in
-            UsageDaySlice(day: "2026-09-\(14 + index)", weight: 1, sharePercent: 0,
-                tokens: UsageTokenTotals(input: value, measurements: 1, inputMeasurements: 1,
-                    outputMeasurements: 1, codexMeasurements: 1), messages: 1)
+        let now = ISO8601DateFormatter().date(from: "2026-10-31T15:00:00Z")!
+        var sessions: [UsageSessionDigest] = []
+        for (provider, input) in [(UsageTranscriptFormat.claude, claude), (.codex, codex)] where input > 0 {
+            for day in [1, 26, 31] {
+                let timestamp = ISO8601DateFormatter().date(from: String(format: "2026-10-%02dT12:00:00Z", day))!
+                let tokens = UsageTokenTotals(input: input, output: 45_678_901, thinking: 7_000,
+                    measurements: 1, inputMeasurements: 1, outputMeasurements: 1,
+                    cacheCreationMeasurements: 1, cacheReadMeasurements: 1, thinkingMeasurements: 1,
+                    claudeMeasurements: provider == .claude ? 1 : 0,
+                    codexMeasurements: provider == .codex ? 1 : 0)
+                var session = UsageSessionDigest(sessionID: "\(provider.rawValue)-\(day)", provider: provider)
+                session.tokens = tokens; session.weight = 1; session.messages = 1
+                session.firstActivity = timestamp; session.lastActivity = timestamp
+                session.projectWeights = ["/private/fixture/Projet de démonstration — une très longue réalisation internationale": 1]
+                session.activityMinutes = [String(Int(timestamp.timeIntervalSince1970 / 60)): UsageTimeBucket(tokens: tokens, weight: 1, messages: 1)]
+                sessions.append(session)
+            }
         }
-        let report = UsageLedgerReport(generatedAt: now, windowStart: start, windowEnd: now, days: 7,
-            totalWeight: 2, tokens: UsageTokenTotals(), messages: 2, sessionCount: 2,
-            accounts: [], timeline: slices, scan: UsageScanSummary())
-        let data = try UsageShareExporter.pngData(snapshot: UsageShareSnapshot(report: report, calendar: calendar))
-        let rep = try XCTUnwrap(NSBitmapImageRep(data: data))
-        // The user requested white light in place of the former yellow glow.
-        // Sample its open center above the day card, away from text and borders.
-        let light = try XCTUnwrap(rep.colorAt(x: 2200, y: 100)?.usingColorSpace(.deviceRGB))
-        let components = [light.redComponent, light.greenComponent, light.blueComponent]
-        XCTAssertGreaterThan(components.min()!, 0.8)
-        XCTAssertLessThan(components.max()! - components.min()!, 0.035)
-        let weekly = try XCTUnwrap(rep.colorAt(x: 1480, y: 900)?.usingColorSpace(.deviceRGB))
-        let today = try XCTUnwrap(rep.colorAt(x: 2180, y: 900)?.usingColorSpace(.deviceRGB))
-        XCTAssertLessThan(max(weekly.redComponent, weekly.greenComponent, weekly.blueComponent), 0.35)
-        XCTAssertGreaterThan(min(today.redComponent, today.greenComponent, today.blueComponent), 0.8)
-
+        var scan = UsageScanSummary(); scan.hitLimit = partial
+        return UsageLedgerEngine.report(sessions: sessions, summary: scan, days: 31, now: now,
+                                        calendar: calendar, timeline: UsageAccountTimeline())
     }
 
-    func testSevenDayArtworkRendersInEnglishAndFrenchWithLargePartialCounts() throws {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "Europe/Paris")!
-        let now = ISO8601DateFormatter().date(from: "2026-09-20T10:45:00Z")!
-        let start = calendar.date(byAdding: .day, value: -6, to: calendar.startOfDay(for: now))!
-        let tokens = UsageTokenTotals(input: 2_000_000_000, output: 45_678_901,
-            measurements: 1, inputMeasurements: 1, outputMeasurements: 1, codexMeasurements: 1)
-        let formatter = UsageLedgerEngine.dayFormatter(calendar: calendar)
-        let slices = (0..<7).map { day in
-            UsageDaySlice(day: formatter.string(from: calendar.date(byAdding: .day, value: day, to: start)!),
-                weight: 1, sharePercent: 0, tokens: tokens, messages: 1)
-        }
-        var scan = UsageScanSummary(); scan.hitLimit = true
-        let report = UsageLedgerReport(generatedAt: now, windowStart: start, windowEnd: now, days: 7,
-            totalWeight: 7, tokens: tokens, messages: 7, sessionCount: 7, accounts: [], timeline: slices, scan: scan)
-        let snapshot = UsageShareSnapshot(report: report, calendar: calendar)
-        for language in ["en", "fr"] {
-            let data = try UsageShareExporter.pngData(snapshot: snapshot, locale: Locale(identifier: language))
+    func testBackgroundUsesOnlyTheLeadingProviderColor() throws {
+        for provider in [UsageTranscriptFormat.claude, .codex] {
+            let report = fixture(claude: provider == .claude ? 3_000 : 0,
+                                 codex: provider == .codex ? 3_000 : 0)
+            let snapshot = UsageShareSnapshot(report: report)
+            XCTAssertEqual(snapshot.todayRanking.first?.provider, provider)
+            let data = try UsageShareExporter.pngData(snapshot: snapshot)
             let rep = try XCTUnwrap(NSBitmapImageRep(data: data))
-            XCTAssertEqual(rep.pixelsWide, 2400)
-            XCTAssertEqual(rep.pixelsHigh, 1260)
-            let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
-            attachment.name = "Consumption export \(language)"
-            attachment.lifetime = .keepAlways
-            add(attachment)
+            var orangeSamples = 0
+            // Open area above both plates: decorative colors must follow the winner.
+            for y in stride(from: 170, to: 200, by: 10) {
+                for x in stride(from: 100, to: 2300, by: 60) {
+                    let color = try XCTUnwrap(rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                    let values = [color.redComponent, color.greenComponent, color.blueComponent]
+                    if provider == .codex {
+                        XCTAssertLessThan(values.max()! - values.min()!, 0.035)
+                    } else {
+                        XCTAssertGreaterThanOrEqual(color.redComponent + 0.01, color.blueComponent)
+                        if color.redComponent - color.blueComponent > 0.035 { orangeSamples += 1 }
+                    }
+                    XCTAssertLessThan(values.max()!, 0.75, "No bright decorative white wash")
+                }
+            }
+            if provider == .claude { XCTAssertGreaterThan(orangeSamples, 10) }
+        }
+    }
+
+    func testPeriodAndProjectArtworkRendersInEnglishAndFrench() throws {
+        for language in ["en", "fr"] {
+            for period in UsageSharePeriod.allCases {
+                let report = fixture(claude: language == "fr" ? 500_000_000 : 2_000_000_000,
+                                     codex: 900_000_000, partial: true)
+                let path = language == "fr" ? report.accounts.first?.projects.first?.path : nil
+                let snapshot = UsageShareSnapshot(report: report, period: period, projectPath: path)
+                let data = try UsageShareExporter.pngData(snapshot: snapshot, locale: Locale(identifier: language))
+                let rep = try XCTUnwrap(NSBitmapImageRep(data: data))
+                XCTAssertEqual(rep.pixelsWide, 2400); XCTAssertEqual(rep.pixelsHigh, 1260)
+                let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
+                attachment.name = "Podium \(language) \(period.rawValue)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
         }
     }
 
@@ -168,6 +185,6 @@ final class UsageShareExportTests: XCTestCase {
         defer { pasteboard.releaseGlobally() }
         try UsageShareExporter.copy(data, to: pasteboard)
         XCTAssertEqual(pasteboard.data(forType: .png), data)
-        XCTAssertEqual(UsageShareExporter.filename(for: snapshot), "Builder-Nutch-tokens-2026-09-15.png")
+        XCTAssertEqual(UsageShareExporter.filename(for: snapshot), "Builder-Nutch-day-tokens-2026-09-15.png")
     }
 }

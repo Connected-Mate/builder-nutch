@@ -34,7 +34,8 @@ enum UsageShareExporter {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = snapshot.timeZone
         formatter.dateFormat = "yyyy-MM-dd"
-        return "Builder-Nutch-tokens-\(formatter.string(from: snapshot.today)).png"
+        let scope = snapshot.isProject ? "project-" : ""
+        return "Builder-Nutch-\(scope)\(snapshot.period.rawValue)-tokens-\(formatter.string(from: snapshot.today)).png"
     }
 
     static func copy(_ data: Data, to pasteboard: NSPasteboard = .general) throws {

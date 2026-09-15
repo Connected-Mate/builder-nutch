@@ -37,15 +37,15 @@ struct UsageShareCard: View {
     private var statisticsPlate: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                if snapshot.isProject {
+                if snapshot.isProject, let projectName = snapshot.projectName {
                     Text("Project")
                         .font(AppTheme.font(size: 16, weightValue: 500))
                         .foregroundStyle(UsageSharePalette.muted)
-                    Text(verbatim: snapshot.projectName ?? "")
+                    Text(verbatim: projectName)
                         .font(AppTheme.font(size: 30, weightValue: 650))
                         .lineLimit(1).truncationMode(.middle).minimumScaleFactor(0.7)
                 } else {
-                    Text(periodTitle(snapshot.period))
+                    Text(snapshot.isProject ? "Project" : periodTitle(snapshot.period))
                         .font(AppTheme.font(size: 30, weightValue: 650))
                         .lineLimit(1).minimumScaleFactor(0.7)
                 }
@@ -225,7 +225,7 @@ struct UsageShareCard: View {
     private var footer: some View {
         HStack(alignment: .top, spacing: 24) {
             Group {
-                if snapshot.isPartial {
+                if snapshot.isPartial || snapshot.weekAvailability != .complete || snapshot.monthAvailability != .complete {
                     Text("Partial history · ≥ means at least")
                 } else {
                     Text("Local history · Input, cache & output")
