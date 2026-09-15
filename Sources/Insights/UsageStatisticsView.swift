@@ -234,6 +234,10 @@ struct UsageStatisticsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // This chart edits a day selection: retain keyboard focus even when
+        // macOS keyboard navigation for ordinary action buttons is disabled.
+        .focusable(true, interactions: .edit)
+        .focusEffectDisabled()
         .focused($focusedDay, equals: day.id)
         .overlay {
             if focusedDay == day.id {
