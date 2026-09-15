@@ -38,7 +38,7 @@ enum UsageLedgerDump {
         return 0
     }
 
-    /// `--days 30`, clamped to something a rolling window can mean.
+    /// `--days 30`, clamped to a useful local-calendar range.
     static func days(in arguments: [String]) -> Int {
         guard let index = arguments.firstIndex(of: "--days"), index + 1 < arguments.count,
               let value = Int(arguments[index + 1]) else { return 7 }

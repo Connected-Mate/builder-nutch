@@ -1,12 +1,7 @@
 import SwiftUI
 
-/// Where the week went. The ledger's report, drawn: a strip of days, the
-/// projects that used the quota, and which subscription paid for each.
-///
-/// Every figure here is a share, never a cost: the ledger ranks sessions by an
-/// estimated weight and says what fraction of the window each took. The only
-/// authoritative percentage is the one on the account rows, and this screen
-/// says how it was spent, not how much is left.
+/// Tokens recorded by the assistants on this Mac. Subscription limits stay in
+/// the account view; this ledger shows the measured activity behind them.
 @MainActor
 final class UsageInsightsModel: ObservableObject {
     @Published private(set) var report: UsageLedgerReport?
@@ -53,7 +48,7 @@ struct UsageInsightsView: View {
     var body: some View {
         Group {
             if let report = model.report {
-                if report.sessionCount == 0 {
+                if report.sessionCount == 0 && !report.scan.hitLimit {
                     empty
                 } else {
                     content(report)
@@ -72,7 +67,7 @@ struct UsageInsightsView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Nothing to show yet.")
                 .font(AppTheme.font(size: 22, weightValue: 550)).tracking(-0.5)
-            Text("Consumption is read from the Claude Code sessions on this Mac. Once you have worked with Claude Code, the projects that used your quota appear here.")
+            Text("Tokens appear here after a Claude Code or Codex session on this Mac.")
                 .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -98,11 +93,15 @@ struct UsageInsightsView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
                 VStack(alignment: .leading, spacing: 4) {
-                Text(String(format: NSLocalizedString("%d sessions", comment: "Usage summary"), report.sessionCount))
+                Text(String(format: NSLocalizedString("%@ tokens", comment: "Usage summary"),
+                            (report.scan.hitLimit ? "≥ " : "") + Self.compact(report.tokens.total)))
                     .font(AppTheme.font(size: 22, weightValue: 550)).tracking(-0.5)
-                Text(String(format: NSLocalizedString("%@ messages · last %d days", comment: "Usage summary"),
-                            Self.compact(report.messages), report.days))
+                Text(String(format: NSLocalizedString("Last %d days", comment: "Usage summary"), report.days))
                     .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                if report.scan.hitLimit {
+                    Text("Partial history").font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
+                        .help("Some history has not been read yet. These totals are a lower bound.")
+                }
                 }
                 Spacer(minLength: 8)
                 Picker("Period", selection: $model.days) {
@@ -112,8 +111,58 @@ struct UsageInsightsView: View {
                 .pickerStyle(.segmented).labelsHidden().frame(width: 150).controlSize(.small)
                 if model.isLoading { ProgressView().controlSize(.small) }
             }
+            tokenSummary(report.tokens)
             dayStrip(report)
+            DisclosureGroup("Token details") {
+                VStack(alignment: .leading, spacing: 8) {
+                    tokenDetail("Input without reported cache", value: report.tokens.input, availability: report.tokens.coverage.input)
+                    tokenDetail("Cache written", value: report.tokens.cacheCreation, availability: report.tokens.coverage.cacheCreation)
+                    tokenDetail("Cache read", value: report.tokens.cacheRead, availability: report.tokens.coverage.cacheRead)
+                    Text("Input includes cache. Reasoning, when reported, is already included in output.")
+                        .foregroundStyle(AppTheme.muted)
+                    Text(String(format: NSLocalizedString("%d sessions · %@ responses", comment: "Usage detail"),
+                                report.sessionCount, Self.compact(report.messages)))
+                        .foregroundStyle(AppTheme.muted)
+                }
+                .font(AppTheme.font(size: 11)).padding(.top, 10)
+            }
+            .font(AppTheme.font(size: 11))
         }
+    }
+
+    private func tokenSummary(_ tokens: UsageTokenTotals) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            tokenMetric("Input", value: Self.tokenDisplay(tokens.totalInput, availability: tokens.coverage.input, compact: true))
+            tokenMetric("Output", value: Self.tokenDisplay(tokens.output, availability: tokens.coverage.output, compact: true))
+            tokenMetric("Reasoning", value: tokens.measuredReasoning.map {
+                (tokens.reasoningAvailability == .partial ? "≥ " : "") + Self.compact($0)
+            } ?? "—", note: tokens.reasoningAvailability == .unavailable ? "Not reported" :
+                            tokens.reasoningAvailability == .partial ? "Partial reading" : nil)
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func tokenMetric(_ title: LocalizedStringKey, value: String, note: LocalizedStringKey? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+            Text(value).font(AppTheme.font(size: 18, weightValue: 550)).monospacedDigit()
+            if let note { Text(note).font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func tokenDetail(_ title: LocalizedStringKey, value: Int, availability: UsageMeasurementAvailability = .complete) -> some View {
+        HStack {
+            Text(title).foregroundStyle(AppTheme.muted)
+            Spacer(minLength: 8)
+            Text(Self.tokenDisplay(value, availability: availability)).monospacedDigit().textSelection(.enabled)
+        }
+    }
+
+    private static func tokenDisplay(_ value: Int, availability: UsageMeasurementAvailability, compact: Bool = false) -> String {
+        guard availability != .unavailable else { return "—" }
+        return (availability == .partial ? "≥ " : "") + (compact ? Self.compact(value) : value.formatted())
     }
 
     /// One column per day of the window, the tallest being the busiest. Days
@@ -122,14 +171,14 @@ struct UsageInsightsView: View {
     private func dayStrip(_ report: UsageLedgerReport) -> some View {
         let byDay = Dictionary(uniqueKeysWithValues: report.timeline.map { ($0.day, $0) })
         let days = Self.dayKeys(from: report.windowStart, to: report.windowEnd)
-        let peak = max(report.timeline.map(\.weight).max() ?? 1, 1)
+        let peak = max(report.timeline.map { $0.tokens.total }.max() ?? 1, 1)
         return HStack(alignment: .bottom, spacing: report.days <= 7 ? 6 : 2) {
             ForEach(days, id: \.self) { day in
                 let slice = byDay[day]
                 VStack(spacing: 5) {
                     RoundedRectangle(cornerRadius: 2)
                         .fill(slice == nil ? AppTheme.track : AppTheme.ink)
-                        .frame(height: max(3, CGFloat((slice?.weight ?? 0) / peak) * 56))
+                        .frame(height: max(3, CGFloat(slice?.tokens.total ?? 0) / CGFloat(peak) * 56))
                         .frame(maxHeight: 56, alignment: .bottom)
                     if report.days <= 7 {
                         Text(Self.dayLabel(day, wide: true))
@@ -137,8 +186,8 @@ struct UsageInsightsView: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .help(slice.map { "\(Self.dayLabel(day, wide: true)): \(Int($0.sharePercent.rounded()))%" } ?? Self.dayLabel(day, wide: true))
-                .accessibilityLabel("\(Self.dayLabel(day, wide: true)), \(Int((slice?.sharePercent ?? 0).rounded())) percent")
+                .help("\(Self.dayLabel(day, wide: true)): \((slice?.tokens.total ?? 0).formatted()) tokens")
+                .accessibilityLabel(Text("\(Self.dayLabel(day, wide: true)), \((slice?.tokens.total ?? 0).formatted()) tokens"))
             }
         }
         .frame(maxWidth: .infinity)
@@ -154,7 +203,7 @@ struct UsageInsightsView: View {
             HStack {
                 Text("Projects")
                 Spacer()
-                Text("Estimated share").foregroundStyle(AppTheme.muted)
+                Text("Tokens").foregroundStyle(AppTheme.muted)
             }
             .font(AppTheme.font(size: 11, weightValue: 550)).padding(.bottom, 8)
             ForEach(rankedProjects(report), id: \.path) { project in projectRow(project) }
@@ -172,6 +221,8 @@ struct UsageInsightsView: View {
                     if !project.topics.isEmpty { Text(project.topics.joined(separator: " · ")) }
                 }
                 Text(project.payers.joined(separator: ", "))
+                tokenDetail("Input", value: project.tokens.totalInput, availability: project.tokens.coverage.input)
+                tokenDetail("Output", value: project.tokens.output, availability: project.tokens.coverage.output)
             }
             .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
             .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
@@ -184,7 +235,7 @@ struct UsageInsightsView: View {
                         .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                shareBar(project.sharePercent).frame(width: 110)
+                tokenAmount(project.tokens.total)
             }
             .padding(.trailing, 8)
         }
@@ -192,26 +243,17 @@ struct UsageInsightsView: View {
         .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
     }
 
-    private func shareBar(_ percent: Double) -> some View {
-        HStack(spacing: 8) {
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(AppTheme.track)
-                    Capsule().fill(AppTheme.ink).frame(width: max(2, proxy.size.width * min(max(percent / 100, 0), 1)))
-                }
-            }
-            .frame(height: 5)
-            Text("\(Int(percent.rounded()))%").font(AppTheme.font(size: 12, weightValue: 550)).monospacedDigit()
-                .frame(width: 38, alignment: .trailing)
-        }
-        .padding(.top, 5)
+    private func tokenAmount(_ value: Int) -> some View {
+        Text(Self.compact(value)).font(AppTheme.font(size: 13, weightValue: 550)).monospacedDigit()
+            .frame(minWidth: 70, alignment: .trailing)
+            .help(String(format: NSLocalizedString("%@ tokens", comment: "Exact token total"), value.formatted()))
     }
 
     // MARK: - Accounts
 
     private func accounts(_ report: UsageLedgerReport) -> some View {
         VStack(spacing: 0) {
-            ForEach(report.accounts.sorted { $0.weight > $1.weight }, id: \.accountKey) { share in
+            ForEach(report.accounts.sorted { $0.tokens.total > $1.tokens.total }, id: \.accountKey) { share in
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(label(for: share)).font(AppTheme.font(size: 13, weightValue: 550)).lineLimit(1)
@@ -220,7 +262,7 @@ struct UsageInsightsView: View {
                     }
                     .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    shareBar(share.sharePercent).frame(width: 110)
+                    tokenAmount(share.tokens.total)
                 }
                 .padding(.vertical, 12)
                 .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
@@ -231,8 +273,8 @@ struct UsageInsightsView: View {
 
     private func footnote(_ report: UsageLedgerReport) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label("Read from the Claude Code sessions on this Mac. Nothing leaves it.", systemImage: "checkmark.shield")
-            Text("Shares are estimates that rank sessions against each other. The percentage left on each account comes from Claude itself.")
+            Label("Read from Claude Code and Codex on this Mac. Nothing leaves it.", systemImage: "checkmark.shield")
+            Text("Only recorded tokens are counted. Subscription limits are shown on each account.")
             if report.scan.hitLimit {
                 Text("The reading stopped early to keep the app quick, so these figures are a floor.")
             }
@@ -246,7 +288,7 @@ struct UsageInsightsView: View {
     struct RankedProject {
         let path: String
         let name: String
-        let sharePercent: Double
+        let tokens: UsageTokenTotals
         let sessions: Int
         let topics: [String]
         let payers: [String]
@@ -256,12 +298,11 @@ struct UsageInsightsView: View {
     /// across three subscriptions is the normal case, and three rows for it
     /// would hide how big it actually is.
     private func rankedProjects(_ report: UsageLedgerReport) -> [RankedProject] {
-        var byPath: [String: (name: String, weight: Double, share: Double, sessions: Int, topics: [String: Double], payers: [(String, Double)])] = [:]
+        var byPath: [String: (name: String, tokens: UsageTokenTotals, sessions: Int, topics: [String: Double], payers: [(String, Double)])] = [:]
         for share in report.accounts {
             for project in share.projects {
-                var row = byPath[project.path] ?? (project.name, 0, 0, 0, [:], [])
-                row.weight += project.weight
-                row.share += project.overallSharePercent
+                var row = byPath[project.path] ?? (project.name, UsageTokenTotals(), 0, [:], [])
+                row.tokens += project.tokens
                 row.sessions += project.sessionCount
                 for topic in project.topics { row.topics[topic.title, default: 0] += topic.weight }
                 row.payers.append((label(for: share), project.weight))
@@ -273,15 +314,19 @@ struct UsageInsightsView: View {
             // account, explicit and deduced) reads once.
             var payers: [String] = []
             for (name, _) in row.payers.sorted(by: { $0.1 > $1.1 }) where !payers.contains(name) { payers.append(name) }
-            return RankedProject(path: path, name: row.name, sharePercent: row.share, sessions: row.sessions,
+            return RankedProject(path: path, name: row.name, tokens: row.tokens, sessions: row.sessions,
                                  topics: row.topics.sorted { $0.value > $1.value }.prefix(3).map(\.key),
                                  payers: payers)
         }
-        .sorted { $0.sharePercent > $1.sharePercent }
+        .sorted { $0.tokens.total > $1.tokens.total }
     }
 
     private func label(for share: AccountUsageShare) -> String {
-        label(forKey: share.accountKey, managedID: share.managedAccountID, vendorID: share.vendorAccountID)
+        if share.attribution == .unknown, share.managedAccountID == nil, share.vendorAccountID == nil {
+            let provider = share.provider == .codex ? "Codex" : "Claude Code"
+            return String(format: NSLocalizedString("%@ · account not identified", comment: "Unattributed local usage"), provider)
+        }
+        return label(forKey: share.accountKey, managedID: share.managedAccountID, vendorID: share.vendorAccountID)
     }
 
     private func label(forKey key: String, managedID: String?, vendorID: String?) -> String {

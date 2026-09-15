@@ -156,7 +156,9 @@ struct CustomAssistantSetupView: View {
             TimelineView(.periodic(from: .now, by: 30)) { context in
                 VStack(alignment: .leading, spacing: 4) {
                     if let rate = report.rateLimit {
-                        Text(rate.title + " · " + rate.scope)
+                        Text((report.isStale(now: context.date)
+                              ? String(format: NSLocalizedString("Last reported: %@", comment: "Historical rate restriction"), rate.title)
+                              : rate.title) + " · " + rate.scope)
                             .fixedSize(horizontal: false, vertical: true)
                         if let retryAt = rate.retryAt {
                             if retryAt > context.date {

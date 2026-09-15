@@ -25,6 +25,8 @@ struct AccountsView: View {
     let settingsContent: (() -> AnyView)?
     @State private var showingCustom = false
     @State private var catalogSearch = ""
+    @State private var addingDesktopAssistant = false
+    @State private var desktopSetupMessage: String?
     @State private var noticeTask: Task<Void, Never>?
 
     @State private var filter: AccountProvider?
@@ -332,7 +334,10 @@ struct AccountsView: View {
                                          loginInProgress: manager.authenticationInProgress,
                                          displayMode: preferences.usageDisplayMode,
                                          projectURL: projectURL, manager: manager,
-                                         connect: { connecting = account },
+                                         connect: {
+                                             if account.provider == .antigravity { Task { await manager.connect(account) } }
+                                             else { connecting = account }
+                                         },
                                          personalize: { personalizing = account },
                                          remove: { removing = account },
                                          reportError: { localError = $0 })
@@ -346,8 +351,13 @@ struct AccountsView: View {
 
     private var providerCatalog: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Choose a service, then sign in on its official page.")
+            Text("Choose your assistant.")
                 .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
+            if let desktopSetupMessage {
+                Label(desktopSetupMessage, systemImage: "info.circle")
+                    .font(AppTheme.font(size: 12)).fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 4)
+            }
             TextField("Find an assistant", text: $catalogSearch)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityLabel("Find an assistant")
@@ -361,7 +371,7 @@ struct AccountsView: View {
                                 ProviderGlyphView(glyph: provider.glyph, size: 24).frame(width: 28)
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(provider.workspaceTitle).font(AppTheme.font(size: 13, weightValue: 550))
-                                    Text(provider.connectionSummary).font(AppTheme.font(size: 11))
+                                    Text(LocalizedStringKey(provider.connectionSummary)).font(AppTheme.font(size: 11))
                                         .foregroundStyle(AppTheme.muted).lineLimit(2)
                                 }
                                 Spacer(minLength: 4)
@@ -370,7 +380,7 @@ struct AccountsView: View {
                             .padding(.horizontal, 8).frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(WorkspaceQuietButtonStyle()).disabled(manager.authenticationInProgress)
+                        .buttonStyle(WorkspaceQuietButtonStyle()).disabled(manager.authenticationInProgress || addingDesktopAssistant)
                         .accessibilityLabel("Add \(provider.workspaceTitle). \(provider.connectionDetail)")
                     }
                 }
@@ -386,7 +396,20 @@ struct AccountsView: View {
     }
 
     private func createAndConnect(_ provider: AccountProvider) {
-        guard !manager.authenticationInProgress else { return }
+        guard !manager.authenticationInProgress, !addingDesktopAssistant else { return }
+        desktopSetupMessage = nil
+        if provider == .antigravity {
+            addingDesktopAssistant = true
+            Task {
+                defer { addingDesktopAssistant = false }
+                do {
+                    if try await manager.attachAntigravity() != nil {
+                        filter = provider; showingAdd = false
+                    } else { desktopSetupMessage = manager.notice }
+                } catch { localError = error.localizedDescription }
+            }
+            return
+        }
         do {
             let count = manager.accounts.filter { $0.provider == provider }.count
             let account = try manager.add(provider: provider,
@@ -421,7 +444,7 @@ struct AccountsView: View {
             if let selectedAccount {
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(selectedAccount.isBrowserOnly ? "Selected profile" : "For your next session")
+                        Text(selectedAccount.readsDesktopUsage ? "On this Mac" : selectedAccount.isBrowserOnly ? "Selected profile" : "For your next session")
                             .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
                         Text(displayName(for: selectedAccount)).font(AppTheme.font(size: 12, weightValue: 550)).lineLimit(1)
                     }
@@ -433,7 +456,7 @@ struct AccountsView: View {
                               systemImage: "arrow.up.right")
                     }
                     .buttonStyle(AppButtonStyle(primary: true, compact: true))
-                    .disabled(!manager.state(for: selectedAccount).isConnected || manager.state(for: selectedAccount).isBusy || manager.authenticationInProgress)
+                    .disabled((!manager.state(for: selectedAccount).isConnected && selectedAccount.provider != .antigravity) || manager.state(for: selectedAccount).isBusy || manager.authenticationInProgress)
                 }
             }
         }
@@ -728,6 +751,8 @@ private struct AssistantRow: View {
         if state.isBusy { return "Checking…" }
         if !state.isConnected { return state.message ?? "Connect this account." }
         if account.isBrowserOnly { return "Browser profile ready" }
+        let rateLimit = state.rateLimitStatus()
+        if rateLimit.kind != .notReported { return rateLimit.title }
         if !state.windows.isEmpty && !state.isFresh() { return "Last known usage · refresh to update" }
         if AccountUsageNotice.modelLimit(state) != nil { return "Model limit · See usage details" }
         if account.provider == .claude && manager.systemClaudeAccountID == account.id { return "Current account on this Mac" }
@@ -745,8 +770,10 @@ private struct AssistantRow: View {
     }
 
     private var usageDetails: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 14) {
             Text("\(displayLabel) · Usage").font(AppTheme.font(size: 16, weightValue: 650))
+            if !account.isBrowserOnly { rateLimitDetails }
             if account.isBrowserOnly {
                 Text("Usage stays on \(account.provider.title)’s website.")
             } else if state.windows.isEmpty {
@@ -795,8 +822,42 @@ private struct AssistantRow: View {
                 usageFooter
             }
         }
-        .font(AppTheme.font(size: 12)).padding(24).frame(width: 390, alignment: .leading)
+        .font(AppTheme.font(size: 12)).padding(24).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(width: 390, height: min(460, CGFloat(max(state.windows.count, 1)) * 94 + 180))
         .background(AppTheme.surface).foregroundStyle(AppTheme.ink).preferredColorScheme(.dark)
+    }
+
+    private var rateLimitDetails: some View {
+        let limit = state.rateLimitStatus()
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("Limits and availability").font(AppTheme.font(size: 12, weightValue: 600))
+            Text(limit.title).fixedSize(horizontal: false, vertical: true)
+            if !limit.affectedLabels.isEmpty {
+                Text(limit.affectedLabels.joined(separator: " · "))
+                    .foregroundStyle(AppTheme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+            if let retry = limit.retryAt {
+                if limit.kind == .usageCheckPaused {
+                    Text("Next usage check: \(retry.formatted(date: .abbreviated, time: .shortened))")
+                        .foregroundStyle(AppTheme.muted)
+                } else if limit.isResetDerived {
+                    Text("Estimated reset: \(retry.formatted(date: .abbreviated, time: .shortened))")
+                        .foregroundStyle(AppTheme.muted)
+                } else {
+                    Text("Limit resets: \(retry.formatted(date: .abbreviated, time: .shortened))")
+                        .foregroundStyle(AppTheme.muted)
+                }
+            }
+            if limit.kind == .usageCheckPaused {
+                Text("Only the usage check is paused. This does not mean your AI is blocked.")
+                    .foregroundStyle(AppTheme.muted).fixedSize(horizontal: false, vertical: true)
+            } else if limit.kind == .notReported {
+                Text("This service does not report requests or tokens per minute here. Subscription limits are listed below.")
+                    .foregroundStyle(AppTheme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+            Divider().overlay(AppTheme.line).padding(.top, 4)
+        }
     }
 
     @ViewBuilder private var usageFooter: some View {

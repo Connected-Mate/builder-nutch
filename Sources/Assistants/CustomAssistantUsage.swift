@@ -32,7 +32,7 @@ struct CustomAssistantUsage: Codable, Equatable {
               !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, source.count <= 200,
               observedAt.timeIntervalSince1970.isFinite, observedAt.timeIntervalSince1970 > 0,
               observedAt <= now.addingTimeInterval(300) else {
-            throw CustomAssistantError.invalid("Provide 1–8 observed limits, their source and a valid observation timestamp, not a future estimate.")
+            throw CustomAssistantError.invalid("Provide observed quotas or a request restriction, their source and a valid observation timestamp, not a future estimate.")
         }
         for limit in limits {
             guard !limit.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,

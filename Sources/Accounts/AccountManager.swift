@@ -102,6 +102,11 @@ final class AccountManager: ObservableObject {
     /// nothing is launched, nothing is written, and no environment is prepared,
     /// because Cursor owns its session and this only ever looks at it.
     private let readCursor: (URL, AccountCancellation) async throws -> ManagedAccountState
+    private let readAntigravity: (URL, AccountCancellation) async throws -> ManagedAccountState
+    private let antigravityCandidate: () -> ExistingAccountCandidate?
+    private let openAntigravity: () -> Bool
+    private let openAssistantWebsite: (URL) -> Bool
+    private var attachingAntigravity = false
     private var browserOpenedIDs: Set<UUID> = []
     private var operations: [UUID: AccountCancellation] = [:]
     private var loaded = false
@@ -119,6 +124,13 @@ final class AccountManager: ObservableObject {
          readKimi: @escaping (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState = KimiAccountIntegration.read,
          readExistingKimi: @escaping (URL, URL, [String: String], AccountCancellation) async throws -> ManagedAccountState = KimiAccountIntegration.readExisting,
          readCursor: @escaping (URL, AccountCancellation) async throws -> ManagedAccountState = CursorAccountIntegration.read,
+         readAntigravity: @escaping (URL, AccountCancellation) async throws -> ManagedAccountState = AntigravityAccountIntegration.read,
+         antigravityCandidate: @escaping () -> ExistingAccountCandidate? = { AntigravityAccountIntegration.existingCandidate() },
+         openAntigravity: @escaping () -> Bool = {
+             guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: AntigravityAccountIntegration.bundleIdentifier) else { return false }
+             return NSWorkspace.shared.open(app)
+         },
+         openAssistantWebsite: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) },
          systemCredentials: ClaudeSystemCredentials? = nil,
          systemClaudeDirectory: URL? = nil,
          claudeReader: (any ClaudeAccountReading)? = nil,
@@ -136,6 +148,10 @@ final class AccountManager: ObservableObject {
         self.runner = runner; self.resolveExecutable = executable; self.openTerminal = openTerminal
         self.openBrowser = openBrowser; self.readKimi = readKimi; self.readExistingKimi = readExistingKimi
         self.readCursor = readCursor
+        self.readAntigravity = readAntigravity
+        self.antigravityCandidate = antigravityCandidate
+        self.openAntigravity = openAntigravity
+        self.openAssistantWebsite = openAssistantWebsite
         let root = rootURL ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Codenotch Accounts", isDirectory: true)
         do {
@@ -211,6 +227,7 @@ final class AccountManager: ObservableObject {
 
     @discardableResult
     func add(provider: AccountProvider, label: String, emailHint: String?) throws -> ManagedAccount {
+        guard provider != .antigravity else { throw ManagedAccountError.unavailable }
         let account = ManagedAccount(id: UUID(), provider: provider, label: try AccountStorage.validLabel(label),
                                      emailHint: try AccountStorage.validEmail(emailHint), createdAt: Date())
         _ = try usableStorage().profile(account)
@@ -220,6 +237,50 @@ final class AccountManager: ObservableObject {
         accounts.append(account); selected = selection; states[account.id] = ManagedAccountState()
         normalizeRotationOrder()
         try persist(accounts: accounts, selected: selected)
+        updateHealth()
+        return account
+    }
+
+    /// Attaches the vendor's one local profile, never a simulated web account.
+    @discardableResult
+    func attachAntigravity() async throws -> ManagedAccount? {
+        guard !hasShutDown, !authenticationInProgress, !attachingAntigravity else { return nil }
+        attachingAntigravity = true
+        defer { attachingAntigravity = false }
+        if let existing = accounts.first(where: { $0.provider == .antigravity && $0.existingProfile != nil }) {
+            _ = openAntigravity()
+            await refresh(existing)
+            return existing
+        }
+        guard let candidate = antigravityCandidate() else {
+            if openAntigravity() {
+                notice = NSLocalizedString("Sign in inside Antigravity, then return here and refresh.", comment: "Desktop assistant setup")
+            } else {
+                notice = NSLocalizedString(AntigravityAccountIntegration.missingMessage, comment: "Desktop assistant missing")
+                _ = openAssistantWebsite(AccountProvider.antigravity.website)
+            }
+            return nil
+        }
+        guard candidate.provider == .antigravity else { throw ManagedAccountError.unsafePath }
+        let directory = try candidate.source.validatedDirectory()
+        let cancellation = AccountCancellation()
+        let state = try await readAntigravity(directory, cancellation)
+        guard !hasShutDown, !Task.isCancelled else { throw ManagedAccountError.cancelled }
+        let key = candidate.source.key(provider: .antigravity)
+        if let existing = accounts.first(where: { $0.existingProfile?.key(provider: $0.provider) == key }) {
+            _ = openAntigravity()
+            return existing
+        }
+        let account = ManagedAccount(id: UUID(), provider: .antigravity,
+            label: try AccountStorage.validLabel(candidate.label), createdAt: Date(), existingProfile: candidate.source)
+        var selection = selected
+        selection[.antigravity] = account.id
+        let previousIgnored = ignoredExistingProfiles
+        ignoredExistingProfiles.remove(key)
+        do { try persist(accounts: accounts + [account], selected: selection) }
+        catch { ignoredExistingProfiles = previousIgnored; throw error }
+        accounts.append(account); selected = selection; states[account.id] = state
+        _ = openAntigravity()
         updateHealth()
         return account
     }
@@ -863,6 +924,14 @@ final class AccountManager: ObservableObject {
     }
 
     func connect(_ account: ManagedAccount) async {
+        if account.provider == .antigravity {
+            guard !hasShutDown else { return }
+            if openAntigravity() {
+                notice = NSLocalizedString("Sign in inside Antigravity, then return here and refresh.", comment: "Desktop assistant setup")
+                await refresh(account)
+            } else { notice = NSLocalizedString(AntigravityAccountIntegration.missingMessage, comment: "Desktop assistant missing") }
+            return
+        }
         guard !hasShutDown else { return }
         if account.existingProfile != nil {
             await refresh(account)
@@ -988,7 +1057,9 @@ final class AccountManager: ObservableObject {
         // Cursor's editor owns its login, so this row is a reading and nothing
         // else: no executable to resolve, no profile to prepare, no environment.
         if account.readsDesktopUsage, let source = account.existingProfile {
-            return try await readCursor(try source.validatedDirectory(), cancellation)
+            let directory = try source.validatedDirectory()
+            if account.provider == .antigravity { return try await readAntigravity(directory, cancellation) }
+            return try await readCursor(directory, cancellation)
         }
         if account.isBrowserOnly {
             guard let current = accounts.first(where: { $0.id == account.id }) else { throw ManagedAccountError.unavailable }
@@ -1260,7 +1331,8 @@ final class AccountManager: ObservableObject {
                         state = ManagedAccountState(email: identity.email, message: error.localizedDescription, requiresKeychainAccess: true)
                     }
                 } else if candidate.provider.readsDesktopUsage {
-                    state = try await readCursor(directory, cancellation)
+                    if candidate.provider == .antigravity { state = try await readAntigravity(directory, cancellation) }
+                    else { state = try await readCursor(directory, cancellation) }
                 } else if candidate.provider == .kimi {
                     guard let executable = resolveExecutable(candidate.provider) else { continue }
                     state = Self.stampKimiIdentity(try await readExistingKimi(executable, directory, environment, cancellation), profile: directory)
@@ -1279,6 +1351,9 @@ final class AccountManager: ObservableObject {
                 }
                 guard !hasShutDown, !Task.isCancelled, !cancellation.isCancelled,
                       state.isConnected || state.requiresKeychainAccess else { continue }
+                // Explicit attachment may finish while this reader is suspended.
+                // Desktop services need not expose email or an identity token.
+                guard !accounts.contains(where: { $0.existingProfile?.key(provider: $0.provider) == key }) else { continue }
                 // Only verified identities count. User-entered hints never suppress a real account.
                 // The address is the readable signal; the opaque fingerprint covers
                 // vendors that publish no address at all, which is how one Kimi
@@ -1442,7 +1517,7 @@ final class AccountManager: ObservableObject {
         let stale = Set(accounts.compactMap { account -> UUID? in
             guard let source = account.existingProfile else { return nil }
             if account.provider == .kimi, source.kimiAuthenticationStatus() == .signedOut { return account.id }
-            if account.readsDesktopUsage,
+            if account.provider == .cursor, account.readsDesktopUsage,
                !CursorAccountIntegration.isSignedIn(directory: URL(fileURLWithPath: source.directory, isDirectory: true)) {
                 return account.id
             }
@@ -1495,6 +1570,14 @@ final class AccountManager: ObservableObject {
                 return
             }
             if account.readsDesktopUsage {
+                if account.provider == .antigravity {
+                    guard openAntigravity() else {
+                        notice = NSLocalizedString(AntigravityAccountIntegration.missingMessage, comment: "Desktop assistant missing")
+                        return
+                    }
+                    await refresh(account)
+                    return
+                }
                 await refresh(account)
                 notice = "The Cursor app keeps this sign-in. Open Cursor to use it — Builder Nutch only reads its usage."
                 return
@@ -1593,6 +1676,9 @@ final class AccountManager: ObservableObject {
     /// The headline names a stable period, rather than silently selecting the
     /// largest reading. Rotation still considers every applicable restriction.
     static func headlineID(for account: ManagedAccount, state: ManagedAccountState? = nil) -> String {
+        if account.provider == .antigravity {
+            return state.flatMap { AntigravityProvider.headlineID(for: $0.windows) } ?? "usage-headline-unavailable"
+        }
         if account.provider == .claude || account.provider == .codex {
             if let state {
                 return state.headlineWindow(for: account.provider)?.id ?? "usage-headline-unavailable"

@@ -472,7 +472,7 @@ actor UsageLedger {
         self.cacheURL = cacheURL
     }
 
-    /// The default 7 days, matching the subscription's weekly window.
+    /// The default week view: today plus the six preceding local dates.
     func report(days: Int = 7, now: Date = Date()) -> UsageLedgerReport {
         var current = cache ?? UsageLedgerCache.load(from: cacheURL)
         let report = engine.report(days: days, now: now, cache: &current)

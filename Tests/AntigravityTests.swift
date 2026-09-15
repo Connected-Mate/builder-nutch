@@ -2,6 +2,112 @@ import XCTest
 import Sparkle
 @testable import Codenotch
 
+@MainActor
+final class AntigravityManagerTests: XCTestCase {
+    private func temporary() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("antigravity-manager-\(UUID().uuidString)")
+        try AccountStorage.privateDirectory(url)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    func testAttachReusesTheDesktopProfileAndDispatchesItsOwnReader() async throws {
+        let root = try temporary(), vendor = try temporary()
+        let candidate = ExistingAccountCandidate(provider: .antigravity, label: "Antigravity · on this Mac",
+            source: ExistingAccountProfile(directory: vendor.path, usesDefaultClaudeHome: false))
+        var reads = 0, opens = 0
+        let manager = AccountManager(rootURL: root, runner: AntigravityNoRunner(), executable: { _ in nil },
+            readCursor: { _, _ in XCTFail("Antigravity must not read Cursor credentials"); throw ManagedAccountError.unavailable },
+            readAntigravity: { directory, _ in
+                XCTAssertEqual(directory.standardizedFileURL.path, vendor.standardizedFileURL.path)
+                reads += 1
+                return AntigravityAccountIntegration.state(windows: [
+                    LimitWindow(id: "gemini", label: "Gemini", usedFraction: 0.2, modelName: "Gemini"),
+                    LimitWindow(id: "claude", label: "Claude", usedFraction: 0.8, modelName: "Claude")
+                ])
+            }, antigravityCandidate: { candidate }, openAntigravity: { opens += 1; return true },
+            openAssistantWebsite: { _ in XCTFail("A local profile must not become a web profile"); return false })
+        let firstResult = try await manager.attachAntigravity()
+        let first = try XCTUnwrap(firstResult)
+        let secondResult = try await manager.attachAntigravity()
+        let second = try XCTUnwrap(secondResult)
+        XCTAssertEqual(first.id, second.id)
+        XCTAssertEqual(manager.accounts.count, 1)
+        XCTAssertGreaterThanOrEqual(reads, 2)
+        XCTAssertEqual(opens, 2)
+        XCTAssertFalse(first.isBrowserOnly)
+        XCTAssertNil(manager.state(for: first).headlineWindow(for: .antigravity))
+        XCTAssertFalse(manager.snapshot(for: first).hasHeadlineReading)
+        await manager.discoverExistingAccounts(candidates: [candidate])
+        XCTAssertEqual(manager.accounts.count, 1, "Cursor sign-out pruning must not remove Antigravity")
+        await manager.launch(first, project: root)
+        XCTAssertEqual(opens, 3)
+        let stored = try AccountStorage(root: root).load()
+        XCTAssertEqual(stored.accounts.first?.existingProfile?.directory, vendor.path)
+    }
+
+    func testMissingAppOpensOfficialPageWithoutCreatingAFalseAccount() async throws {
+        let root = try temporary()
+        var opened: URL?
+        let manager = AccountManager(rootURL: root, runner: AntigravityNoRunner(), executable: { _ in nil },
+            readAntigravity: { _, _ in XCTFail("Missing app has no usage to read"); throw ManagedAccountError.unavailable },
+            antigravityCandidate: { nil }, openAntigravity: { false }, openAssistantWebsite: { opened = $0; return true })
+        let result = try await manager.attachAntigravity()
+        XCTAssertNil(result)
+        XCTAssertTrue(manager.accounts.isEmpty)
+        XCTAssertEqual(opened, AccountProvider.antigravity.website)
+        XCTAssertNotNil(manager.notice)
+        XCTAssertThrowsError(try manager.add(provider: .antigravity, label: "Antigravity", emailHint: nil))
+    }
+
+    func testDiscoveryCannotDuplicateAnAttachmentThatFinishesDuringItsRead() async throws {
+        let root = try temporary(), vendor = try temporary()
+        let candidate = ExistingAccountCandidate(provider: .antigravity, label: "Antigravity",
+            source: ExistingAccountProfile(directory: vendor.path, usesDefaultClaudeHome: false))
+        let entered = AsyncStream<Void>.makeStream()
+        var firstRead = true
+        var resumeRead: CheckedContinuation<Void, Never>?
+        let manager = AccountManager(rootURL: root, runner: AntigravityNoRunner(), executable: { _ in nil },
+            readAntigravity: { _, _ in
+                if firstRead {
+                    firstRead = false
+                    await withCheckedContinuation { continuation in
+                        resumeRead = continuation
+                        entered.continuation.yield(())
+                    }
+                }
+                return ManagedAccountState(isConnected: true, plan: "Antigravity", refreshedAt: Date())
+            }, antigravityCandidate: { candidate }, openAntigravity: { true }, openAssistantWebsite: { _ in false })
+        let discovery = Task { await manager.discoverExistingAccounts(candidates: [candidate]) }
+        var iterator = entered.stream.makeAsyncIterator()
+        _ = await iterator.next()
+        let attached = try await manager.attachAntigravity()
+        resumeRead?.resume()
+        await discovery.value
+        entered.continuation.finish()
+        XCTAssertNotNil(attached)
+        XCTAssertEqual(manager.accounts.count, 1)
+    }
+
+    func testInstalledAppWithoutProfileOpensSignInWithoutCreatingAFalseAccount() async throws {
+        var opened = 0
+        let manager = AccountManager(rootURL: try temporary(), runner: AntigravityNoRunner(), executable: { _ in nil },
+            antigravityCandidate: { nil }, openAntigravity: { opened += 1; return true },
+            openAssistantWebsite: { _ in XCTFail("Installed app should own sign-in"); return false })
+        let result = try await manager.attachAntigravity()
+        XCTAssertNil(result)
+        XCTAssertTrue(manager.accounts.isEmpty)
+        XCTAssertEqual(opened, 1)
+    }
+}
+
+private struct AntigravityNoRunner: AccountCommandRunning {
+    func run(_ command: AccountCommand, cancellation: AccountCancellation) async throws -> Data {
+        XCTFail("Antigravity integration must not launch a CLI")
+        throw ManagedAccountError.unavailable
+    }
+}
+
 /// Fixtures are the real thing: the keychain payload's shape and the actual
 /// `loadCodeAssist` response from a signed-in install.
 final class AntigravityCredentialsTests: XCTestCase {

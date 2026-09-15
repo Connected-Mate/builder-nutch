@@ -27,7 +27,9 @@ Use **Copy connection** for the actual path of your installed copy. MCP mode run
 
 - `list_assistants`: reads the custom catalog; no provider accounts or credentials.
 - `configure_assistant`: requires `name` and public HTTPS `website`; optional existing `id`, `instructions`, `usageNote`. Existing id selects a profile; omitting id updates the same name, case insensitively. Omitted optional text fields are preserved on updates; an explicit empty string clears one. Renaming never removes its usage history.
-- `report_usage`: requires profile `id`, `observedAt` (ISO 8601 with timezone), `source` (where the AI observed the figures), and 1–8 `limits` with `label`, `usedPercent` (finite 0–100) and optional `resetsAt`. The first limit supplies the notch headline. Older observations cannot replace newer ones.
+- `report_usage`: requires profile `id`, `observedAt` (ISO 8601 with timezone), `source` (where the AI observed the figures), and up to 8 `limits` with `label`, `usedPercent` (finite 0–100) and optional `resetsAt`. The first limit supplies the notch headline. Older observations cannot replace newer ones.
+
+An observed request restriction can be reported separately as `rateLimit`, with `kind` (`rateLimited`, `concurrencyLimited` or `providerOverloaded`), a human-readable `scope`, and an optional ISO 8601 `retryAt` taken from the provider. A restriction-only report may use `limits: []`; it never becomes a fabricated 100% quota. At least one quota or a restriction is required. A newer quota report without `rateLimit` clears the previous restriction. A past retry time requires a fresh observation, rather than a claim that the service has resumed.
 
 Reports carry **Reported by assistant** provenance. They become **Out of date** after one hour or when a reported reset passes. Missing usage remains unknown. These are reported observations; no automatic polling, shell commands, credential extraction, account switching, or fabricated limits are enabled.
 

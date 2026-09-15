@@ -30,6 +30,11 @@ struct ReleaseNote: Equatable {
 /// `testTheCurrentVersionHasANote`.
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
+        ReleaseNote(version: "0.12.0", headline: "Tokens and limits, clearly.", changes: [
+            .init(title: "Your tokens at a glance", detail: "Input, output, cache and reported reasoning from Claude Code and Codex, grouped by project."),
+            .init(title: "Know which limit is holding you back", detail: "Model restrictions, quota resets and paused usage checks are shown separately."),
+            .init(title: "Antigravity has its own place", detail: "Connect the official app on this Mac and read its available model limits.")
+        ]),
         ReleaseNote(
             version: "0.11.0",
             headline: "Less to manage. More room to build.",
