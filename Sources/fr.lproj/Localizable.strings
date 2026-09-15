@@ -503,3 +503,8 @@
 "Light, color and depth" = "Lumière, couleur et relief";
 "A luminous dotted background, glossy black weekly card and pastel day card give your token export a new look. Your recorded figures stay the same." = "Un fond lumineux à pois, une carte noire brillante pour la semaine et une carte pastel pour la journée donnent un nouveau visage à votre export. Vos chiffres enregistrés restent les mêmes.";
 "tokens" = "tokens";
+
+/* White sharing gradients */
+"A cooler light." = "Une lumière plus douce.";
+"White gradients" = "Des dégradés blancs";
+"White light replaces the warm yellow tones in the sharing background and day card." = "Le blanc remplace les tons jaunes du fond et de la carte du jour dans votre image à partager.";

@@ -22,20 +22,20 @@ enum UsageSharePalette {
 struct UsageShareBackdrop: View {
     var body: some View {
         ZStack {
-            UsageSharePalette.forest
+            UsageSharePalette.black
             light(UsageSharePalette.blue, width: 690, height: 780, opacity: 0.95)
                 .rotationEffect(.degrees(-24)).position(x: 65, y: 352)
             light(UsageSharePalette.lavender, width: 550, height: 360, opacity: 0.55)
                 .rotationEffect(.degrees(15)).position(x: 210, y: 657)
-            light(UsageSharePalette.amber, width: 790, height: 940, opacity: 1)
+            light(.white, width: 790, height: 940, opacity: 1)
                 .rotationEffect(.degrees(-22)).position(x: 1098, y: 98)
-            light(UsageSharePalette.coral, width: 440, height: 410, opacity: 0.95)
+            light(.white, width: 440, height: 410, opacity: 0.95)
                 .position(x: 1100, y: 12)
-            light(UsageSharePalette.gold, width: 610, height: 255, opacity: 0.77)
+            light(.white, width: 610, height: 255, opacity: 0.77)
                 .rotationEffect(.degrees(-27)).position(x: 600, y: 536)
-            light(UsageSharePalette.amber, width: 730, height: 240, opacity: 0.85)
+            light(.white, width: 730, height: 240, opacity: 0.85)
                 .rotationEffect(.degrees(-30)).position(x: 770, y: 470)
-            light(UsageSharePalette.gold, width: 340, height: 390, opacity: 0.25)
+            light(.white, width: 340, height: 390, opacity: 0.25)
                 .position(x: 508, y: -97)
             texture
             // A gentle vignette retains contrast around the source caption.

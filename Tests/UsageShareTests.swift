@@ -113,18 +113,12 @@ final class UsageShareExportTests: XCTestCase {
             accounts: [], timeline: slices, scan: UsageScanSummary())
         let data = try UsageShareExporter.pngData(snapshot: UsageShareSnapshot(report: report, calendar: calendar))
         let rep = try XCTUnwrap(NSBitmapImageRep(data: data))
-        // The previous export lost the reference's colored light entirely.
-        // Inspect open background above the plates, not text or effects inside them.
-        var colorful = 0, sampled = 0
-        for y in stride(from: 30, to: 160, by: 20) {
-            for x in stride(from: 40, to: 2360, by: 60) {
-                let color = try XCTUnwrap(rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
-                let components = [color.redComponent, color.greenComponent, color.blueComponent]
-                if components.max()! - components.min()! > 0.1 { colorful += 1 }
-                sampled += 1
-            }
-        }
-        XCTAssertGreaterThan(Double(colorful) / Double(sampled), 0.4)
+        // The user requested white light in place of the former yellow glow.
+        // Sample its open center above the day card, away from text and borders.
+        let light = try XCTUnwrap(rep.colorAt(x: 2200, y: 100)?.usingColorSpace(.deviceRGB))
+        let components = [light.redComponent, light.greenComponent, light.blueComponent]
+        XCTAssertGreaterThan(components.min()!, 0.8)
+        XCTAssertLessThan(components.max()! - components.min()!, 0.035)
         let weekly = try XCTUnwrap(rep.colorAt(x: 1480, y: 900)?.usingColorSpace(.deviceRGB))
         let today = try XCTUnwrap(rep.colorAt(x: 2180, y: 900)?.usingColorSpace(.deviceRGB))
         XCTAssertLessThan(max(weekly.redComponent, weekly.greenComponent, weekly.blueComponent), 0.35)

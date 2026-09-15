@@ -201,14 +201,14 @@ struct UsageShareCard: View {
     private var pastelHeader: some View {
         ZStack {
             LinearGradient(stops: [
-                .init(color: UsageSharePalette.coral, location: 0),
-                .init(color: UsageSharePalette.coral, location: 0.16),
+                .init(color: .white, location: 0),
+                .init(color: .white, location: 0.16),
                 .init(color: UsageSharePalette.lavender, location: 0.73),
                 .init(color: UsageSharePalette.lavender, location: 1)
             ], startPoint: .top, endPoint: .bottom)
             RadialGradient(colors: [UsageSharePalette.mint, UsageSharePalette.mint.opacity(0)],
                            center: .bottomTrailing, startRadius: 5, endRadius: 260)
-            RadialGradient(colors: [UsageSharePalette.gold.opacity(0.72), .clear],
+            RadialGradient(colors: [.white.opacity(0.72), .clear],
                            center: .topTrailing, startRadius: 0, endRadius: 185)
             todaySeal
                 .frame(width: 102, height: 102)
@@ -226,7 +226,7 @@ struct UsageShareCard: View {
             Circle()
                 .fill(LinearGradient(stops: [
                     .init(color: UsageSharePalette.paper, location: 0),
-                    .init(color: UsageSharePalette.coral, location: 0.28),
+                    .init(color: .white, location: 0.28),
                     .init(color: UsageSharePalette.lavender, location: 0.58),
                     .init(color: UsageSharePalette.mint, location: 0.80),
                     .init(color: UsageSharePalette.paper, location: 1)
