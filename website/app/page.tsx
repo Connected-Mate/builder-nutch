@@ -123,6 +123,14 @@ function AppScreenshots() {
 
 const faqs = [
   [
+    'What is AI Podium?',
+    'AI Podium turns your recorded Claude Code and Codex activity into a shareable image: token totals for today, this calendar week or this month, plus the AI assistants you used most today. You can also focus on a single project. Input, cache and output are included; reasoning is part of output, not added twice. Incomplete readings stay marked.',
+  ],
+  [
+    'What does my AI Podium share?',
+    'The image shows token totals, dates and your AI ranking. Account names and conversations stay private. A project name appears only when you select a project and personal details are visible. Copy or save the image, then attach it to your post on X or LinkedIn. The optional 17:30 notification opens today’s preview; it does not publish for you.',
+  ],
+  [
     'Will it find accounts already on my Mac?',
     'Yes. Builder Nutch checks the usual Claude Code, Codex and Kimi Code profile locations and adds confirmed signed-in accounts. It reuses the original sign-in without copying tokens. Previously linked profiles and verified duplicate identities are skipped; removed profiles stay removed. Kimi can show separate profiles for the same subscription when its tool does not provide account identity. Browser subscriptions need their own sign-in; browser cookies are not scanned.',
   ],
@@ -168,6 +176,7 @@ export default function Home() {
         </a>
         <nav aria-label="Main navigation">
           <a href="#how-it-works">How it works</a>
+          <a href="#ai-podium">AI Podium</a>
           <a href={repository} className="github-link">
             GitHub <ArrowUpRight size={15} />
           </a>
@@ -195,8 +204,8 @@ export default function Home() {
             </p>
             <p>
               Bring the plans you pay for together, keep available capacity
-              visible and turn more experiments into production before the
-              economics change.
+              visible and turn more experiments into production. With AI Podium,
+              share your token activity and the AI behind your day.
             </p>
             <div className="hero-actions">
               <a className="button" href={download}>
@@ -219,6 +228,32 @@ export default function Home() {
             ))}
           </div>
           <AppScreenshots />
+        </section>
+        <section className="podium-section shell" id="ai-podium" aria-labelledby="podium-title">
+          <div className="podium-intro">
+            <span className="eyebrow">AI PODIUM</span>
+            <h2 id="podium-title">Your day.<br />Your AI Podium.</h2>
+            <p>
+              You built something. Show the AI behind it. Your token totals and
+              most-used assistants, together in one image, ready for X or LinkedIn.
+            </p>
+            <ul className="podium-features">
+              <li><Check size={17} /> Today, this week, this month — or one project</li>
+              <li><Check size={17} /> Today’s top AI, ranked by recorded tokens</li>
+              <li><Check size={17} /> A daily reminder at 17:30 to share your day</li>
+            </ul>
+            <a className="quiet-link" href={download}>
+              Make your AI Podium <ArrowUpRight size={16} />
+            </a>
+          </div>
+          <figure className="podium-preview">
+            <a href={asset('screenshots/ai-podium.png')} target="_blank" rel="noreferrer"
+              aria-label="View a full-size AI Podium example">
+              <img src={asset('screenshots/ai-podium.png')} width={2400} height={1260}
+                loading="lazy" alt="AI Podium example exported from Builder Nutch: token totals on the left and today’s AI ranking with provider logos on the right, on a black background lit in the leading AI’s colors." />
+            </a>
+            <figcaption>Example data · Exported from the Mac app · 2400 × 1260 PNG</figcaption>
+          </figure>
         </section>
         <section
           className="workflow shell"
