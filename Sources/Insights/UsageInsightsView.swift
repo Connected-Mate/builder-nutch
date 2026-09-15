@@ -181,77 +181,12 @@ struct UsageInsightsView: View {
     // MARK: - Overview
 
     private func overview(_ report: UsageLedgerReport) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                Text(String(format: NSLocalizedString("%@ tokens", comment: "Usage summary"),
-                            (report.scan.hitLimit ? "≥ " : "") + Self.compact(report.tokens.total)))
-                    .font(AppTheme.font(size: 22, weightValue: 550)).tracking(-0.5)
-                    .help((report.scan.hitLimit ? "≥ " : "") + report.tokens.total.formatted())
-                Text(String(format: NSLocalizedString("Last %d days", comment: "Usage summary"), report.days))
-                    .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
-                if report.scan.hitLimit {
-                    Text("Partial history").font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
-                        .help("Some history has not been read yet. These totals are a lower bound.")
-                }
-                }
-                Spacer(minLength: 8)
-                Picker("Period", selection: $model.days) {
-                    Text("7 days").tag(7)
-                    Text("30 days").tag(30)
-                }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 150).controlSize(.small)
-                .disabled(model.isLoading)
-                if model.isLoading { ProgressView().controlSize(.small) }
-            }
+        VStack(alignment: .leading, spacing: 12) {
+            UsageStatisticsView(report: report, days: $model.days, isLoading: model.isLoading)
             if let milestones = report.milestones {
                 UsageMilestonesView(progress: milestones)
             }
-            tokenSummary(report.tokens, partialHistory: report.scan.hitLimit)
-            dayStrip(report)
-            DisclosureGroup("Token details") {
-                VStack(alignment: .leading, spacing: 8) {
-                    tokenDetail("Input without reported cache", value: report.tokens.input, availability: report.tokens.coverage.input)
-                    tokenDetail("Cache written", value: report.tokens.cacheCreation, availability: report.tokens.coverage.cacheCreation)
-                    tokenDetail("Cache read", value: report.tokens.cacheRead, availability: report.tokens.coverage.cacheRead)
-                    Text("Input includes cache. Reasoning, when reported, is already included in output.")
-                        .foregroundStyle(AppTheme.muted)
-                    Text(String(format: NSLocalizedString("%d sessions · %@ responses", comment: "Usage detail"),
-                                report.sessionCount, Self.compact(report.messages)))
-                        .foregroundStyle(AppTheme.muted)
-                }
-                .font(AppTheme.font(size: 11)).padding(.top, 10)
-            }
-            .font(AppTheme.font(size: 11))
         }
-    }
-
-    private func tokenSummary(_ tokens: UsageTokenTotals, partialHistory: Bool) -> some View {
-        let inputCoverage: UsageMeasurementAvailability = partialHistory && tokens.coverage.input == .complete ? .partial : tokens.coverage.input
-        let outputCoverage: UsageMeasurementAvailability = partialHistory && tokens.coverage.output == .complete ? .partial : tokens.coverage.output
-        return HStack(alignment: .top, spacing: 16) {
-            tokenMetric("Input", value: Self.tokenDisplay(tokens.totalInput, availability: inputCoverage, compact: true),
-                        exact: Self.tokenDisplay(tokens.totalInput, availability: inputCoverage))
-            tokenMetric("Output", value: Self.tokenDisplay(tokens.output, availability: outputCoverage, compact: true),
-                        exact: Self.tokenDisplay(tokens.output, availability: outputCoverage))
-            tokenMetric("Reasoning", value: tokens.measuredReasoning.map {
-                (tokens.reasoningAvailability == .partial ? "≥ " : "") + Self.compact($0)
-            } ?? "—", exact: Self.tokenDisplay(tokens.thinking, availability: tokens.reasoningAvailability),
-                        note: tokens.reasoningAvailability == .unavailable ? "Not reported" :
-                            tokens.reasoningAvailability == .partial ? "Partial reading" : nil)
-        }
-        .padding(.vertical, 8)
-    }
-
-    private func tokenMetric(_ title: LocalizedStringKey, value: String, exact: String? = nil, note: LocalizedStringKey? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
-            Text(value).font(AppTheme.font(size: 18, weightValue: 550)).monospacedDigit()
-            if let note { Text(note).font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted) }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .help(exact ?? value)
-        .accessibilityElement(children: .combine)
     }
 
     private func tokenDetail(_ title: LocalizedStringKey, value: Int, availability: UsageMeasurementAvailability = .complete) -> some View {
@@ -265,37 +200,6 @@ struct UsageInsightsView: View {
     private static func tokenDisplay(_ value: Int, availability: UsageMeasurementAvailability, compact: Bool = false) -> String {
         guard availability != .unavailable else { return "—" }
         return (availability == .partial ? "≥ " : "") + (compact ? Self.compact(value) : value.formatted())
-    }
-
-    /// One column per day of the window, the tallest being the busiest. Days
-    /// with nothing in them are drawn empty rather than left out, so a quiet
-    /// Sunday is visibly quiet.
-    private func dayStrip(_ report: UsageLedgerReport) -> some View {
-        let byDay = Dictionary(uniqueKeysWithValues: report.timeline.map { ($0.day, $0) })
-        let days = Self.dayKeys(from: report.windowStart, to: report.windowEnd)
-        let peak = max(report.timeline.map { $0.tokens.total }.max() ?? 1, 1)
-        return HStack(alignment: .bottom, spacing: report.days <= 7 ? 6 : 2) {
-            ForEach(days, id: \.self) { day in
-                let slice = byDay[day]
-                VStack(spacing: 5) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(slice == nil ? AppTheme.track : AppTheme.ink)
-                        .frame(height: max(3, CGFloat(slice?.tokens.total ?? 0) / CGFloat(peak) * 56))
-                        .frame(maxHeight: 56, alignment: .bottom)
-                    if report.days <= 7 {
-                        Text(Self.dayLabel(day, wide: true))
-                            .font(AppTheme.font(size: 9)).foregroundStyle(AppTheme.muted).lineLimit(1)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .help("\(Self.dayLabel(day, wide: true)): \((slice?.tokens.total ?? 0).formatted()) tokens")
-                .accessibilityLabel(Text("\(Self.dayLabel(day, wide: true)), \((slice?.tokens.total ?? 0).formatted()) tokens"))
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14).padding(.horizontal, 16)
-        .background(AppTheme.paper, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppTheme.line))
     }
 
     // MARK: - Projects

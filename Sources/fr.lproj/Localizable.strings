@@ -467,4 +467,9 @@
 "Keep your timeline after cleaning sessions" = "Conservez votre chronologie après nettoyage des sessions";
 "Recorded tokens are saved separately on this Mac and remain after the original Claude Code or Codex files are removed." = "Les tokens enregistrés sont sauvegardés séparément sur ce Mac et restent disponibles après suppression des fichiers Claude Code ou Codex d’origine.";
 "Automatic recording" = "Enregistrement automatique";
+"Recorded tokens" = "Tokens enregistrés";
+"Daily activity" = "Activité quotidienne";
+"Includes cache" = "Cache inclus";
+"Reasoning: %@ · Included in output" = "Raisonnement : %@ · Inclus dans la sortie";
+"Select a day. Use the left and right arrow keys to move between days." = "Sélectionnez un jour. Utilisez les flèches gauche et droite pour changer de jour.";
 "Builder Nutch saves available token activity while it is open, even with the accounts window closed. Restored sessions are not counted twice." = "Builder Nutch sauvegarde les tokens disponibles tant qu’il est ouvert, même lorsque la fenêtre des comptes est fermée. Les sessions restaurées ne sont pas comptées deux fois.";

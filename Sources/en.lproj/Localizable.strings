@@ -200,4 +200,9 @@
 "Keep your timeline after cleaning sessions" = "Keep your timeline after cleaning sessions";
 "Recorded tokens are saved separately on this Mac and remain after the original Claude Code or Codex files are removed." = "Recorded tokens are saved separately on this Mac and remain after the original Claude Code or Codex files are removed.";
 "Automatic recording" = "Automatic recording";
+"Recorded tokens" = "Recorded tokens";
+"Daily activity" = "Daily activity";
+"Includes cache" = "Includes cache";
+"Reasoning: %@ · Included in output" = "Reasoning: %@ · Included in output";
+"Select a day. Use the left and right arrow keys to move between days." = "Select a day. Use the left and right arrow keys to move between days.";
 "Builder Nutch saves available token activity while it is open, even with the accounts window closed. Restored sessions are not counted twice." = "Builder Nutch saves available token activity while it is open, even with the accounts window closed. Restored sessions are not counted twice.";
