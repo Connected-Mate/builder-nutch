@@ -7,12 +7,14 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let manager: AccountManager
     private let preferences: Preferences
+    private let usage: UsageInsightsModel
     private let navigation = AccountsNavigation()
     private let settingsContent: (() -> AnyView)?
     private let onOpenSettings: (() -> Void)?
 
-    init(manager: AccountManager, preferences: Preferences, onOpenSettings: (() -> Void)? = nil,
+    init(manager: AccountManager, preferences: Preferences, usage: UsageInsightsModel, onOpenSettings: (() -> Void)? = nil,
          settingsContent: (() -> AnyView)? = nil) {
+        self.usage = usage
         self.settingsContent = settingsContent
         self.manager = manager
         self.preferences = preferences
@@ -43,7 +45,7 @@ final class AccountsWindowController: NSObject, NSWindowDelegate {
         window.delegate = self
         window.contentView = NSHostingView(
             rootView: AccountsView(manager: manager, preferences: preferences, onOpenSettings: onOpenSettings,
-                                   navigation: navigation, settingsContent: settingsContent)
+                                   navigation: navigation, settingsContent: settingsContent, usage: usage)
         )
         window.center()
         self.window = window

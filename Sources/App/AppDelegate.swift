@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var accountManager: AccountManager?
     private var customAssistants: CustomAssistantStore?
     private var accountsWindow: AccountsWindowController?
+    private var usageHistory: UsageInsightsModel?
     private var settings: SettingsWindowController?
     private var preferences: Preferences?
     private var statusItem: StatusItemController?
@@ -57,8 +58,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             signOut: { _ in }, signIn: { _ in false },
             switchAccount: { _ in false }, retry: { _ in }, managedAccounts: true
         )
+        let usageHistory = UsageInsightsModel()
+        self.usageHistory = usageHistory
         let accounts = AccountsWindowController(
-            manager: manager, preferences: preferences,
+            manager: manager, preferences: preferences, usage: usageHistory,
             settingsContent: { appearance.makeView() }
         )
         appearance.onShowInAccounts = { [weak accounts] in accounts?.showSettings() }
@@ -152,6 +155,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences.$problemAlerts.receive(on: RunLoop.main).sink { [weak escalator] in
             escalator?.isEnabled = $0
         }.store(in: &cancellables)
+        manager.$accounts.dropFirst().receive(on: RunLoop.main).sink { [weak usageHistory] _ in
+            usageHistory?.captureInBackground()
+        }.store(in: &cancellables)
         manager.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
             self?.updateNotch()
         }.store(in: &cancellables)
@@ -203,7 +209,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refresh() {
-        guard !terminating, refreshTask == nil, let manager = accountManager else { return }
+        guard !terminating else { return }
+        usageHistory?.captureInBackground()
+        guard refreshTask == nil, let manager = accountManager else { return }
         refreshTask = Task { [weak self] in
             await manager.refreshAll()
             self?.refreshTask = nil
@@ -391,8 +399,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         OfficialAccountProcess.shutdownAll()
         accountManager?.shutdown()
         refreshTask?.cancel()
+        usageHistory?.stop()
         Task {
+            async let historyDrain: Void = usageHistory?.shutdownAndWait() ?? ()
             await accountManager?.shutdownAndWait()
+            await historyDrain
             self.replyToTermination(sender)
         }
         // macOS is owed this reply. While it was owed, `osascript … quit` failed
@@ -414,6 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
     func applicationWillTerminate(_ notification: Notification) {
+        usageHistory?.stop()
         accountManager?.shutdown()
         refreshTask?.cancel()
         refreshTimer?.invalidate()

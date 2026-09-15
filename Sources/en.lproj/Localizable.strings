@@ -177,3 +177,11 @@
 "Cursor account · Web dashboard" = "Cursor account · Web dashboard";
 "Separate web account" = "Separate web account";
 "%.1f B" = "%.1f B";
+"This reading could not be saved. Previously saved history is kept. Try refreshing." = "This reading could not be saved. Previously saved history is kept. Try refreshing.";
+"History saved on this Mac" = "History saved on this Mac";
+"Saved tokens stay in your timeline when session files are removed. Recording continues while Builder Nutch is open." = "Saved tokens stay in your timeline when session files are removed. Recording continues while Builder Nutch is open.";
+"Your token history stays with you." = "Your token history stays with you.";
+"Keep your timeline after cleaning sessions" = "Keep your timeline after cleaning sessions";
+"Recorded tokens are saved separately on this Mac and remain after the original Claude Code or Codex files are removed." = "Recorded tokens are saved separately on this Mac and remain after the original Claude Code or Codex files are removed.";
+"Automatic recording" = "Automatic recording";
+"Builder Nutch saves available token activity while it is open, even with the accounts window closed. Restored sessions are not counted twice." = "Builder Nutch saves available token activity while it is open, even with the accounts window closed. Restored sessions are not counted twice.";

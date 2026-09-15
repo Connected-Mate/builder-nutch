@@ -10,33 +10,76 @@ final class UsageInsightsModel: ObservableObject {
     @Published var days = 7 { didSet { if days != oldValue { Task { await refresh() } } } }
 
     private let ledger: UsageLedger
+    private let home: URL
+    private let catalogRoot: URL
     private var lastRefresh: Date?
+    private var refreshTask: Task<UsageLedgerReport, Never>?
+    private var backgroundTask: Task<Void, Never>?
+    private var stopped = false
 
     init(home: URL = FileManager.default.homeDirectoryForCurrentUser) {
+        self.home = home
         let catalogRoot = home.appendingPathComponent("Library/Application Support/Codenotch Accounts", isDirectory: true)
-        let catalog = (try? AccountStorage(root: catalogRoot)).flatMap { try? $0.load() }
-        ledger = UsageLedger(sources: UsageLedger.defaultSources(home: home, catalogRoot: catalogRoot),
-                             cacheURL: UsageLedger.defaultCacheURL(catalogRoot: catalogRoot),
-                             timeline: UsageLedgerDump.timeline(from: catalog))
+        self.catalogRoot = catalogRoot
+        ledger = UsageLedger(sources: [], cacheURL: UsageLedger.defaultCacheURL(catalogRoot: catalogRoot),
+                             archiveURL: UsageLedger.defaultArchiveURL(catalogRoot: catalogRoot))
     }
 
-    /// Reads again only when the last reading is older than a minute, unless
-    /// asked outright. The cache makes a refresh cheap, not free.
+    /// App-owned, so capture continues with the accounts window closed. All
+    /// routes share the same task and ledger; a view cannot start a second writer.
+    func captureInBackground() {
+        guard !stopped, backgroundTask == nil else { return }
+        backgroundTask = Task { [weak self] in
+            await self?.refresh()
+            self?.backgroundTask = nil
+        }
+    }
+
     func refreshIfStale(now: Date = Date()) async {
         if let lastRefresh, now.timeIntervalSince(lastRefresh) < 60, report != nil { return }
         await refresh(now: now)
     }
 
     func refresh(now: Date = Date()) async {
-        guard !isLoading else { return }
+        guard !stopped else { return }
+        if let refreshTask { _ = await refreshTask.value; return }
         isLoading = true
-        defer { isLoading = false }
-        let days = self.days
-        let ledger = self.ledger
-        report = await ledger.report(days: days, now: now)
-        failure = nil
+        let days = self.days, ledger = self.ledger, home = self.home, catalogRoot = self.catalogRoot
+        let task = Task {
+            // Discovery is cheap but still file I/O. Read fresh homes and login
+            // context every pass, including accounts added after app launch.
+            let context = await Task.detached(priority: .utility) {
+                let catalog = (try? AccountStorage(root: catalogRoot)).flatMap { try? $0.load() }
+                return (UsageLedger.defaultSources(home: home, catalogRoot: catalogRoot),
+                        UsageLedgerDump.timeline(from: catalog))
+            }.value
+            await ledger.updateSources(context.0, timeline: context.1)
+            return await ledger.report(days: days, now: now)
+        }
+        refreshTask = task
+        let result = await task.value
+        refreshTask = nil
+        isLoading = false
+        guard !stopped else { return }
+        report = result
+        failure = result.persistence.state == .failed
+            ? NSLocalizedString("This reading could not be saved. Previously saved history is kept. Try refreshing.", comment: "Durable usage write failure")
+            : nil
         lastRefresh = now
+        if self.days != days { await refresh() }
     }
+
+    func stop() {
+        stopped = true
+        refreshTask?.cancel()
+        backgroundTask?.cancel()
+    }
+
+    func shutdownAndWait() async {
+        stop()
+        if let refreshTask { _ = await refreshTask.value }
+    }
+
 }
 
 struct UsageInsightsView: View {
@@ -46,21 +89,29 @@ struct UsageInsightsView: View {
     @State private var expandedProjects: Set<String> = []
 
     var body: some View {
-        Group {
-            if let report = model.report {
-                if report.sessionCount == 0 && !report.scan.hitLimit {
-                    empty
-                } else {
-                    content(report)
-                }
-            } else if model.isLoading {
-                ProgressView().controlSize(.small)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                empty
+        VStack(alignment: .leading, spacing: 0) {
+            if let failure = model.failure {
+                Label(failure, systemImage: "exclamationmark.triangle")
+                    .font(AppTheme.font(size: 12))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(24)
             }
+            Group {
+                if let report = model.report {
+                    if report.sessionCount == 0 && !report.scan.hitLimit {
+                        empty
+                    } else {
+                        content(report)
+                    }
+                } else if model.isLoading {
+                    ProgressView().controlSize(.small)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    empty
+                }
+            }
+            .task { await model.refreshIfStale() }
         }
-        .task { await model.refreshIfStale() }
     }
 
     private var empty: some View {
@@ -283,6 +334,10 @@ struct UsageInsightsView: View {
         VStack(alignment: .leading, spacing: 6) {
             Label("Read from Claude Code and Codex on this Mac. Nothing leaves it.", systemImage: "checkmark.shield")
             Text("Only recorded tokens are counted. Subscription limits are shown on each account.")
+            if report.persistence.state == .saved {
+                Label("History saved on this Mac", systemImage: "externaldrive.badge.checkmark")
+                Text("Saved tokens stay in your timeline when session files are removed. Recording continues while Builder Nutch is open.")
+            }
             if report.scan.hitLimit {
                 Text("The reading stopped early to keep the app quick, so these figures are a floor.")
             }

@@ -444,3 +444,11 @@
 "Cursor account · Web dashboard" = "Compte Cursor · Tableau de bord web";
 "Separate web account" = "Compte web séparé";
 "%.1f B" = "%.1f Md";
+"This reading could not be saved. Previously saved history is kept. Try refreshing." = "Cette lecture n’a pas pu être sauvegardée. L’historique déjà enregistré est conservé. Essayez d’actualiser.";
+"History saved on this Mac" = "Historique sauvegardé sur ce Mac";
+"Saved tokens stay in your timeline when session files are removed. Recording continues while Builder Nutch is open." = "Les tokens enregistrés restent dans votre chronologie après suppression des fichiers de sessions. L’enregistrement continue tant que Builder Nutch est ouvert.";
+"Your token history stays with you." = "Votre historique de tokens reste avec vous.";
+"Keep your timeline after cleaning sessions" = "Conservez votre chronologie après nettoyage des sessions";
+"Recorded tokens are saved separately on this Mac and remain after the original Claude Code or Codex files are removed." = "Les tokens enregistrés sont sauvegardés séparément sur ce Mac et restent disponibles après suppression des fichiers Claude Code ou Codex d’origine.";
+"Automatic recording" = "Enregistrement automatique";
+"Builder Nutch saves available token activity while it is open, even with the accounts window closed. Restored sessions are not counted twice." = "Builder Nutch sauvegarde les tokens disponibles tant qu’il est ouvert, même lorsque la fenêtre des comptes est fermée. Les sessions restaurées ne sont pas comptées deux fois.";

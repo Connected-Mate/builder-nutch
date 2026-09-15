@@ -32,7 +32,7 @@ struct AccountsView: View {
     @State private var filter: AccountProvider?
     @State private var showingAdd = false
     @State private var showingUsage = false
-    @StateObject private var usage = UsageInsightsModel()
+    @ObservedObject private var usage: UsageInsightsModel
     @State private var connecting: ManagedAccount?
     @State private var personalizing: ManagedAccount?
     @State private var showingRotation = false
@@ -46,7 +46,9 @@ struct AccountsView: View {
     @AppStorage("app.language") private var appLanguage = AppLanguage.system.rawValue
 
     init(manager: AccountManager, preferences: Preferences, onOpenSettings: (() -> Void)? = nil, projectFolder: URL? = nil,
-         navigation: AccountsNavigation? = nil, settingsContent: (() -> AnyView)? = nil) {
+         navigation: AccountsNavigation? = nil, settingsContent: (() -> AnyView)? = nil,
+         usage: UsageInsightsModel) {
+        self.usage = usage
         self.navigation = navigation ?? AccountsNavigation()
         self.settingsContent = settingsContent
         self.manager = manager
