@@ -56,7 +56,7 @@ struct UsageTranscriptScanner {
             var start = chunk.startIndex
             while let newline = chunk[start...].firstIndex(of: 0x0A) {
                 let slice = chunk[start..<newline]
-                position += UInt64(slice.count + 1)
+                position += UInt64(line.count + slice.count + 1)
                 if skippingLongLine {
                     skippingLongLine = false
                     line.removeAll(keepingCapacity: true)
@@ -219,6 +219,7 @@ struct UsageTranscriptScanner {
     private struct CodexState {
         var digest: UsageSessionDigest
         var previousCumulative: CodexCounters?
+        var previousObservedCumulative: CodexCounters?
         var responseIDs: Set<String> = []
         var projectPath: String?
         var model: String?
@@ -230,6 +231,7 @@ struct UsageTranscriptScanner {
             digest = UsageSessionDigest(sessionID: "codex:\(resumedID)", provider: .codex)
             digest.managedAccountID = managedAccountID
             previousCumulative = checkpoint.codexPreviousCumulative
+            previousObservedCumulative = checkpoint.codexPreviousObservedCumulative ?? checkpoint.codexPreviousCumulative
             responseIDs = checkpoint.codexResponseIDs
             projectPath = checkpoint.codexProjectPath
             model = checkpoint.codexModel
@@ -249,7 +251,8 @@ struct UsageTranscriptScanner {
                                       codexProjectPath: projectPath,
                                       codexModel: model,
                                       codexThreadID: threadID,
-                                      codexSawExactRecord: sawExactRecord)
+                                      codexSawExactRecord: sawExactRecord,
+                                      codexPreviousObservedCumulative: previousObservedCumulative)
         }
     }
 
@@ -276,21 +279,42 @@ struct UsageTranscriptScanner {
             hasReasoningOutput = UsageTranscriptScanner.countIfPresent(usage["reasoning_output_tokens"]) != nil
         }
 
-        func delta(after previous: CodexCounters?) -> CodexCounters {
+        func delta(after previous: CodexCounters?, treatingRegressionAsReset: Bool = true) -> CodexCounters {
+            // Cache/reasoning are details inside the primary counters. Their
+            // absence or revision cannot turn the whole session into new usage.
+            guard let previous else { return self }
+            if treatingRegressionAsReset && (inclusiveInput < previous.inclusiveInput || output < previous.output) { return self }
+            return CodexCounters(inclusiveInput: max(0, inclusiveInput - previous.inclusiveInput),
+                                 cachedInput: max(0, cachedInput - previous.cachedInput),
+                                 cacheWriteInput: max(0, cacheWriteInput - previous.cacheWriteInput),
+                                 output: max(0, output - previous.output),
+                                 reasoningOutput: max(0, reasoningOutput - previous.reasoningOutput),
+                                 hasCachedInput: hasCachedInput,
+                                 hasCacheWriteInput: hasCacheWriteInput,
+                                 hasReasoningOutput: hasReasoningOutput)
+        }
+
+        func highWater(after previous: CodexCounters?) -> CodexCounters {
+            guard let previous else { return self }
+            var result = self
+            result.inclusiveInput = max(inclusiveInput, previous.inclusiveInput)
+            result.output = max(output, previous.output)
+            result.cachedInput = max(cachedInput, previous.cachedInput)
+            result.cacheWriteInput = max(cacheWriteInput, previous.cacheWriteInput)
+            result.reasoningOutput = max(reasoningOutput, previous.reasoningOutput)
+            return result
+        }
+
+        /// The deployed parser's former calculation, retained only as numeric
+        /// evidence when a complete replay proves an old archive floor wrong.
+        func legacyDelta(after previous: CodexCounters?) -> CodexCounters {
             guard let previous,
                   inclusiveInput >= previous.inclusiveInput,
                   cachedInput >= previous.cachedInput,
                   cacheWriteInput >= previous.cacheWriteInput,
                   output >= previous.output,
                   reasoningOutput >= previous.reasoningOutput else { return self }
-            return CodexCounters(inclusiveInput: inclusiveInput - previous.inclusiveInput,
-                                 cachedInput: cachedInput - previous.cachedInput,
-                                 cacheWriteInput: cacheWriteInput - previous.cacheWriteInput,
-                                 output: output - previous.output,
-                                 reasoningOutput: reasoningOutput - previous.reasoningOutput,
-                                 hasCachedInput: hasCachedInput,
-                                 hasCacheWriteInput: hasCacheWriteInput,
-                                 hasReasoningOutput: hasReasoningOutput)
+            return delta(after: previous)
         }
 
         private init(inclusiveInput: Int, cachedInput: Int, cacheWriteInput: Int, output: Int,
@@ -367,29 +391,39 @@ struct UsageTranscriptScanner {
             // Once exact per-request telemetry starts, later cumulative
             // snapshots overlap it. Earlier cumulative history remains valid.
             guard !state.sawExactRecord else { return }
-            let delta = cumulative.delta(after: state.previousCumulative)
-            state.previousCumulative = cumulative
-            guard delta.inclusiveInput > 0 || delta.output > 0 else { return }
-            recordCodex(delta.totals(), at: UsageText.date(object["timestamp"]), into: &state.digest,
+            let lastUsage = (info["last_token_usage"] as? [String: Any]).flatMap(CodexCounters.init)
+            // When totals still include earlier requests, a backwards snapshot
+            // is a revision/replay, not a fresh session worth counting whole.
+            let primaryDecreased = state.previousCumulative.map { cumulative.inclusiveInput < $0.inclusiveInput || cumulative.output < $0.output } ?? false
+            let reset = primaryDecreased && (lastUsage.map { $0.inclusiveInput == cumulative.inclusiveInput && $0.output == cumulative.output } ?? true)
+            let derivation = UsageCumulativeDerivation(current: cumulative, previous: state.previousCumulative,
+                                                       legacyPrevious: state.previousObservedCumulative,
+                                                       treatsRegressionAsReset: reset)
+            let delta = cumulative.delta(after: state.previousCumulative, treatingRegressionAsReset: reset)
+            state.previousObservedCumulative = cumulative
+            state.previousCumulative = reset ? cumulative : cumulative.highWater(after: state.previousCumulative)
+            guard delta.inclusiveInput > 0 || delta.output > 0 || derivation.legacyTokens.total > 0 else { return }
+            recordCodex(derivation.tokens, at: UsageText.date(object["timestamp"]), into: &state.digest,
                         projectPath: state.projectPath, model: state.model,
-                        requestID: "cumulative:\(cumulative.inclusiveInput):\(cumulative.cachedInput):\(cumulative.cacheWriteInput):\(cumulative.output):\(cumulative.reasoningOutput):\(object["timestamp"] as? String ?? "")")
+                        requestID: "cumulative:\(cumulative.inclusiveInput):\(cumulative.cachedInput):\(cumulative.cacheWriteInput):\(cumulative.output):\(cumulative.reasoningOutput):\(object["timestamp"] as? String ?? "")",
+                        cumulative: derivation)
         default:
             break
         }
     }
 
     private func recordCodex(_ tokens: UsageTokenTotals, at date: Date?, into digest: inout UsageSessionDigest,
-                             projectPath: String?, model: String?, requestID: String? = nil) {
-        guard tokens.total > 0 else { return }
+                             projectPath: String?, model: String?, requestID: String? = nil, cumulative: UsageCumulativeDerivation? = nil) {
+        guard tokens.total > 0 || cumulative != nil else { return }
         let weight = UsageWeight.weight(tokens, model: model)
         let event = UsageRecordedEvent(tokens: tokens, weight: weight, date: date,
-                                       projectPath: projectPath, model: model, sidechain: false)
+                                       projectPath: projectPath, model: model, sidechain: false, cumulative: cumulative)
         let id = event.identity(sessionID: digest.sessionID, provider: .codex, requestID: requestID)
         let enriched = digest.recordedEvents?[id]?.reconciled(with: event) ?? event
         digest.recordedEvents?[id] = enriched
         digest.tokens += tokens
         digest.weight += weight
-        digest.messages += 1
+        digest.messages += tokens.total > 0 ? 1 : 0
         if let model { digest.modelWeights[model, default: 0] += weight }
         if let projectPath { digest.projectWeights[projectPath, default: 0] += weight }
         guard let date else { return }
@@ -400,7 +434,7 @@ struct UsageTranscriptScanner {
             var bucket = digest.activityMinutes[key] ?? UsageTimeBucket()
             bucket.tokens += tokens
             bucket.weight += weight
-            bucket.messages += 1
+            bucket.messages += tokens.total > 0 ? 1 : 0
             digest.activityMinutes[key] = bucket
         }
     }
@@ -440,6 +474,7 @@ struct UsageTranscriptCheckpoint: Codable, Equatable {
     var codexModel: String?
     var codexThreadID: String?
     var codexSawExactRecord = false
+    var codexPreviousObservedCumulative: UsageTranscriptScanner.CodexCounters?
 }
 
 /// Bounds on every string that comes out of a transcript.

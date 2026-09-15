@@ -1,4 +1,5 @@
 import Foundation
+import Compression
 
 /// What the ledger already knows about one transcript file.
 ///
@@ -28,12 +29,15 @@ struct UsageLedgerCacheEntry: Codable, Equatable {
 /// of conversation, and nothing in it is sent anywhere.
 struct UsageLedgerCache: Codable, Equatable {
     /// Bumped when the file layout changes.
-    static let currentVersion = 5
+    static let currentVersion = 6
     /// Bumped when `UsageWeight` changes, because every cached weight was
     /// computed with the old formula and mixing the two would be nonsense.
     static let currentFormula = 1
-    /// A cache far bigger than this is not a cache any more.
+    /// Ordinary indices remain readable JSON; larger ones are losslessly
+    /// compressed rather than losing their progress checkpoints.
     static let maximumBytes = 40_000_000
+    static let maximumExpandedBytes = 512_000_000
+    private static let compressedMagic = Data("BNLC1".utf8)
 
     var version = UsageLedgerCache.currentVersion
     var formula = UsageLedgerCache.currentFormula
@@ -48,8 +52,8 @@ struct UsageLedgerCache: Codable, Equatable {
     /// must cost a slow refresh, never an error the person has to understand.
     static func load(from url: URL) -> UsageLedgerCache {
         guard (try? AccountStorage.rejectSymlink(url)) != nil,
-              let data = try? Data(contentsOf: url), data.count <= maximumBytes,
-              let cache = try? JSONDecoder().decode(UsageLedgerCache.self, from: data),
+              let data = try? Data(contentsOf: url),
+              let cache = try? decode(data),
               cache.version == currentVersion, cache.formula == currentFormula else {
             return UsageLedgerCache()
         }
@@ -91,19 +95,59 @@ struct UsageLedgerCache: Codable, Equatable {
         try AccountStorage.rejectSymlink(url)
         guard FileManager.default.fileExists(atPath: url.path) else { return UsageLedgerCache() }
         let data = try Data(contentsOf: url)
-        guard let cache = try? JSONDecoder().decode(UsageLedgerCache.self, from: data) else {
+        guard let cache = try? decode(data) else {
             throw UsageArchiveError.corrupt
         }
         guard cache.version >= 5 else { return UsageLedgerCache() }
         return identifyingComponents(cache)
     }
 
-    /// Writes atomically and privately, reusing the same guards as the account
-    /// catalog. A cache that cannot be written is not an error either.
-    func save(to url: URL) {
-        guard let data = try? JSONEncoder().encode(self), data.count <= Self.maximumBytes else { return }
-        try? AccountStorage.privateDirectory(url.deletingLastPathComponent())
-        try? AccountStorage.write(data, to: url)
+    private static func decode(_ data: Data) throws -> UsageLedgerCache {
+        let json: Data
+        if data.starts(with: compressedMagic) {
+            guard data.count > compressedMagic.count + 8 else { throw UsageArchiveError.corrupt }
+            let sizeBytes = data.dropFirst(compressedMagic.count).prefix(8)
+            let size = sizeBytes.enumerated().reduce(UInt64(0)) { $0 | (UInt64($1.element) << ($1.offset * 8)) }
+            guard size > 0, size <= UInt64(maximumExpandedBytes), data.count <= maximumExpandedBytes else {
+                throw UsageArchiveError.corrupt
+            }
+            let compressed = data.dropFirst(compressedMagic.count + 8)
+            var decoded = Data(count: Int(size))
+            let count = decoded.withUnsafeMutableBytes { output in
+                compressed.withUnsafeBytes { input in
+                    compression_decode_buffer(output.bindMemory(to: UInt8.self).baseAddress!, Int(size),
+                                              input.bindMemory(to: UInt8.self).baseAddress!, compressed.count,
+                                              nil, COMPRESSION_LZFSE)
+                }
+            }
+            guard count == Int(size) else { throw UsageArchiveError.corrupt }
+            json = decoded
+        } else {
+            guard data.count <= maximumExpandedBytes else { throw UsageArchiveError.corrupt }
+            json = data
+        }
+        return try JSONDecoder().decode(UsageLedgerCache.self, from: json)
+    }
+
+    /// Atomic, private and truthful: callers can keep the prior in-memory
+    /// checkpoint when disk persistence fails, and surface that failure.
+    @discardableResult
+    func save(to url: URL) -> Bool {
+        do {
+            let json = try JSONEncoder().encode(self)
+            guard json.count <= Self.maximumExpandedBytes else { return false }
+            var data = json
+            if json.count > Self.maximumBytes {
+                let compressed = try (json as NSData).compressed(using: .lzfse)
+                var size = UInt64(json.count).littleEndian
+                data = Self.compressedMagic
+                withUnsafeBytes(of: &size) { data.append(contentsOf: $0) }
+                data.append(compressed as Data)
+            }
+            try AccountStorage.privateDirectory(url.deletingLastPathComponent())
+            try AccountStorage.write(data, to: url)
+            return true
+        } catch { return false }
     }
 
     /// Drops files that no longer exist, so a deleted project does not haunt the

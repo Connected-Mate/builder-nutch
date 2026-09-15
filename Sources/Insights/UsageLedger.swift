@@ -174,6 +174,7 @@ struct UsageLedgerEngine {
             cache.scanCursor = nil
             cache.scanSeenPaths = nil
         }
+        summary.hitLimit = summary.hitLimit || cache.entries.values.contains(where: \.truncated)
         summary.duration = ProcessInfo.processInfo.systemUptime - started
         // Unvisited files retain their last known digest during a partial sweep.
         return (Self.merge(cache.entries.values.map(\.digest)), summary)
@@ -579,6 +580,7 @@ private struct UsageLedgerState {
         var report = UsageLedgerEngine.report(sessions: sessions, summary: captured.scan, days: days, now: now,
                                               calendar: engine.calendar, timeline: engine.timeline)
         report.persistence = captured.persistence
+        if lastArchive != nil { report.milestones = UsageMilestoneProgress(sessions: sessions, now: now) }
         return report
     }
 
@@ -605,10 +607,11 @@ private struct UsageLedgerState {
             summary = scanned.summary
             try Task.checkCancellation()
             lastArchive = try UsageLedgerArchiveStore.update(at: archiveURL, now: now) { archive in
-                archive.absorb(current.entries.values.map(\.digest), timeline: engine.timeline)
+                archive.absorb(current.entries.values.map(\.digest), timeline: engine.timeline,
+                               completeReplays: current.entries.values.filter { !$0.truncated && $0.digest.recordedEventsComplete == true }.map(\.digest))
             }
+            guard current.save(to: cacheURL) else { throw UsageArchiveError.checkpointUnavailable }
             cache = current
-            current.save(to: cacheURL)
             return UsageCaptureResult(scan: summary, persistence: UsagePersistenceStatus(state: .saved, savedAt: lastArchive?.savedAt))
         } catch {
             // Keep the last successfully decoded archive available in this
@@ -658,6 +661,8 @@ actor UsageLedger {
         var sources = [UsageLedgerSource(projectsRoot: home.appendingPathComponent(".claude/projects", isDirectory: true),
                                          managedAccountID: nil, format: .claude),
                        UsageLedgerSource(projectsRoot: home.appendingPathComponent(".codex/sessions", isDirectory: true),
+                                         managedAccountID: nil, format: .codex),
+                       UsageLedgerSource(projectsRoot: home.appendingPathComponent(".codex/archived_sessions", isDirectory: true),
                                          managedAccountID: nil, format: .codex)]
         let profiles = catalogRoot.appendingPathComponent("profiles", isDirectory: true)
         let contents = (try? FileManager.default.contentsOfDirectory(at: profiles, includingPropertiesForKeys: [.isDirectoryKey],

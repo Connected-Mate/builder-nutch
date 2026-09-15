@@ -15,6 +15,35 @@ struct UsageCaptureResult: Equatable {
     var persistence: UsagePersistenceStatus
 }
 
+/// Provenance for a derived cumulative delta. Optional on older archives;
+/// recording only counters permits safe repair without retaining transcript text.
+struct UsageCumulativeDerivation: Codable, Equatable {
+    var current: UsageTranscriptScanner.CodexCounters
+    var previous: UsageTranscriptScanner.CodexCounters?
+    var legacyPrevious: UsageTranscriptScanner.CodexCounters?
+    var treatsRegressionAsReset: Bool = true
+
+    var tokens: UsageTokenTotals {
+        let delta = current.delta(after: previous, treatingRegressionAsReset: treatsRegressionAsReset)
+        return delta.inclusiveInput > 0 || delta.output > 0 ? delta.totals() : UsageTokenTotals()
+    }
+    var legacyTokens: UsageTokenTotals {
+        let delta = current.legacyDelta(after: legacyPrevious ?? previous)
+        return delta.inclusiveInput > 0 || delta.output > 0 ? delta.totals() : UsageTokenTotals()
+    }
+
+    /// A suffix-only copy lacks the predecessor; it cannot replace a measured
+    /// delta with the session's entire cumulative total. Between overlapping
+    /// replays, the closest observed predecessor accounts for the smallest gap.
+    func preferred(over other: UsageCumulativeDerivation) -> UsageCumulativeDerivation {
+        guard let previous else { return other.previous == nil ? self : other }
+        guard let otherPrevious = other.previous else { return self }
+        let distance = abs(current.inclusiveInput - previous.inclusiveInput) + abs(current.output - previous.output)
+        let otherDistance = abs(current.inclusiveInput - otherPrevious.inclusiveInput) + abs(current.output - otherPrevious.output)
+        return distance <= otherDistance ? self : other
+    }
+}
+
 /// One numeric measurement, without messages, titles, credentials or raw JSON.
 struct UsageRecordedEvent: Codable, Equatable {
     var tokens: UsageTokenTotals
@@ -23,6 +52,7 @@ struct UsageRecordedEvent: Codable, Equatable {
     var projectPath: String?
     var model: String?
     var sidechain: Bool
+    var cumulative: UsageCumulativeDerivation?
 
     /// Provider IDs identify requests across renames and duplicate homes. For
     /// older telemetry without IDs, hash only its numeric/time metadata.
@@ -38,10 +68,15 @@ struct UsageRecordedEvent: Codable, Equatable {
     func reconciled(with other: UsageRecordedEvent) -> UsageRecordedEvent {
         var result = self
         result.tokens = tokens.reconciled(with: other.tokens)
+        if let recovered = other.cumulative {
+            result.cumulative = cumulative.map { recovered.preferred(over: $0) } ?? recovered
+        }
+        if let derivation = result.cumulative { result.tokens = derivation.tokens }
         result.model = model ?? other.model
         result.projectPath = projectPath ?? other.projectPath
         result.date = [date, other.date].compactMap { $0 }.min()
-        result.weight = max(weight, other.weight, UsageWeight.weight(result.tokens, model: result.model))
+        result.weight = result.cumulative != nil ? UsageWeight.weight(result.tokens, model: result.model)
+            : max(weight, other.weight, UsageWeight.weight(result.tokens, model: result.model))
         return result
     }
 
@@ -52,13 +87,13 @@ struct UsageRecordedEvent: Codable, Equatable {
     func add(to digest: inout UsageSessionDigest) {
         digest.tokens += tokens
         digest.weight += weight
-        digest.messages += 1
+        digest.messages += tokens.total > 0 ? 1 : 0
         if let date {
             digest.firstActivity = min(digest.firstActivity ?? date, date)
             digest.lastActivity = max(digest.lastActivity ?? date, date)
             let key = String(Int(date.timeIntervalSince1970 / 60))
             digest.activityMinutes[key] = (digest.activityMinutes[key] ?? UsageTimeBucket())
-                + UsageTimeBucket(tokens: tokens, weight: weight, messages: 1)
+                + UsageTimeBucket(tokens: tokens, weight: weight, messages: tokens.total > 0 ? 1 : 0)
         }
         if let model { digest.modelWeights[model, default: 0] += weight }
         if let projectPath {
@@ -69,13 +104,14 @@ struct UsageRecordedEvent: Codable, Equatable {
 }
 
 enum UsageArchiveError: LocalizedError {
-    case corrupt, unsupportedVersion, unavailable, busy
+    case corrupt, unsupportedVersion, unavailable, busy, checkpointUnavailable
     var errorDescription: String? {
         switch self {
         case .corrupt: return "Saved token history is unreadable. The existing archive was preserved."
         case .unsupportedVersion: return "Saved token history uses a newer format. The existing archive was preserved."
         case .unavailable: return "Token history could not be saved."
         case .busy: return "Token history is being saved by another process. Please retry."
+        case .checkpointUnavailable: return "Token history was saved, but progress through the source files could not be saved."
         }
     }
 }
@@ -87,6 +123,7 @@ struct UsageLedgerArchive: Codable, Equatable {
     var version = currentVersion
     var savedAt: Date?
     var sessions: [String: Session] = [:]
+    var counterRepairRevision: Int?
 
     struct Legacy: Codable, Equatable {
         var remaining: UsageSessionDigest
@@ -112,7 +149,8 @@ struct UsageLedgerArchive: Codable, Equatable {
         "\(digest.firstActivity?.timeIntervalSince1970 ?? -1)|\(digest.transcriptComponentID ?? "main")"
     }
 
-    mutating func absorb(_ digests: [UsageSessionDigest], timeline: UsageAccountTimeline) {
+    mutating func absorb(_ digests: [UsageSessionDigest], timeline: UsageAccountTimeline,
+                         completeReplays: [UsageSessionDigest] = []) {
         // Migrate aggregate-only prefixes before importing their new suffixes.
         for digest in digests.sorted(by: { $0.tokens.total > $1.tokens.total }) where digest.recordedEventsComplete != true {
             let key = Self.sessionKey(digest)
@@ -145,6 +183,9 @@ struct UsageLedgerArchive: Codable, Equatable {
             for (id, event) in digest.recordedEvents ?? [:] {
                 if let previous = session.events[id] {
                     let enriched = previous.reconciled(with: event)
+                    if enriched.cumulative != nil && enriched.tokens.total < previous.tokens.total {
+                        counterRepairRevision = (counterRepairRevision ?? 0) + 1
+                    }
                     session.events[id] = enriched
                     if enriched != previous,
                        let legacyKey = session.legacy.keys.first(where: { session.legacy[$0]?.seenEvents.contains(id) == true }),
@@ -170,6 +211,46 @@ struct UsageLedgerArchive: Codable, Equatable {
                     session.legacy[legacyKey] = legacy
                 }
                 session.events[id] = event
+            }
+            sessions[key] = session
+        }
+        // A legacy aggregate is corrected only when a complete source replay
+        // reproduces its ORIGINAL numeric fingerprint under the former parser.
+        // Unmatched/deleted history is deliberately left untouched.
+        for replay in completeReplays where replay.provider == .codex {
+            let key = Self.sessionKey(replay)
+            guard var session = sessions[key], let events = replay.recordedEvents,
+                  events.values.contains(where: { $0.cumulative != nil }) else { continue }
+            for legacyKey in session.legacy.keys {
+                guard var legacy = session.legacy[legacyKey], legacy.remaining.tokens.total > 0 else { continue }
+                var former = UsageSessionDigest(sessionID: replay.sessionID, provider: replay.provider)
+                former.recordedEvents = nil
+                former.recordedEventsComplete = nil
+                for event in events.values.sorted(by: { ($0.date ?? .distantPast) < ($1.date ?? .distantPast) }) {
+                    if let end = legacy.remaining.lastActivity, let date = event.date, date > end { continue }
+                    var oldEvent = event
+                    if let derivation = event.cumulative {
+                        oldEvent.tokens = derivation.legacyTokens
+                        oldEvent.weight = UsageWeight.weight(oldEvent.tokens, model: oldEvent.model)
+                    }
+                    oldEvent.add(to: &former)
+                }
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = .sortedKeys
+                var matches = false
+                for completeness: Bool? in [nil, false] {
+                    former.recordedEventsComplete = completeness
+                    if let data = try? encoder.encode(former), UsageRecordedEvent.hash(data) == legacy.originalFingerprint {
+                        matches = true
+                    }
+                }
+                guard matches else { continue }
+                var empty = UsageSessionDigest(sessionID: replay.sessionID, provider: replay.provider)
+                empty.recordedEvents = nil
+                legacy.remaining = empty
+                legacy.seenEvents.formUnion(events.keys)
+                session.legacy[legacyKey] = legacy
+                counterRepairRevision = (counterRepairRevision ?? 0) + 1
             }
             sessions[key] = session
         }
@@ -259,6 +340,10 @@ enum UsageLedgerArchiveStore {
         var payload: Data
     }
 
+    static func correctionBackupURL(for url: URL) -> URL {
+        url.deletingLastPathComponent().appendingPathComponent("token-history-before-counter-repair-v1.json")
+    }
+
     static func read(from url: URL) throws -> UsageLedgerArchive {
         try Task.checkCancellation()
         try AccountStorage.rejectSymlink(url)
@@ -285,6 +370,21 @@ enum UsageLedgerArchiveStore {
         var archive = try read(from: url)
         let previous = archive
         change(&archive)
+        if archive.counterRepairRevision != previous.counterRepairRevision,
+           FileManager.default.fileExists(atPath: url.path) {
+            let backup = correctionBackupURL(for: url)
+            try AccountStorage.rejectSymlink(backup)
+            if FileManager.default.fileExists(atPath: backup.path) {
+                _ = try read(from: backup)
+            } else {
+                // Preserve the exact original envelope before the first proven
+                // downward repair. An unwriteable backup blocks that repair.
+                try AccountStorage.write(Data(contentsOf: url), to: backup)
+                let handle = try FileHandle(forWritingTo: backup)
+                try handle.synchronize()
+                try handle.close()
+            }
+        }
         if archive == previous, archive.savedAt != nil { return archive }
         archive.savedAt = now
         let encoder = JSONEncoder()
