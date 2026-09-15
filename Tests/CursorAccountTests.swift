@@ -296,9 +296,10 @@ final class CursorAccountTests: XCTestCase {
         XCTAssertEqual(candidates.map(\.provider), [.cursor])
         XCTAssertEqual(candidates.first?.label, "Cursor · on this Mac")
 
-        // Antigravity/Gemini and the other dormant adapters stay dormant: nothing
-        // discovers them, and nothing marks them as readable on the desktop.
-        for provider in AccountProvider.allCases where provider != .cursor {
+        // Gemini and the other web adapters stay browser-only. Antigravity is a
+        // separate desktop reader, covered by AntigravityAccountTests.
+        XCTAssertTrue(AccountProvider.antigravity.readsDesktopUsage)
+        for provider in AccountProvider.allCases where provider != .cursor && provider != .antigravity {
             XCTAssertFalse(provider.readsDesktopUsage, "\(provider.rawValue) must not be wired in")
         }
     }

@@ -1,7 +1,7 @@
 import Foundation
 
 enum AccountProvider: String, Codable, CaseIterable, Identifiable {
-    case claude, codex, cursor, kimi, grok, chatgpt, gemini, perplexity, deepseek, mistral
+    case claude, codex, cursor, kimi, antigravity, grok, chatgpt, gemini, perplexity, deepseek, mistral
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -9,6 +9,7 @@ enum AccountProvider: String, Codable, CaseIterable, Identifiable {
         case .codex: return "Codex"
         case .cursor: return "Cursor"
         case .kimi: return "Kimi"
+        case .antigravity: return "Antigravity"
         case .grok: return "Grok"
         case .chatgpt: return "ChatGPT"
         case .gemini: return "Gemini"
@@ -17,22 +18,25 @@ enum AccountProvider: String, Codable, CaseIterable, Identifiable {
         case .mistral: return "Mistral"
         }
     }
-    var isBrowserProfile: Bool { self != .claude && self != .codex && self != .kimi }
+    var isBrowserProfile: Bool {
+        self == .cursor || self == .grok || self == .chatgpt || self == .gemini
+            || self == .perplexity || self == .deepseek || self == .mistral
+    }
     /// True where the vendor's own **desktop app** holds a login on this Mac
     /// that can be read for usage without opening a browser profile.
     ///
-    /// Cursor is the only one, and the distinction matters: the editor mints and
-    /// rotates its own session, so there is a real reading to take but nothing
-    /// to switch. That is why this is deliberately *not* wired to
-    /// `supportsAutomaticSelection`, which stays false for Cursor.
-    var readsDesktopUsage: Bool { self == .cursor }
-    var supportsAutomaticSelection: Bool { !isBrowserProfile }
+    /// Cursor and Antigravity each mint and rotate their own session, so there
+    /// is a real reading to take but nothing Builder Nutch can switch. That is
+    /// why this is deliberately independent from `supportsAutomaticSelection`.
+    var readsDesktopUsage: Bool { self == .cursor || self == .antigravity }
+    var supportsAutomaticSelection: Bool { self == .claude || self == .codex || self == .kimi }
     var symbolName: String {
         switch self {
         case .claude: return "sparkles"
         case .codex: return "terminal"
         case .cursor: return "cursorarrow"
         case .kimi: return "moon.stars"
+        case .antigravity: return "atom"
         case .grok: return "slash.circle"
         case .chatgpt: return "bubble.left.and.bubble.right"
         case .gemini: return "sparkle"
@@ -47,6 +51,7 @@ enum AccountProvider: String, Codable, CaseIterable, Identifiable {
         case .codex: return "ChatGPT subscription · Coding"
         case .kimi: return "Kimi Code subscription · Coding"
         case .cursor: return "Cursor account · Web dashboard"
+        case .antigravity: return "Antigravity desktop account · Coding"
         default: return "Separate web account"
         }
     }
@@ -56,6 +61,7 @@ enum AccountProvider: String, Codable, CaseIterable, Identifiable {
         case .codex: return "Sign in with ChatGPT. Launch Codex and follow its available usage."
         case .kimi: return "Sign in with your Kimi Code subscription. Launch Kimi Code and follow its available usage."
         case .cursor: return "Sign in to your Cursor dashboard in a separate browser profile. This does not switch the Cursor editor account."
+        case .antigravity: return "Uses the account already signed in to the official Antigravity app. Open Antigravity while checking usage to read its live model quotas and reset times."
         default: return "Sign in on \(title)'s official website. Each account keeps its own browser profile."
         }
     }
@@ -66,6 +72,7 @@ enum AccountProvider: String, Codable, CaseIterable, Identifiable {
         case .codex, .chatgpt: address = "https://chatgpt.com/"
         case .cursor: address = "https://cursor.com/dashboard"
         case .kimi: address = "https://www.kimi.com/"
+        case .antigravity: address = "https://antigravity.google/"
         case .grok: address = "https://grok.com/"
         case .gemini: address = "https://gemini.google.com/"
         case .perplexity: address = "https://www.perplexity.ai/"
@@ -86,6 +93,7 @@ enum AccountProvider: String, Codable, CaseIterable, Identifiable {
         case .claude: return .claude
         case .codex, .chatgpt: return .openai
         case .cursor: return .cursor
+        case .antigravity: return .antigravity
         case .gemini: return .geminiChat
         case .kimi: return .kimi
         case .grok: return .grok
@@ -110,9 +118,9 @@ struct ManagedAccount: Identifiable, Codable, Equatable {
     var existingProfile: ExistingAccountProfile? = nil
 
     /// A row backed by a vendor desktop app already signed in on this Mac,
-    /// rather than by a browser profile Builder Nutch opened. Only these Cursor
-    /// rows have usage to show; a Cursor row the user created here is still a
-    /// browser profile and still behaves like one.
+    /// rather than by a browser profile Builder Nutch opened. Cursor and
+    /// Antigravity rows discovered from their official apps have usage to show;
+    /// Antigravity's add flow attaches this source instead of creating a login.
     var readsDesktopUsage: Bool { provider.readsDesktopUsage && existingProfile != nil }
 
     /// A row whose whole content is a separate browser profile: there is no

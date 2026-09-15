@@ -58,6 +58,103 @@ final class AntigravityCredentialsTests: XCTestCase {
     }
 }
 
+final class AntigravityAccountTests: XCTestCase {
+    private func temporary() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("antigravity-account-\(UUID().uuidString)")
+        try AccountStorage.privateDirectory(url)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    func testAntigravityIsDistinctFromGeminiWeb() {
+        XCTAssertNotEqual(AccountProvider.antigravity, .gemini)
+        XCTAssertEqual(AccountProvider.antigravity.title, "Antigravity")
+        XCTAssertEqual(AccountProvider.antigravity.glyph, .antigravity)
+        XCTAssertTrue(AccountProvider.antigravity.readsDesktopUsage)
+        XCTAssertFalse(AccountProvider.antigravity.isBrowserProfile)
+        XCTAssertFalse(AccountProvider.antigravity.supportsAutomaticSelection)
+        XCTAssertNil(AccountEnvironment.executable(for: .antigravity))
+        XCTAssertEqual(AccountProvider.gemini.title, "Gemini")
+        XCTAssertEqual(AccountProvider.gemini.glyph, .geminiChat)
+        XCTAssertFalse(AccountProvider.gemini.readsDesktopUsage)
+    }
+
+    func testDiscoveryOffersInstalledAntigravityDataAsItsOwnAccount() throws {
+        let home = try temporary()
+        try AccountStorage.privateDirectory(AntigravityAccountIntegration.dataDirectory(home: home))
+        let candidates = ExistingAccountDiscovery.candidates(
+            home: home, environment: [:], antigravityInstalled: true
+        )
+        let antigravity = try XCTUnwrap(candidates.first { $0.provider == .antigravity })
+        XCTAssertEqual(antigravity.label, "Antigravity · on this Mac")
+        XCTAssertEqual(antigravity.source.directory,
+                       AntigravityAccountIntegration.dataDirectory(home: home).path)
+    }
+
+    func testDiscoveryDoesNotClaimAnUninstalledApp() throws {
+        let home = try temporary()
+        try AccountStorage.privateDirectory(AntigravityAccountIntegration.dataDirectory(home: home))
+        XCTAssertFalse(ExistingAccountDiscovery.candidates(
+            home: home, environment: [:], antigravityInstalled: false
+        ).contains { $0.provider == .antigravity })
+    }
+
+    func testInstallDetectionRequiresTheOfficialBundleIdentifier() throws {
+        let home = try temporary()
+        let application = home.appendingPathComponent("Antigravity.app/Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: application, withIntermediateDirectories: true)
+        let plist = try PropertyListSerialization.data(
+            fromPropertyList: ["CFBundleIdentifier": AntigravityAccountIntegration.bundleIdentifier],
+            format: .xml, options: 0
+        )
+        try plist.write(to: application.appendingPathComponent("Info.plist"))
+        XCTAssertTrue(AntigravityAccountIntegration.isInstalled(
+            home: home, applications: [application.deletingLastPathComponent()]
+        ))
+        XCTAssertFalse(AntigravityAccountIntegration.isInstalled(
+            home: home, applications: [home.appendingPathComponent("Impostor.app")]
+        ))
+    }
+
+    func testReaderAcceptsOnlyTheCanonicalVendorDirectory() throws {
+        let home = try temporary()
+        let canonical = AntigravityAccountIntegration.dataDirectory(home: home)
+        try AccountStorage.privateDirectory(canonical)
+        XCTAssertEqual(try AntigravityAccountIntegration.validatedDataDirectory(
+            canonical, home: home
+        ), canonical.standardizedFileURL)
+        let other = home.appendingPathComponent("safe-but-not-antigravity")
+        try AccountStorage.privateDirectory(other)
+        XCTAssertThrowsError(try AntigravityAccountIntegration.validatedDataDirectory(
+            other, home: home
+        ))
+    }
+
+    func testExactModelWindowsAndResetReachManagedAccountState() throws {
+        let reset = try XCTUnwrap(AntigravityCredentials.parse("2026-09-16T12:00:00Z"))
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let window = LimitWindow(id: "gemini-pro", label: "Gemini models",
+                                 usedFraction: 0.27, resetsAt: reset,
+                                 modelName: "Gemini models")
+        let state = AntigravityAccountIntegration.state(windows: [window], now: now)
+        XCTAssertTrue(state.isConnected)
+        XCTAssertEqual(state.windows, [window])
+        XCTAssertEqual(state.refreshedAt, now)
+        XCTAssertTrue(state.windows[0].isModelSpecific)
+        XCTAssertEqual(state.windows[0].resetsAt, reset)
+    }
+
+    func testNoQuotaResponseStaysUnknown() {
+        let state = AntigravityAccountIntegration.state(windows: [])
+        XCTAssertTrue(state.isConnected)
+        XCTAssertTrue(state.windows.isEmpty)
+        XCTAssertNil(state.refreshedAt)
+        XCTAssertEqual(state.message, AntigravityAccountIntegration.noReadingMessage)
+        XCTAssertNil(state.remainingPercent)
+    }
+}
+
 final class AntigravityTierTests: XCTestCase {
     /// Verbatim from a signed-in install. Note what is absent: no used, no
     /// limit, no reset. That absence is why the provider reports the plan and
@@ -203,6 +300,7 @@ final class AntigravityQuotaTests: XCTestCase {
         XCTAssertEqual(windows.count, 1)
         XCTAssertEqual(windows.first?.usedFraction ?? 0, 0.25, accuracy: 0.0001)
         XCTAssertEqual(windows.first?.label, "Daily")
+        XCTAssertEqual(windows.first?.modelName, "Gemini")
     }
 
     /// Cursor's free plan reports an included limit of zero, and dividing by it
@@ -299,6 +397,7 @@ final class AntigravityBridgeTests: XCTestCase {
         XCTAssertEqual(windows[0].id, "gemini-weekly")
         XCTAssertEqual(windows[0].usedFraction ?? 0, 1 - 0.96262, accuracy: 0.00001)
         XCTAssertEqual(windows[0].label, "Gemini Models")
+        XCTAssertEqual(windows[0].modelName, "Gemini Models")
     }
 
     /// A full bucket is 0% used, not "no reading".
@@ -309,6 +408,16 @@ final class AntigravityBridgeTests: XCTestCase {
     func testItKeepsTheResetTime() throws {
         let resets = try XCTUnwrap(AntigravityBridge.windows(in: real)[0].resetsAt)
         XCTAssertEqual(resets, ISO8601DateFormatter().date(from: "2026-09-07T14:12:34Z"))
+    }
+
+    func testSeveralModelPoolsDoNotInventAnAccountWideHeadline() {
+        let windows = AntigravityBridge.windows(in: real)
+        let snapshot = ProviderSnapshot(id: "gemini", displayName: "Antigravity",
+            glyph: .antigravity, fidelity: .official, status: .ok,
+            windows: windows, headlineID: AntigravityProvider.headlineID(for: windows))
+        XCTAssertNil(snapshot.headline)
+        XCTAssertTrue(snapshot.hasReading)
+        XCTAssertEqual(windows.map(\.modelName), ["Gemini Models", "Claude and GPT models"])
     }
 
     /// A fraction outside 0...1 is not a fraction; better nothing than a ring

@@ -13,7 +13,7 @@ enum AccountEnvironment {
     }
 
     static func executable(for provider: AccountProvider) -> URL? {
-        guard !provider.isBrowserProfile else { return nil }
+        guard provider == .claude || provider == .codex || provider == .kimi else { return nil }
         if provider == .kimi { return KimiAccountIntegration.executable() }
         let home = FileManager.default.homeDirectoryForCurrentUser
         let name = provider == .claude ? "claude" : "codex"

@@ -109,7 +109,12 @@ actor AntigravityProvider: UsageProvider {
             everBridged = true
             return ProviderSnapshot(id: id, displayName: displayName, glyph: glyph,
                                     fidelity: .official, status: .ok, windows: windows,
-                                    headlineID: "gemini-weekly")
+                                    // Every returned allowance belongs to one
+                                    // model family. With several families there
+                                    // is no honest account-wide percentage, so
+                                    // keep the headline blank and show the exact
+                                    // model rows in detail.
+                                    headlineID: Self.headlineID(for: windows))
         }
 
         // Antigravity has answered before and is not answering now: keep the
@@ -120,7 +125,8 @@ actor AntigravityProvider: UsageProvider {
         // Then Google directly, which answers for a licensed account.
         if let windows = try await quota(token: credentials.accessToken), !windows.isEmpty {
             return ProviderSnapshot(id: id, displayName: displayName, glyph: glyph,
-                                    fidelity: .official, status: .ok, windows: windows)
+                                    fidelity: .official, status: .ok, windows: windows,
+                                    headlineID: Self.headlineID(for: windows))
         }
 
         // Not licensed, so Google will not say how much of what. Our own count
@@ -217,9 +223,13 @@ actor AntigravityProvider: UsageProvider {
         }
 
         guard let decoded = try? JSONDecoder().decode(Response.self, from: data) else { return [] }
-        let buckets = (decoded.quotaGroups?.flatMap { $0.buckets ?? [] } ?? []) + (decoded.buckets ?? [])
+        let grouped: [(Response.Bucket, String?)] = decoded.quotaGroups?.flatMap { group in
+            (group.buckets ?? []).map { ($0, group.displayName) }
+        } ?? []
+        let buckets = grouped + (decoded.buckets ?? []).map { ($0, Optional<String>.none) }
 
-        return buckets.compactMap { bucket in
+        return buckets.compactMap { pair in
+            let (bucket, modelName) = pair
             guard let limit = bucket.limit, limit > 0,
                   let used = bucket.used, used >= 0, used <= limit * 1.5
             else { return nil }
@@ -227,8 +237,14 @@ actor AntigravityProvider: UsageProvider {
             return LimitWindow(id: bucket.name ?? label,
                                label: label,
                                usedFraction: used / limit,
-                               resetsAt: bucket.resetTime.flatMap(AntigravityCredentials.parse))
+                               resetsAt: bucket.resetTime.flatMap(AntigravityCredentials.parse),
+                               modelName: modelName)
         }
+    }
+
+    static func headlineID(for windows: [LimitWindow]) -> String? {
+        guard windows.count == 1 else { return "antigravity-account-wide-unavailable" }
+        return windows[0].id
     }
 
     /// The plan's display name, for the message the cell shows.

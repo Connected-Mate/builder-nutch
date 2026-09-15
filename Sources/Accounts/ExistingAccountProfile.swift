@@ -116,7 +116,8 @@ struct ExistingAccountCandidate {
 
 enum ExistingAccountDiscovery {
     static func candidates(home: URL = FileManager.default.homeDirectoryForCurrentUser,
-                           environment: [String: String] = ProcessInfo.processInfo.environment) -> [ExistingAccountCandidate] {
+                           environment: [String: String] = ProcessInfo.processInfo.environment,
+                           antigravityInstalled: Bool = AntigravityAccountIntegration.isInstalled()) -> [ExistingAccountCandidate] {
         var result: [ExistingAccountCandidate] = []
         func append(_ provider: AccountProvider, _ path: URL, defaultClaude: Bool = false, named: String? = nil) {
             let source = ExistingAccountProfile(directory: path.standardizedFileURL.path, usesDefaultClaudeHome: defaultClaude)
@@ -141,6 +142,16 @@ enum ExistingAccountDiscovery {
         // editor produces no row rather than a row that can never say anything.
         let cursor = CursorAccountIntegration.globalStorage(home: home)
         if CursorAccountIntegration.isSignedIn(directory: cursor) { append(.cursor, cursor, named: "on this Mac") }
+        // Antigravity owns one desktop login. Its per-model quota is served by
+        // the running app, so the row points at its existing data directory and
+        // never creates or copies a Google login.
+        if let candidate = AntigravityAccountIntegration.existingCandidate(
+            home: home, installed: antigravityInstalled
+        ), !result.contains(where: {
+            $0.source.key(provider: $0.provider) == candidate.source.key(provider: candidate.provider)
+        }) {
+            result.append(candidate)
+        }
         for (provider, variable) in [(AccountProvider.claude, "CLAUDE_CONFIG_DIR"), (.codex, "CODEX_HOME"), (.kimi, "KIMI_CODE_HOME")] {
             if let path = environment[variable], path.hasPrefix("/") {
                 let url = URL(fileURLWithPath: path)

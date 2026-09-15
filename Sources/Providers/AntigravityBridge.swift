@@ -163,7 +163,12 @@ enum AntigravityBridge {
                     // "Weekly Limit Remaining", which is the same for both.
                     label: group.displayName ?? bucket.displayName ?? "Usage",
                     usedFraction: 1 - remaining,
-                    resetsAt: bucket.resetTime.flatMap(AntigravityCredentials.parse)
+                    resetsAt: bucket.resetTime.flatMap(AntigravityCredentials.parse),
+                    // Antigravity meters model families independently. Google
+                    // documents that Gemini and other Model Garden models have
+                    // separate availability, so these must never masquerade as
+                    // an all-account allowance.
+                    modelName: group.displayName
                 )
             }
         }
