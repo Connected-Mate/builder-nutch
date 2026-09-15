@@ -24,13 +24,14 @@ enum ProviderGlyph: String, Codable, Equatable {
         case .claude: return "brand-claude"
         case .openai: return "brand-openai"
         case .cursor: return "brand-cursor"
+        case .antigravity: return "brand-antigravity"
         case .kimi: return "brand-kimi"
         case .grok: return "brand-grok"
         case .geminiChat: return "brand-gemini"
         case .perplexity: return "brand-perplexity"
         case .deepseek: return "brand-deepseek"
         case .mistral: return "brand-mistral"
-        case .third, .antigravity, .glm: return nil
+        case .third, .glm: return nil
         }
     }
 
