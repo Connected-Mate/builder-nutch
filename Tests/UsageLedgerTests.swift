@@ -225,6 +225,26 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertEqual(digest.tokens.coverage.codexRecords, 1)
     }
 
+    func testCopiedCodexRolloutsUseCanonicalThreadIDAndCountOnce() throws {
+        let session = "abababab-abab-abab-abab-abababababab"
+        let lines = [
+            codexMeta(session: session, cwd: "/tmp/Copied"),
+            codexRecord(response: "resp_copy", at: epoch, input: 100, cached: 0,
+                        cacheWrite: 0, output: 20, reasoning: 0, thread: session)
+        ]
+        try write(lines, to: "copies/rollout-original.jsonl")
+        try write(lines, to: "copies/rollout-copy.jsonl")
+        let source = UsageLedgerSource(projectsRoot: root.appendingPathComponent("copies"),
+                                       managedAccountID: nil, format: .codex)
+        var cache = UsageLedgerCache()
+
+        let result = engine([source]).scan(cache: &cache)
+
+        XCTAssertEqual(result.sessions.map(\.sessionID), ["codex:\(session)"])
+        XCTAssertEqual(result.sessions.first?.messages, 1)
+        XCTAssertEqual(result.sessions.first?.tokens.total, 120)
+    }
+
     func testCodexFormatTransitionKeepsLegacyPrefixWithoutCountingLaterSnapshotsTwice() throws {
         let session = "dddddddd-dddd-dddd-dddd-dddddddddddd"
         let file = try write([
@@ -775,6 +795,26 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertFalse(second.summary.hitLimit)
         XCTAssertEqual(second.sessions.first?.messages, 3_000)
         XCTAssertEqual(cache.entries.values.first?.truncated, false)
+    }
+
+    func testResumedClaudeTranscriptKeepsCanonicalSessionIDFromEarlierSlice() throws {
+        let session = "fefefefe-fefe-fefe-fefe-fefefefefefe"
+        let usage = "{\"type\":\"assistant\",\"cwd\":\"/tmp/Long\",\"timestamp\":\"\(Self.stamp.string(from: epoch))\",\"message\":{\"model\":\"claude\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}"
+        var lines = [title(session: session, "Long transcript")]
+        lines += Array(repeating: usage, count: 2_000)
+        try write(lines, to: "long-claude/renamed.jsonl")
+        var limits = UsageLedgerLimits.default
+        limits.maxFileBytes = 1_000
+        let source = UsageLedgerSource(projectsRoot: root.appendingPathComponent("long-claude"),
+                                       managedAccountID: nil, format: .claude)
+        var cache = UsageLedgerCache()
+
+        let first = engine([source], limits: limits).scan(cache: &cache)
+        let second = engine([source], limits: limits).scan(cache: &cache)
+
+        XCTAssertTrue(first.summary.hitLimit)
+        XCTAssertEqual(second.sessions.first?.sessionID, session)
+        XCTAssertEqual(second.sessions.first?.messages, 2_000)
     }
 
     func testTheDumpRanksAProjectOnceHoweverManyAccountsPaidForIt() throws {

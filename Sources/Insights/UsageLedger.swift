@@ -78,8 +78,9 @@ struct UsageLedgerEngine {
 
                 // A growing file, or a previously bounded read of the same
                 // file, resumes at a complete-line checkpoint. Rewrites start
-                // over. A continuation refresh gets two bounded slices so a
-                // modest over-limit file can finish without an unbounded read.
+                // over. A continuation refresh can consume more bounded slices,
+                // up to a byte and time budget, so it keeps making useful
+                // progress without turning one refresh into an unbounded read.
                 let grew = cached.map { size > $0.size } ?? false
                 let continuesPartial = cached.map {
                     $0.truncated && size == $0.size && modified == $0.modified
@@ -88,13 +89,14 @@ struct UsageLedgerEngine {
                 var nextOffset = resumable ? (cached?.offset ?? 0) : 0
                 var checkpoint = resumable ? (cached?.checkpoint ?? UsageTranscriptCheckpoint())
                                            : UsageTranscriptCheckpoint()
-                var incremental = UsageSessionDigest(sessionID: Self.sessionIDHint(for: file), provider: source.format)
-                incremental.managedAccountID = source.managedAccountID
+                var incremental: UsageSessionDigest?
                 var finalTruncated = false
                 var parsedSlice = false
-                let sliceCount = cached?.truncated == true ? 2 : 1
+                let continuesWithinRefresh = cached?.truncated == true
+                let continuationByteBudget = max(limits.maxFileBytes, 1024 * 1024)
+                var continuationBytesRead = 0
 
-                for _ in 0..<sliceCount {
+                while true {
                     let before = nextOffset
                     guard var outcome = try? scanner.scan(file: file, from: nextOffset,
                                                           sessionIDHint: Self.sessionIDHint(for: file),
@@ -103,14 +105,23 @@ struct UsageLedgerEngine {
                                                           checkpoint: checkpoint) else { break }
                     parsedSlice = true
                     if outcome.consumed >= size { outcome.truncated = false }
-                    incremental.merge(outcome.digest)
+                    if var accumulated = incremental {
+                        accumulated.merge(outcome.digest)
+                        incremental = accumulated
+                    } else {
+                        // Keep the canonical thread/session identifier learned
+                        // from the transcript instead of the filename hint.
+                        incremental = outcome.digest
+                    }
                     nextOffset = outcome.consumed
                     checkpoint = outcome.checkpoint
                     finalTruncated = outcome.truncated
+                    continuationBytesRead += outcome.bytesRead
                     summary.bytesRead += outcome.bytesRead
                     summary.malformedLines += outcome.malformedLines
                     summary.oversizedLines += outcome.oversizedLines
-                    guard outcome.truncated, nextOffset > before,
+                    guard continuesWithinRefresh, outcome.truncated, nextOffset > before,
+                          continuationBytesRead < continuationByteBudget,
                           ProcessInfo.processInfo.systemUptime - started <= budget else { break }
                 }
 
@@ -120,8 +131,16 @@ struct UsageLedgerEngine {
                     continue
                 }
 
-                var digest = incremental
-                if resumable, let previous = cached?.digest { digest.merge(previous) }
+                guard let incremental else { continue }
+                var digest: UsageSessionDigest
+                if resumable, var previous = cached?.digest {
+                    // The canonical identifier may exist only before the resume
+                    // offset. Preserve it while adding the new slice.
+                    previous.merge(incremental)
+                    digest = previous
+                } else {
+                    digest = incremental
+                }
                 digests.append(digest)
                 cache.entries[file.path] = UsageLedgerCacheEntry(size: size, modified: modified,
                                                                  offset: nextOffset, digest: digest,
