@@ -109,6 +109,7 @@ struct UsageInsightsView: View {
                     Text("30 days").tag(30)
                 }
                 .pickerStyle(.segmented).labelsHidden().frame(width: 150).controlSize(.small)
+                .disabled(model.isLoading)
                 if model.isLoading { ProgressView().controlSize(.small) }
             }
             tokenSummary(report.tokens)
