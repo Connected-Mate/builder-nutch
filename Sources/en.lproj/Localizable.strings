@@ -229,3 +229,4 @@
 "Only the numbers" = "Only the numbers";
 "Account names and projects stay private. Dates and partial readings remain visible on the image." = "Account names and projects stay private. Dates and partial readings remain visible on the image.";
 "Today" = "Today";
+"This week: %@ tokens. Today: %@ tokens. Recorded %@." = "This week: %@ tokens. Today: %@ tokens. Recorded %@.";

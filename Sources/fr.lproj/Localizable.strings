@@ -496,3 +496,4 @@
 "Only the numbers" = "Uniquement les chiffres";
 "Account names and projects stay private. Dates and partial readings remain visible on the image." = "Noms de comptes et projets restent privés. Les dates et les lectures partielles restent visibles sur l’image.";
 "Today" = "Aujourd’hui";
+"This week: %@ tokens. Today: %@ tokens. Recorded %@." = "Cette semaine : %@ tokens. Aujourd’hui : %@ tokens. Relevé du %@.";
