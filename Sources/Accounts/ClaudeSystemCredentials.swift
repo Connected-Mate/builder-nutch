@@ -166,6 +166,15 @@ struct ClaudeNativeCredentialKeychain: ClaudeCredentialKeychain {
 /// Security.framework and filesystem APIs have no shared transaction: optimistic checks detect
 /// intervening changes; rollback never deliberately overwrites a newer credential.
 final class ClaudeSystemCredentials {
+    struct RecoveryBackup {
+        fileprivate let location: ClaudeCredentialLocation
+        fileprivate let config: Data
+        fileprivate let secret: ClaudeCredentialSnapshot
+        fileprivate let system: ClaudeCredentialLocation
+        fileprivate let systemConfig: Data
+        fileprivate let systemSecret: ClaudeCredentialSnapshot?
+    }
+
     static let maximumBytes = 8 * 1024 * 1024
     private let keychain: any ClaudeCredentialKeychain
     private let account: String
@@ -253,6 +262,58 @@ final class ClaudeSystemCredentials {
         guard let oauth = try Self.object(secret.data)["claudeAiOauth"] as? [String: Any] else { return nil }
         guard let token = oauth["accessToken"] as? String, !token.isEmpty else { return nil }
         return token
+    }
+
+    /// Verify an already separate backup without renewing or rewriting it. An
+    /// expired but structurally complete login remains suitable for rollback.
+    /// Never discard a partial Mac login that still holds either token: it may
+    /// contain a newer refresh token than the saved backup.
+    @discardableResult
+    func validateRecoveryBackup(at location: ClaudeCredentialLocation, replacing system: ClaudeCredentialLocation,
+                                expectedIdentity: ClaudeCredentialIdentity) throws -> RecoveryBackup {
+        lock.lock()
+        defer { lock.unlock() }
+        try checkRunning()
+        try Self.validateLocation(location)
+        try Self.validateLocation(system)
+        guard !location.isDefault, system.isDefault, location.service != system.service,
+              location.configURL != system.configURL else { throw ClaudeSystemCredentialError.unsafePath }
+        guard let systemConfig = try Self.readConfig(system.configURL) else { throw ClaudeSystemCredentialError.missingLogin }
+        guard try Self.identity(in: Self.object(systemConfig)) == expectedIdentity else {
+            throw ClaudeSystemCredentialError.identityMismatch
+        }
+        let systemSecret = try keychain.read(service: system.service, account: account)
+        if let systemSecret {
+            let payload = try Self.object(systemSecret.data)
+            if let value = payload["claudeAiOauth"] {
+                guard let oauth = value as? [String: Any] else { throw ClaudeSystemCredentialError.malformedData }
+                for key in ["accessToken", "refreshToken"] {
+                    if let value = oauth[key] {
+                        guard let token = value as? String, token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                            throw ClaudeSystemCredentialError.malformedData
+                        }
+                    }
+                }
+            }
+        }
+        guard let config = try Self.readConfig(location.configURL),
+              let secret = try keychain.read(service: location.service, account: account) else {
+            throw ClaudeSystemCredentialError.missingLogin
+        }
+        guard try Self.identity(in: Self.object(config)) == expectedIdentity else {
+            throw ClaudeSystemCredentialError.identityMismatch
+        }
+        _ = try Self.completeOAuth(in: Self.object(secret.data))
+        try Self.validateLocation(location)
+        try Self.validateLocation(system)
+        guard try Self.readConfig(location.configURL) == config,
+              try Self.readConfig(system.configURL) == systemConfig,
+              try keychain.read(service: location.service, account: account) == secret,
+              try keychain.read(service: system.service, account: account) == systemSecret else {
+            throw ClaudeSystemCredentialError.changedDuringCopy
+        }
+        return RecoveryBackup(location: location, config: config, secret: secret,
+                              system: system, systemConfig: systemConfig, systemSecret: systemSecret)
     }
 
     /// Puts the right name on a login whose secret and name disagree. Only the
@@ -465,7 +526,8 @@ final class ClaudeSystemCredentials {
     /// `expectedIdentity`; the source config is then not consulted for the name.
     func copyLogin(from source: ClaudeCredentialLocation, to target: ClaudeCredentialLocation,
                    expectedIdentity: ClaudeCredentialIdentity, allowExpired: Bool = false,
-                   completingTransaction: Bool = false, sourceOAuthAccount: [String: Any]? = nil) throws {
+                   completingTransaction: Bool = false, sourceOAuthAccount: [String: Any]? = nil,
+                   recoveryBackup: RecoveryBackup? = nil) throws {
         lock.lock()
         defer { lock.unlock() }
         func checkCancellation() throws { if !completingTransaction { try checkRunning() } }
@@ -477,18 +539,33 @@ final class ClaudeSystemCredentials {
         guard source.service != target.service, source.configURL != target.configURL else {
             throw ClaudeSystemCredentialError.unsafePath
         }
+        var locations = [source, target]
+        if let recoveryBackup {
+            guard recoveryBackup.system == target, recoveryBackup.location.service != source.service,
+                  recoveryBackup.location.configURL != source.configURL else { throw ClaudeSystemCredentialError.unsafePath }
+            try Self.validateLocation(recoveryBackup.location)
+            locations.append(recoveryBackup.location)
+        }
+        func checkBackup() throws {
+            guard let recoveryBackup else { return }
+            try Self.validateLocation(recoveryBackup.location)
+            guard try Self.readConfig(recoveryBackup.location.configURL) == recoveryBackup.config,
+                  try keychain.read(service: recoveryBackup.location.service, account: account) == recoveryBackup.secret else {
+                throw ClaudeSystemCredentialError.changedDuringCopy
+            }
+        }
         // Match Claude Code's own secure-storage mutex, including its 15-second
         // stale window. Stable ordering also prevents two app switches deadlocking.
         var storageLocks: [ClaudeStorageWriteLock] = []
         defer { storageLocks.reversed().forEach { $0.release() } }
-        for location in [source, target].sorted(by: { $0.directory.path < $1.directory.path }) {
+        for location in locations.sorted(by: { $0.directory.path < $1.directory.path }) {
             try checkCancellation()
             storageLocks.append(try ClaudeStorageWriteLock(directory: location.directory, checkCancellation: checkCancellation))
         }
         // Claude's settings writer has its own proper-lockfile mutex. Hold both
         // configs from their initial read through commit/rollback to preserve
         // concurrent project/settings updates as well as the login identity.
-        for location in [source, target].sorted(by: { $0.configURL.path < $1.configURL.path }) {
+        for location in locations.sorted(by: { $0.configURL.path < $1.configURL.path }) {
             try checkCancellation()
             storageLocks.append(try ClaudeStorageWriteLock(lockURL: URL(fileURLWithPath: location.configURL.path + ".lock"), staleAfter: 10, checkCancellation: checkCancellation))
         }
@@ -507,17 +584,17 @@ final class ClaudeSystemCredentials {
         }
         guard let sourceSecret = try keychain.read(service: source.service, account: account) else { throw ClaudeSystemCredentialError.missingLogin }
         let sourcePayload = try Self.object(sourceSecret.data)
-        guard let oauth = sourcePayload["claudeAiOauth"] as? [String: Any],
-              let access = oauth["accessToken"] as? String, !access.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let refresh = oauth["refreshToken"] as? String, !refresh.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let expiry = oauth["expiresAt"] as? NSNumber,
-              CFGetTypeID(expiry) != CFBooleanGetTypeID(), expiry.doubleValue.isFinite else {
-            throw ClaudeSystemCredentialError.malformedData
-        }
-        guard allowExpired || expiry.doubleValue / 1000 > now().timeIntervalSince1970 else { throw ClaudeSystemCredentialError.expiredLogin }
+        let (oauth, expiry) = try Self.completeOAuth(in: sourcePayload)
+        guard allowExpired || expiry / 1000 > now().timeIntervalSince1970 else { throw ClaudeSystemCredentialError.expiredLogin }
         let oldConfig = try Self.readConfig(target.configURL)
         var newConfig = try oldConfig.map(Self.object) ?? [:]
         let oldSecret = try keychain.read(service: target.service, account: account)
+        if let recoveryBackup {
+            guard oldConfig == recoveryBackup.systemConfig, oldSecret == recoveryBackup.systemSecret else {
+                throw ClaudeSystemCredentialError.changedDuringCopy
+            }
+            try checkBackup()
+        }
         var newSecret = try oldSecret.map { try Self.object($0.data) } ?? [:]
         newSecret["claudeAiOauth"] = oauth
         newConfig["oauthAccount"] = carriedOAuthAccount
@@ -531,6 +608,7 @@ final class ClaudeSystemCredentials {
             throw ClaudeSystemCredentialError.changedDuringCopy
         }
         try storageLocks.forEach { try $0.check() }
+        try checkBackup()
         var configCommitted = false
         // After the first write, finish commit/rollback under the lock. Shutdown
         // waits for this transaction, rather than abandoning a half-written login.
@@ -545,6 +623,7 @@ final class ClaudeSystemCredentials {
                 throw ClaudeSystemCredentialError.changedDuringCopy
             }
             try storageLocks.forEach { try $0.check() }
+            try checkBackup()
             try writeConfig(configBytes, target.configURL, oldConfig)
             configCommitted = true
             try invalidateCache(target)
@@ -567,6 +646,17 @@ final class ClaudeSystemCredentials {
             if rollbackFailed { throw ClaudeSystemCredentialError.rollbackFailed }
             throw originalError
         }
+    }
+
+    private static func completeOAuth(in payload: [String: Any]) throws -> ([String: Any], Double) {
+        guard let oauth = payload["claudeAiOauth"] as? [String: Any],
+              let access = oauth["accessToken"] as? String, !access.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let refresh = oauth["refreshToken"] as? String, !refresh.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let expiry = oauth["expiresAt"] as? NSNumber,
+              CFGetTypeID(expiry) != CFBooleanGetTypeID(), expiry.doubleValue.isFinite else {
+            throw ClaudeSystemCredentialError.malformedData
+        }
+        return (oauth, expiry.doubleValue)
     }
 
     private static func identity(in object: [String: Any]) throws -> ClaudeCredentialIdentity? {

@@ -692,7 +692,8 @@ final class AccountManager: ObservableObject {
     /// config's: that file names whichever account the last session to save it
     /// started under, and copying it is how a profile ends up holding another
     /// account's login under its own name.
-    private func saveSystemClaudeLogin(_ current: ManagedAccount, identity: ClaudeCredentialIdentity) async throws -> ManagedAccount {
+    private func saveSystemClaudeLogin(_ current: ManagedAccount, identity: ClaudeCredentialIdentity) async throws
+        -> (account: ManagedAccount, recoveryBackup: ClaudeSystemCredentials.RecoveryBackup?) {
         guard let credentials = systemCredentials else { throw ManagedAccountError.unavailable }
         var carried = identity.minimalOAuthAccount
         if profileIdentity(current) == identity,
@@ -711,11 +712,29 @@ final class AccountManager: ObservableObject {
             updated[index] = saved
             try persist(accounts: updated, selected: selected)
             accounts = updated
-            return saved
+            return (saved, nil)
         }
-        try await copyClaudeLogin(from: systemClaudeLocation, to: credentialLocation(for: current), identity: identity, allowExpired: true,
-                                  sourceOAuthAccount: carried)
-        return current
+        let savedLocation = credentialLocation(for: current)
+        let systemLocation = systemClaudeLocation
+        do {
+            try await copyClaudeLogin(from: systemClaudeLocation, to: savedLocation, identity: identity, allowExpired: true,
+                                      sourceOAuthAccount: carried)
+        } catch ClaudeSystemCredentialError.missingLogin {
+            let backup = try await Task.detached(priority: .utility) {
+                try credentials.validateRecoveryBackup(at: savedLocation, replacing: systemLocation, expectedIdentity: identity)
+            }.value
+            return (current, backup)
+        } catch ClaudeSystemCredentialError.malformedData {
+            // A half-written Mac login must not strand every healthy account.
+            // Keep the existing backup byte-for-byte, but only after proving it
+            // can restore this identity. Access and transaction failures still
+            // propagate; default-profile conversion never takes this path.
+            let backup = try await Task.detached(priority: .utility) {
+                try credentials.validateRecoveryBackup(at: savedLocation, replacing: systemLocation, expectedIdentity: identity)
+            }.value
+            return (current, backup)
+        }
+        return (current, nil)
     }
 
     /// Switch credentials in place. No process is restarted, no transcript is
@@ -781,8 +800,9 @@ final class AccountManager: ObservableObject {
         }
         markBusy(current.id, cancellation: AccountCancellation())
         markBusy(target.id, cancellation: AccountCancellation())
-        let saved = try await saveSystemClaudeLogin(current, identity: currentIdentity)
-        try await copyClaudeLogin(from: credentialLocation(for: target), to: systemClaudeLocation, identity: targetIdentity)
+        let (saved, recoveryBackup) = try await saveSystemClaudeLogin(current, identity: currentIdentity)
+        try await copyClaudeLogin(from: credentialLocation(for: target), to: systemClaudeLocation, identity: targetIdentity,
+                                  recoveryBackup: recoveryBackup)
         var updated = selected
         updated[.claude] = target.id
         do { try persist(accounts: accounts, selected: updated) }
@@ -824,11 +844,13 @@ final class AccountManager: ObservableObject {
 
     private func copyClaudeLogin(from source: ClaudeCredentialLocation, to target: ClaudeCredentialLocation,
                                  identity: ClaudeCredentialIdentity, allowExpired: Bool = false, completingTransaction: Bool = false,
-                                 sourceOAuthAccount: [String: Any]? = nil) async throws {
+                                 sourceOAuthAccount: [String: Any]? = nil,
+                                 recoveryBackup: ClaudeSystemCredentials.RecoveryBackup? = nil) async throws {
         guard !hasShutDown || completingTransaction, let credentials = systemCredentials else { throw ManagedAccountError.cancelled }
         try await Task.detached(priority: .utility) {
             try credentials.copyLogin(from: source, to: target, expectedIdentity: identity,
-                allowExpired: allowExpired, completingTransaction: completingTransaction, sourceOAuthAccount: sourceOAuthAccount)
+                allowExpired: allowExpired, completingTransaction: completingTransaction, sourceOAuthAccount: sourceOAuthAccount,
+                recoveryBackup: recoveryBackup)
         }.value
     }
 

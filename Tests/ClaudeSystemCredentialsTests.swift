@@ -181,6 +181,88 @@ final class ClaudeSystemCredentialsTests: XCTestCase {
         XCTAssertEqual(keychain.writes, 1)
     }
 
+    func testRecoveryBackupValidationAcceptsExpiredLoginWithoutWritingOrRenewing() throws {
+        let (source, target, keychain) = try fixture()
+        try Data(contentsOf: source.configURL).write(to: target.configURL)
+        keychain.items[target.service + ":tester"] = ClaudeCredentialSnapshot(reference: Data("target".utf8),
+            data: try json(["claudeAiOauth": [:]]))
+        let before = keychain.items
+        let config = try Data(contentsOf: source.configURL)
+        let manager = ClaudeSystemCredentials(keychain: keychain, account: "tester", now: { self.fixedNow.addingTimeInterval(7200) },
+            renew: { _, _ in XCTFail("Backup validation must be read-only"); throw ClaudeSystemCredentialError.expiredLogin })
+
+        try manager.validateRecoveryBackup(at: source, replacing: target, expectedIdentity: expected)
+
+        XCTAssertEqual(keychain.items, before)
+        XCTAssertEqual(try Data(contentsOf: source.configURL), config)
+        XCTAssertEqual(keychain.writes, 0)
+    }
+
+    func testRecoveryBackupValidationRejectsIncompleteOrInvalidOAuth() throws {
+        let (source, target, keychain) = try fixture()
+        try Data(contentsOf: source.configURL).write(to: target.configURL)
+        keychain.items[target.service + ":tester"] = nil
+        let valid: [String: Any] = ["accessToken": "TEST-ONLY-access", "refreshToken": "TEST-ONLY-refresh", "expiresAt": 1_000]
+        for (key, value) in [("accessToken", " \n" as Any), ("refreshToken", "\t" as Any),
+                             ("expiresAt", true as Any), ("expiresAt", "1000" as Any)] {
+            var oauth = valid
+            oauth[key] = value
+            keychain.items[source.service + ":tester"] = ClaudeCredentialSnapshot(reference: Data("source".utf8),
+                data: try json(["claudeAiOauth": oauth]))
+            let manager = ClaudeSystemCredentials(keychain: keychain, account: "tester")
+            XCTAssertThrowsError(try manager.validateRecoveryBackup(at: source, replacing: target, expectedIdentity: expected)) { error in
+                guard case ClaudeSystemCredentialError.malformedData = error else { return XCTFail("Unexpected error: \(error)") }
+            }
+        }
+        XCTAssertEqual(keychain.writes, 0)
+    }
+
+    func testRecoveryBackupValidationRejectsConcurrentCredentialChange() throws {
+        let (source, target, keychain) = try fixture()
+        try Data(contentsOf: source.configURL).write(to: target.configURL)
+        keychain.items[target.service + ":tester"] = nil
+        keychain.beforeRead = { count in
+            if count == 3 { keychain.items[source.service + ":tester"] = nil }
+        }
+        let manager = ClaudeSystemCredentials(keychain: keychain, account: "tester")
+        XCTAssertThrowsError(try manager.validateRecoveryBackup(at: source, replacing: target, expectedIdentity: expected)) { error in
+            guard case ClaudeSystemCredentialError.changedDuringCopy = error else { return XCTFail("Unexpected error: \(error)") }
+        }
+        XCTAssertEqual(keychain.writes, 0)
+    }
+
+    func testRecoveredCopyRefusesChangesAfterBackupValidation() throws {
+        for changed in ["systemSecret", "systemConfig", "backupSecret"] {
+            let (backup, system, keychain) = try fixture()
+            let (healthy, _, healthyKeychain) = try fixture()
+            keychain.items[healthy.service + ":tester"] = healthyKeychain.items[healthy.service + ":tester"]
+            try Data(contentsOf: backup.configURL).write(to: system.configURL)
+            keychain.items[system.service + ":tester"] = nil
+            let manager = ClaudeSystemCredentials(keychain: keychain, account: "tester", now: { self.fixedNow })
+            let recovery = try manager.validateRecoveryBackup(at: backup, replacing: system, expectedIdentity: expected)
+
+            switch changed {
+            case "systemSecret":
+                keychain.items[system.service + ":tester"] = ClaudeCredentialSnapshot(reference: Data("newer".utf8),
+                    data: try json(["claudeAiOauth": ["refreshToken": "TEST-ONLY-newer-refresh"]]))
+            case "systemConfig":
+                var config = try object(Data(contentsOf: system.configURL))
+                config["concurrentSetting"] = true
+                try json(config).write(to: system.configURL)
+            default: keychain.items[backup.service + ":tester"] = nil
+            }
+            let before = keychain.items
+            let config = try Data(contentsOf: system.configURL)
+            XCTAssertThrowsError(try manager.copyLogin(from: healthy, to: system, expectedIdentity: expected,
+                                                       recoveryBackup: recovery)) { error in
+                guard case ClaudeSystemCredentialError.changedDuringCopy = error else { return XCTFail("Unexpected error: \(error)") }
+            }
+            XCTAssertEqual(keychain.items, before, changed)
+            XCTAssertEqual(try Data(contentsOf: system.configURL), config, changed)
+            XCTAssertEqual(keychain.writes, 0, changed)
+        }
+    }
+
     func testSymlinkConfigIsRefused() throws {
         let (source, target, keychain) = try fixture()
         let elsewhere = target.directory.appendingPathComponent("elsewhere.json")
