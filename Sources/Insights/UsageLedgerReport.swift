@@ -99,6 +99,9 @@ struct UsageLedgerReport: Codable, Equatable {
     var persistence: UsagePersistenceStatus = .notCaptured
     /// Lifetime progress uses saved history, never the selected 7/30-day total.
     var milestones: UsageMilestoneProgress? = nil
+    /// Calendar that produced the day keys. Keep exports aligned when the Mac's
+    /// timezone changes while an existing ledger is still running.
+    var calendar: Calendar? = nil
 
     static let empty = UsageLedgerReport(
         generatedAt: .distantPast, windowStart: .distantPast, windowEnd: .distantPast, days: 0,

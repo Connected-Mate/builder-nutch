@@ -6,6 +6,7 @@ struct UsageStatisticsView: View {
     let report: UsageLedgerReport
     @Binding var days: Int
     let isLoading: Bool
+    var onShare: (() -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var entered = false
     @State private var selectedDay: String?
@@ -15,10 +16,11 @@ struct UsageStatisticsView: View {
 
     private let chartDays: [UsageChartDay]
 
-    init(report: UsageLedgerReport, days: Binding<Int>, isLoading: Bool) {
+    init(report: UsageLedgerReport, days: Binding<Int>, isLoading: Bool, onShare: (() -> Void)? = nil) {
         self.report = report
         self._days = days
         self.isLoading = isLoading
+        self.onShare = onShare
         chartDays = UsageChartDay.make(keys: UsageInsightsView.dayKeys(from: report.windowStart, to: report.windowEnd),
                                       timeline: report.timeline, partialHistory: report.scan.hitLimit)
     }
@@ -59,6 +61,16 @@ struct UsageStatisticsView: View {
             Text("Recorded tokens")
                 .font(AppTheme.font(size: 12, weightValue: 550))
             Spacer(minLength: 4)
+            if let onShare {
+                Button(action: onShare) {
+                    Image(systemName: "square.and.arrow.up")
+                        .frame(width: 28, height: 28).contentShape(Rectangle())
+                }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("Export activity"))
+                    .help("Export activity")
+                    .disabled(isLoading)
+            }
             Group {
                 if isLoading { ProgressView().controlSize(.mini) }
                 else { Color.clear.accessibilityHidden(true) }

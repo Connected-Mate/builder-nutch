@@ -473,3 +473,26 @@
 "Reasoning: %@ · Included in output" = "Raisonnement : %@ · Inclus dans la sortie";
 "Select a day. Use the left and right arrow keys to move between days." = "Sélectionnez un jour. Utilisez les flèches gauche et droite pour changer de jour.";
 "Builder Nutch saves available token activity while it is open, even with the accounts window closed. Restored sessions are not counted twice." = "Builder Nutch sauvegarde les tokens disponibles tant qu’il est ouvert, même lorsque la fenêtre des comptes est fermée. Les sessions restaurées ne sont pas comptées deux fois.";
+
+/* Token consumption image export */
+"Export activity" = "Exporter l’activité";
+"Share your activity" = "Partager votre activité";
+"Token consumption image preview" = "Aperçu de l’image de consommation de tokens";
+"Ready for LinkedIn or your favorite network. Accounts and projects stay private." = "Prêt pour LinkedIn ou votre réseau préféré. Comptes et projets restent privés.";
+"Copy image" = "Copier l’image";
+"Save image…" = "Enregistrer l’image…";
+"Image copied. Paste it into your post." = "Image copiée. Collez-la dans votre publication.";
+"Image saved. Ready to share." = "Image enregistrée. Prête à partager.";
+"The image could not be created. Try again." = "Impossible de créer l’image. Réessayez.";
+"The image could not be copied. Try saving it instead." = "Impossible de copier l’image. Essayez de l’enregistrer.";
+"AI consumption" = "Consommation IA";
+"This week" = "Cette semaine";
+"No recorded data" = "Aucune donnée enregistrée";
+"Partial history · ≥ means at least" = "Historique partiel · ≥ signifie au moins";
+"Local history · Input, cache & output" = "Historique local · Entrée, cache et sortie";
+"Your activity, ready to share." = "Votre activité, prête à partager.";
+"A token card to share" = "Une carte de tokens à partager";
+"Export a polished image of your recorded tokens this week and today. Save it or copy it directly into a post." = "Exportez une image soignée de vos tokens enregistrés cette semaine et aujourd’hui. Enregistrez-la ou copiez-la dans une publication.";
+"Only the numbers" = "Uniquement les chiffres";
+"Account names and projects stay private. Dates and partial readings remain visible on the image." = "Noms de comptes et projets restent privés. Les dates et les lectures partielles restent visibles sur l’image.";
+"Today" = "Aujourd’hui";

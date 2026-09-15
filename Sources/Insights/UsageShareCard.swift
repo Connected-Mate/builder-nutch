@@ -170,7 +170,7 @@ struct UsageShareCard: View {
             }
             .lineLimit(1).minimumScaleFactor(0.8)
             Spacer(minLength: 0)
-            Text(snapshot.timeZone.identifier)
+            Text("\(date(snapshot.generatedAt, template: "d MMM yyyy HHmm")) · \(snapshot.timeZone.identifier)")
                 .lineLimit(1).minimumScaleFactor(0.8)
         }
         .font(AppTheme.font(size: 14))

@@ -122,6 +122,7 @@ struct UsageInsightsView: View {
     @ObservedObject var model: UsageInsightsModel
     let hidePersonalDetails: Bool
     @State private var expandedProjects: Set<String> = []
+    @State private var shareSnapshot: UsageShareSnapshot?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -132,7 +133,9 @@ struct UsageInsightsView: View {
                     .padding(24)
             }
             Group {
-                if let report = model.report {
+                if let shareSnapshot {
+                    UsageShareView(snapshot: shareSnapshot) { self.shareSnapshot = nil }
+                } else if let report = model.report {
                     if report.sessionCount == 0 && !report.scan.hitLimit && report.milestones == nil {
                         empty
                     } else {
@@ -182,7 +185,9 @@ struct UsageInsightsView: View {
 
     private func overview(_ report: UsageLedgerReport) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            UsageStatisticsView(report: report, days: $model.days, isLoading: model.isLoading)
+            UsageStatisticsView(report: report, days: $model.days, isLoading: model.isLoading) {
+                shareSnapshot = UsageShareSnapshot(report: report)
+            }
             if let milestones = report.milestones {
                 UsageMilestonesView(progress: milestones)
             }

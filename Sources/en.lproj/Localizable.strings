@@ -206,3 +206,26 @@
 "Reasoning: %@ · Included in output" = "Reasoning: %@ · Included in output";
 "Select a day. Use the left and right arrow keys to move between days." = "Select a day. Use the left and right arrow keys to move between days.";
 "Builder Nutch saves available token activity while it is open, even with the accounts window closed. Restored sessions are not counted twice." = "Builder Nutch saves available token activity while it is open, even with the accounts window closed. Restored sessions are not counted twice.";
+
+/* Token consumption image export */
+"Export activity" = "Export activity";
+"Share your activity" = "Share your activity";
+"Token consumption image preview" = "Token consumption image preview";
+"Ready for LinkedIn or your favorite network. Accounts and projects stay private." = "Ready for LinkedIn or your favorite network. Accounts and projects stay private.";
+"Copy image" = "Copy image";
+"Save image…" = "Save image…";
+"Image copied. Paste it into your post." = "Image copied. Paste it into your post.";
+"Image saved. Ready to share." = "Image saved. Ready to share.";
+"The image could not be created. Try again." = "The image could not be created. Try again.";
+"The image could not be copied. Try saving it instead." = "The image could not be copied. Try saving it instead.";
+"AI consumption" = "AI consumption";
+"This week" = "This week";
+"No recorded data" = "No recorded data";
+"Partial history · ≥ means at least" = "Partial history · ≥ means at least";
+"Local history · Input, cache & output" = "Local history · Input, cache & output";
+"Your activity, ready to share." = "Your activity, ready to share.";
+"A token card to share" = "A token card to share";
+"Export a polished image of your recorded tokens this week and today. Save it or copy it directly into a post." = "Export a polished image of your recorded tokens this week and today. Save it or copy it directly into a post.";
+"Only the numbers" = "Only the numbers";
+"Account names and projects stay private. Dates and partial readings remain visible on the image." = "Account names and projects stay private. Dates and partial readings remain visible on the image.";
+"Today" = "Today";

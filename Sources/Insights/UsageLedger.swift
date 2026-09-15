@@ -309,7 +309,7 @@ struct UsageLedgerEngine {
         return UsageLedgerReport(generatedAt: now, windowStart: windowStart, windowEnd: now, days: boundedDays,
                                  totalWeight: total, tokens: overall.tokens, messages: overall.messages,
                                  sessionCount: shares.reduce(0) { $0 + $1.sessionCount },
-                                 accounts: shares, timeline: timelineSlices, scan: summary)
+                                 accounts: shares, timeline: timelineSlices, scan: summary, calendar: calendar)
     }
 
     // MARK: - Window arithmetic
