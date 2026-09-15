@@ -63,6 +63,17 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(switchAlerts, forKey: Keys.switchAlerts) }
     }
 
+    /// A quiet daily invitation to make the already-local usage share. The
+    /// reminder is on for a fresh install because the share is useful only if
+    /// it becomes a habit, and it remains one switch away from silence.
+    @Published var dailyShareReminder: Bool {
+        didSet { defaults.set(dailyShareReminder, forKey: Keys.dailyShareReminder) }
+    }
+
+    /// Live macOS permission state. This is deliberately not persisted: System
+    /// Settings is the source of truth and can change while the app is open.
+    @Published private(set) var dailyShareNotificationDenied = false
+
     /// The version whose changes have already been shown.
     ///
     /// Written when the What's New dialogue is dismissed rather than when it
@@ -97,6 +108,7 @@ final class Preferences: ObservableObject {
         static let usageAlerts = "usageAlerts"
         static let problemAlerts = "problemAlerts"
         static let switchAlerts = "switchAlerts"
+        static let dailyShareReminder = "dailyShareReminder"
     }
 
     /// True the very first time this copy runs, and never again.
@@ -158,6 +170,7 @@ final class Preferences: ObservableObject {
         self.usageAlerts = defaults.object(forKey: Keys.usageAlerts) as? Bool ?? true
         self.problemAlerts = defaults.object(forKey: Keys.problemAlerts) as? Bool ?? true
         self.switchAlerts = defaults.object(forKey: Keys.switchAlerts) as? Bool ?? false
+        self.dailyShareReminder = defaults.object(forKey: Keys.dailyShareReminder) as? Bool ?? true
         // Absent means nothing has been shown yet, which is true of a fresh
         // install — so the current release reads as new to it.
         self.lastSeenVersion = defaults.string(forKey: Keys.lastSeenVersion)
@@ -182,6 +195,10 @@ final class Preferences: ObservableObject {
         usageDisplayMode = mode
         hasChosenUsageDisplay = true
         defaults.set(true, forKey: Keys.hasChosenUsageDisplay)
+    }
+
+    func setDailyShareNotificationDenied(_ denied: Bool) {
+        dailyShareNotificationDenied = denied
     }
 
     /// Forget everything this app has stored and quit.

@@ -96,6 +96,25 @@ struct SettingsView: View {
             // One switch per thing macOS might say. The notch shows everything
             // regardless; these only decide what is allowed to interrupt.
             if section == .notifications { settingsSection("Notifications") {
+                Toggle("Offer today's token share at 5:30 PM", isOn: $preferences.dailyShareReminder)
+                Text(LocalizedStringKey(SettingsView.dailyShareReminderCopy))
+                    .font(AppTheme.font(.caption))
+                    .foregroundStyle(AppTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if preferences.dailyShareReminder && preferences.dailyShareNotificationDenied {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text("Notifications are off for Builder Nutch in macOS. Turn them on to receive the daily reminder.")
+                            .font(AppTheme.font(.caption))
+                            .foregroundStyle(AppTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        Button("Open Notification Settings") {
+                            NSWorkspace.shared.open(SettingsView.notificationSettingsURL)
+                        }
+                        .controlSize(.small)
+                    }
+                }
+
                 Toggle("Tell me when an account is running low", isOn: $preferences.usageAlerts)
                 // Wrapped in a key rather than written as a concatenated
                 // literal: `Text` only localises a literal, and a `+` chain
@@ -232,6 +251,9 @@ struct SettingsView: View {
     }
 
     static let authorURL = URL(string: "https://x.com/hivinz_")!
+    static let notificationSettingsURL = URL(
+        string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
+    )!
 
     /// Room for all four visibility choices without shrinking their labels.
     static let width: CGFloat = 520
@@ -244,6 +266,10 @@ struct SettingsView: View {
     static let usageAlertsCopy =
         "A notification at 50%, 75% and 85% of each limit, once per account "
         + "each time the limit resets."
+
+    static let dailyShareReminderCopy =
+        "Builder Nutch prepares the private preview only after you open the "
+        + "notification. Nothing is posted automatically."
 
     static let problemAlertsCopy =
         "A notification when the notch has been red for an hour without being "

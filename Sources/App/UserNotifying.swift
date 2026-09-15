@@ -31,9 +31,19 @@ protocol UserNotifying: AnyObject {
 /// that has been broken for an hour — is the moment it would find the door shut.
 /// Asked at the point of a real message, the request explains itself.
 final class SystemNotifier: NSObject, UserNotifying, UNUserNotificationCenterDelegate {
+    enum ActivationDestination: Equatable {
+        case accounts
+        case dailyShare
+    }
+
+    static func activationDestination(for requestIdentifier: String) -> ActivationDestination {
+        requestIdentifier == DailyShareNotificationScheduler.requestID ? .dailyShare : .accounts
+    }
+
     /// Run when the user clicks one of these notifications. The click is the
     /// whole point of sending it: it has to land on the problem.
     var onActivate: (() -> Void)?
+    var onDailyShareActivate: (() -> Void)?
 
     private var center: UNUserNotificationCenter?
 
@@ -94,6 +104,61 @@ final class SystemNotifier: NSObject, UserNotifying, UNUserNotificationCenterDel
         }
     }
 
+    // MARK: - Scheduled notifications
+
+    func dailyShareAuthorizationStatus(
+        then completion: @escaping (DailyShareNotificationAuthorization) -> Void
+    ) {
+        connectedCentre().getNotificationSettings { settings in
+            let status: DailyShareNotificationAuthorization
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral: status = .allowed
+            case .notDetermined: status = .notDetermined
+            case .denied: status = .denied
+            @unknown default: status = .denied
+            }
+            completion(status)
+        }
+    }
+
+    func requestDailyShareAuthorization(then completion: @escaping (Bool) -> Void) {
+        connectedCentre().requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if let error {
+                Log.usage.error("notification authorisation failed: \(error.localizedDescription, privacy: .public)")
+            }
+            completion(granted)
+        }
+    }
+
+    func replaceDailyShareRequest(
+        _ request: DailyShareNotificationRequest,
+        completion: @escaping (Error?) -> Void
+    ) {
+        let center = connectedCentre()
+        center.removePendingNotificationRequests(withIdentifiers: [request.id])
+
+        let content = UNMutableNotificationContent()
+        content.title = request.title
+        content.body = request.body
+        content.sound = .default
+
+        // Supplying only hour and minute follows the system's current calendar
+        // and time zone, including daylight-saving and time-zone changes.
+        var time = DateComponents()
+        time.hour = request.hour
+        time.minute = request.minute
+        let trigger = UNCalendarNotificationTrigger(dateMatching: time, repeats: true)
+        center.add(UNNotificationRequest(
+            identifier: request.id, content: content, trigger: trigger
+        ), withCompletionHandler: completion)
+    }
+
+    func removeDailyShareRequest() {
+        connectedCentre().removePendingNotificationRequests(
+            withIdentifiers: [DailyShareNotificationScheduler.requestID]
+        )
+    }
+
     // MARK: - UNUserNotificationCenterDelegate
 
     /// Shown even when Builder Nutch is the app in front. Being frontmost is
@@ -112,7 +177,11 @@ final class SystemNotifier: NSObject, UserNotifying, UNUserNotificationCenterDel
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let activate = onActivate
+        let activate: (() -> Void)?
+        switch Self.activationDestination(for: response.notification.request.identifier) {
+        case .accounts: activate = onActivate
+        case .dailyShare: activate = onDailyShareActivate
+        }
         DispatchQueue.main.async { activate?() }
         completionHandler()
     }

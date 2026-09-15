@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notifier: SystemNotifier?
     private var escalator: AttentionEscalator?
     private var usageThresholds: UsageThresholdNotifier?
+    private var dailyShareScheduler: DailyShareNotificationScheduler?
     private var terminating = false
     private var terminationReplied = false
 
@@ -85,14 +86,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let notifier = SystemNotifier()
         let escalator = AttentionEscalator(notifier: notifier)
         let thresholds = UsageThresholdNotifier(notifier: notifier)
+        let dailyShareScheduler = DailyShareNotificationScheduler(backend: notifier)
+        dailyShareScheduler.onAuthorizationDeniedChange = { [weak preferences] denied in
+            preferences?.setDailyShareNotificationDenied(denied)
+        }
         thresholds.isEnabled = preferences.usageAlerts
         escalator.isEnabled = preferences.problemAlerts
         // A notification about a broken account is only useful if clicking it
         // lands on the account.
         notifier.onActivate = { [weak self] in self?.openAccounts() }
+        notifier.onDailyShareActivate = { [weak self] in
+            self?.accountsWindow?.showDailyUsageShare()
+        }
         self.notifier = notifier
         self.escalator = escalator
         self.usageThresholds = thresholds
+        self.dailyShareScheduler = dailyShareScheduler
 
         controller.model.edge = preferences.notchEdge
         controller.model.usageDisplayMode = preferences.usageDisplayMode
@@ -154,6 +163,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }.store(in: &cancellables)
         preferences.$problemAlerts.receive(on: RunLoop.main).sink { [weak escalator] in
             escalator?.isEnabled = $0
+        }.store(in: &cancellables)
+        preferences.$dailyShareReminder.receive(on: RunLoop.main).sink { [weak dailyShareScheduler] in
+            dailyShareScheduler?.setEnabled($0)
         }.store(in: &cancellables)
         manager.$accounts.dropFirst().receive(on: RunLoop.main).sink { [weak usageHistory] _ in
             usageHistory?.captureInBackground()
@@ -423,6 +435,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         openAccounts()
         return true
+    }
+    func applicationDidBecomeActive(_ notification: Notification) {
+        dailyShareScheduler?.refresh()
     }
     func applicationWillTerminate(_ notification: Notification) {
         usageHistory?.stop()
