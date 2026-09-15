@@ -148,7 +148,7 @@ struct UsageShareCard: View {
                         .frame(height: max(1, barHeight))
                 }
             }
-            .frame(height: 40)
+            .frame(height: 40, alignment: .bottom)
             .accessibilityHidden(true)
             Text(date(day.date, template: "EEE d"))
                 .font(AppTheme.font(size: 15, weightValue: current ? 650 : 400))

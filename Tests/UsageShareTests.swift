@@ -98,6 +98,34 @@ final class UsageShareSnapshotTests: XCTestCase {
 
 @MainActor
 final class UsageShareExportTests: XCTestCase {
+    func testUnequalDailyBarsShareTheSameBaseline() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Paris")!
+        let now = ISO8601DateFormatter().date(from: "2026-09-15T10:00:00Z")!
+        let start = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now))!
+        let slices = [3_000, 1_000].enumerated().map { index, value in
+            UsageDaySlice(day: "2026-09-\(14 + index)", weight: 1, sharePercent: 0,
+                tokens: UsageTokenTotals(input: value, measurements: 1, inputMeasurements: 1,
+                    outputMeasurements: 1, codexMeasurements: 1), messages: 1)
+        }
+        let report = UsageLedgerReport(generatedAt: now, windowStart: start, windowEnd: now, days: 7,
+            totalWeight: 2, tokens: UsageTokenTotals(), messages: 2, sessionCount: 2,
+            accounts: [], timeline: slices, scan: UsageScanSummary())
+        let data = try UsageShareExporter.pngData(snapshot: UsageShareSnapshot(report: report, calendar: calendar))
+        let rep = try XCTUnwrap(NSBitmapImageRep(data: data))
+        // Sample clear columns between the labels, within the chart's vertical
+        // band. Both real bars must end on the same baseline despite unequal heights.
+        func baseline(x: Int) -> Int? {
+            (760..<980).last { y in
+                guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return false }
+                return min(color.redComponent, color.greenComponent, color.blueComponent) > 0.38
+            }
+        }
+        let left = try XCTUnwrap(baseline(x: 400))
+        let right = try XCTUnwrap(baseline(x: 1900))
+        XCTAssertEqual(left, right, accuracy: 1)
+    }
+
     func testSevenDayArtworkRendersInEnglishAndFrenchWithLargePartialCounts() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Europe/Paris")!
