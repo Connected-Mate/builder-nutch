@@ -8,12 +8,20 @@ final class UsageSharePresentationTests: XCTestCase {
                                  now: Date(), calendar: .current, timeline: UsageAccountTimeline())
     }
 
+    private func waitFor(_ condition: () -> Bool) async {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while !condition(), ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        XCTAssertTrue(condition(), "The expected presentation state did not arrive")
+    }
+
     func testClosingDuringLoadingCannotReopenThePopup() async {
         let presentation = UsageSharePresentation()
         let value = report()
         var pending: CheckedContinuation<UsageLedgerReport?, Never>?
         presentation.open { await withCheckedContinuation { pending = $0 } }
-        while pending == nil { await Task.yield() }
+        await waitFor { pending != nil }
         XCTAssertTrue(presentation.isPresented)
         presentation.close()
         pending?.resume(returning: value)
@@ -28,11 +36,11 @@ final class UsageSharePresentationTests: XCTestCase {
         var first: CheckedContinuation<UsageLedgerReport?, Never>?
         var second: CheckedContinuation<UsageLedgerReport?, Never>?
         presentation.open(projectPath: "/first") { await withCheckedContinuation { first = $0 } }
-        while first == nil { await Task.yield() }
+        await waitFor { first != nil }
         presentation.open(projectPath: "/second") { await withCheckedContinuation { second = $0 } }
-        while second == nil { await Task.yield() }
+        await waitFor { second != nil }
         second?.resume(returning: value)
-        while presentation.report == nil { await Task.yield() }
+        await waitFor { presentation.report != nil }
         first?.resume(returning: nil)
         for _ in 0..<10 { await Task.yield() }
         XCTAssertEqual(presentation.projectPath, "/second")
@@ -43,11 +51,11 @@ final class UsageSharePresentationTests: XCTestCase {
     func testFailedLoadIsRecoverableAndSavingProtectsTheFrozenPreview() async {
         let presentation = UsageSharePresentation()
         presentation.open { nil }
-        while !presentation.failed { await Task.yield() }
+        await waitFor { presentation.failed }
         XCTAssertTrue(presentation.isPresented)
         let value = report()
         presentation.open(projectPath: "/chosen") { value }
-        while presentation.report == nil { await Task.yield() }
+        await waitFor { presentation.report != nil }
         presentation.isSaving = true
         presentation.close()
         presentation.open { nil }

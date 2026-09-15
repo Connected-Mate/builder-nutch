@@ -534,3 +534,15 @@
 "A daily invitation" = "Un rendez-vous chaque jour";
 
 "At 17:30, a notification opens your card for today. Turn it off anytime in Settings." = "À 17 h 30, une notification ouvre votre carte du jour. Vous pouvez la désactiver dans les réglages.";
+
+"Offer today's token share at 5:30 PM" = "Proposer le partage du jour à 17 h 30";
+
+"Builder Nutch prepares the private preview only after you open the notification. Nothing is posted automatically." = "Ouvrez la notification pour voir votre image du jour. Rien n’est publié automatiquement.";
+
+"Notifications are off for Builder Nutch in macOS. Turn them on to receive the daily reminder." = "Les notifications de Builder Nutch sont désactivées dans macOS. Activez-les pour recevoir le rappel quotidien.";
+
+"Open Notification Settings" = "Réglages des notifications";
+
+"Your daily token share is ready" = "Votre carte du jour vous attend";
+
+"Open Builder Nutch to preview it before sharing." = "Ouvrez Builder Nutch pour la voir et la partager.";

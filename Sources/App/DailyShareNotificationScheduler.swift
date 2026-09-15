@@ -35,7 +35,7 @@ extension SystemNotifier: DailyShareNotificationBacking {}
 /// user changed the switch.
 @MainActor
 final class DailyShareNotificationScheduler {
-    static let requestID = "builder-nutch.daily-usage-share"
+    nonisolated static let requestID = "builder-nutch.daily-usage-share"
 
     private let backend: DailyShareNotificationBacking
     private var enabled = false

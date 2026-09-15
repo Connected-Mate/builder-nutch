@@ -161,6 +161,10 @@ struct AccountsView: View {
             consumeDailyShareRequest()
         }
         .onChange(of: navigation.dailyShareRequest) { _, _ in consumeDailyShareRequest() }
+        .onChange(of: preferences.hasChosenUsageDisplay) { _, _ in consumeDailyShareRequest() }
+        .onChange(of: share.isSaving) { _, saving in
+            if !saving { consumeDailyShareRequest() }
+        }
         .onChange(of: manager.notice) { _, notice in
             noticeTask?.cancel()
             guard notice != nil else { return }
@@ -185,8 +189,17 @@ struct AccountsView: View {
     }
 
     private func consumeDailyShareRequest() {
-        guard navigation.dailyShareRequest != nil else { return }
+        // Keep the intent queued while the initial setup or a save needs a
+        // response. Ordinary sheets are dismissed so Today is never behind one.
+        guard navigation.dailyShareRequest != nil,
+              preferences.hasChosenUsageDisplay, !share.isSaving else { return }
         navigation.dailyShareRequest = nil
+        connecting = nil
+        personalizing = nil
+        showingOpenAIRelay = false
+        showingRotation = false
+        removing = nil
+        localError = nil
         navigation.showingSettings = false
         showingCustom = false
         showingAdd = false
