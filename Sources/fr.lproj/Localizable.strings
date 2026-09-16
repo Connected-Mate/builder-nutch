@@ -613,6 +613,13 @@
 "GenGen appears in your saved levels and AI Podium exports, independently of the period or project you choose." = "GenGen apparaît dans vos niveaux et vos exports AI Podium, quelle que soit la période ou le projet choisi.";
 
 /* GenGen Studio release */
+"No sessions today." = "Aucune session aujourd’hui.";
+"Recorded since local midnight." = "Relevé depuis minuit, heure locale.";
+"Today, with room to breathe." = "Aujourd’hui, avec plus d’espace.";
+"Start with today" = "Votre journée en premier";
+"Usage opens on today's recorded tokens, inputs, outputs and projects. Switch to 7 or 30 days whenever you need the bigger picture." = "La consommation s’ouvre sur les tokens, entrées, sorties et projets de la journée. Passez à 7 ou 30 jours pour prendre du recul.";
+"More room for your work" = "Plus de place pour votre activité";
+"Repeated page headers are gone. Privacy and refresh sit in the sidebar, while account alerts have proper spacing and rounded edges." = "Les titres de page répétés disparaissent. Masquage et actualisation restent dans la barre latérale ; les alertes des comptes gagnent de vraies marges et des contours arrondis.";
 "Your GenGen, everywhere." = "Votre GenGen, partout.";
 "Your GenGen certificate" = "Votre certificat GenGen";
 "When GenGen is reached, save your certificate from AI Podium. It includes your lifetime total and eligibility, without account or project details." = "Une fois GenGen obtenu, enregistrez votre certificat depuis AI Podium. Il contient votre total cumulé et les conditions atteintes, sans compte ni projet.";

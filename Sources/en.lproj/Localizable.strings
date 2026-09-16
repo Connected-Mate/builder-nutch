@@ -348,6 +348,13 @@
 "GenGen appears in your saved levels and AI Podium exports, independently of the period or project you choose." = "GenGen appears in your saved levels and AI Podium exports, independently of the period or project you choose.";
 
 /* GenGen Studio release */
+"No sessions today." = "No sessions today.";
+"Recorded since local midnight." = "Recorded since local midnight.";
+"Today, with room to breathe." = "Today, with room to breathe.";
+"Start with today" = "Start with today";
+"Usage opens on today's recorded tokens, inputs, outputs and projects. Switch to 7 or 30 days whenever you need the bigger picture." = "Usage opens on today's recorded tokens, inputs, outputs and projects. Switch to 7 or 30 days whenever you need the bigger picture.";
+"More room for your work" = "More room for your work";
+"Repeated page headers are gone. Privacy and refresh sit in the sidebar, while account alerts have proper spacing and rounded edges." = "Repeated page headers are gone. Privacy and refresh sit in the sidebar, while account alerts have proper spacing and rounded edges.";
 "Your GenGen, everywhere." = "Your GenGen, everywhere.";
 "Your GenGen certificate" = "Your GenGen certificate";
 "When GenGen is reached, save your certificate from AI Podium. It includes your lifetime total and eligibility, without account or project details." = "When GenGen is reached, save your certificate from AI Podium. It includes your lifetime total and eligibility, without account or project details.";

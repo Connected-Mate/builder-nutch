@@ -71,7 +71,6 @@ struct AccountsView: View {
         HStack(spacing: 0) {
             sidebar
             VStack(spacing: 0) {
-                header
                 if navigation.showingSettings, let settingsContent {
                     settingsContent()
                 } else if showingCustom {
@@ -230,9 +229,7 @@ struct AccountsView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Assistants")
-                .font(AppTheme.font(size: 11, weightValue: 550)).foregroundStyle(AppTheme.muted)
-                .padding(.horizontal, 12).padding(.top, 20).padding(.bottom, 4)
+            sidebarTools
             ScrollView {
                 VStack(spacing: 4) {
                     ForEach(providers) { filterButton($0) }
@@ -254,6 +251,9 @@ struct AccountsView: View {
                             .padding(.horizontal, 12)
                     }
                     .buttonStyle(WorkspaceQuietButtonStyle()).padding(.top, 4)
+                    .background(showingAdd && !navigation.showingSettings ? AppTheme.selected : .clear,
+                                in: RoundedRectangle(cornerRadius: 6))
+                    .accessibilityAddTraits(showingAdd && !navigation.showingSettings ? .isSelected : [])
                     .disabled(manager.loginAccountID != nil)
                     .keyboardShortcut("n", modifiers: .command)
                 }
@@ -322,16 +322,18 @@ struct AccountsView: View {
         .accessibilityAddTraits(active ? .isSelected : [])
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            Text(LocalizedStringKey(navigation.showingSettings ? "Settings" : showingCustom ? "Custom assistants" :
-                    showingAdd ? "Add an assistant" : showingUsage ? "Usage" : filter?.workspaceTitle ?? "Accounts"))
-                .font(AppTheme.font(size: 14, weightValue: 600)).lineLimit(1)
+    /// Navigation already names the current page. Keep utility actions beside
+    /// it instead of reserving a second title bar above every content view.
+    private var sidebarTools: some View {
+        HStack(spacing: 4) {
+            Text("Assistants")
+                .font(AppTheme.font(size: 10, weightValue: 550)).lineLimit(1)
                 .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 8)
+            Spacer(minLength: 0)
             if !navigation.showingSettings && !showingCustom {
                 Button { hidePersonalDetails.toggle() } label: {
-                    Image(systemName: hidePersonalDetails ? "eye.slash" : "eye").frame(width: 28, height: 32)
+                    Image(systemName: hidePersonalDetails ? "eye.slash" : "eye")
+                        .font(.system(size: 12)).frame(width: 28, height: 28)
                 }
                 .buttonStyle(WorkspaceQuietButtonStyle())
                 .help(hidePersonalDetails ? "Show personal details" : "Hide personal details")
@@ -341,7 +343,10 @@ struct AccountsView: View {
                         Task {
                             if showingUsage { await usage.refresh() } else { await manager.refreshAll() }
                         }
-                    } label: { Image(systemName: "arrow.clockwise").frame(width: 28, height: 32) }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12)).frame(width: 28, height: 28)
+                    }
                     .buttonStyle(WorkspaceQuietButtonStyle()).help("Refresh")
                     .accessibilityLabel("Refresh")
                     .disabled(showingUsage ? usage.isLoading : !manager.busyIDs.isEmpty)
@@ -349,9 +354,9 @@ struct AccountsView: View {
                 }
             }
         }
-        .frame(minHeight: 32)
-        .padding(.horizontal, 24).padding(.vertical, 4)
-        .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
+        .foregroundStyle(AppTheme.muted)
+        .frame(height: 28)
+        .padding(.leading, 12).padding(.trailing, 4).padding(.top, 8)
     }
 
     @ViewBuilder private var assistantList: some View {
@@ -376,6 +381,7 @@ struct AccountsView: View {
                     Text("Selection").frame(width: 100)
                 }
                 .font(AppTheme.font(size: 10, weightValue: 500)).foregroundStyle(AppTheme.muted)
+                .padding(.horizontal, 12)
                 .padding(.vertical, 10)
                 .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
                 ScrollView {
@@ -396,9 +402,11 @@ struct AccountsView: View {
                                          reportError: { localError = $0 })
                         }
                     }
+                    .padding(.vertical, 4)
                 }
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
         }
     }
 
@@ -531,7 +539,9 @@ struct AccountsView: View {
             Spacer()
             Button("Cancel") { manager.cancelLogin() }.buttonStyle(WorkspaceSelectionStyle())
         }
-        .padding(.horizontal, 24).padding(.vertical, 10).background(AppTheme.soft)
+        .padding(12)
+        .background(AppTheme.soft, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
     }
 
     /// One problem, one sentence, one button. The colour separates "macOS is
@@ -553,9 +563,10 @@ struct AccountsView: View {
                 .buttonStyle(WorkspaceSelectionStyle(primary: true))
                 .disabled(repairing || manager.loginAccountID != nil)
         }
-        .padding(.leading, 27).padding(.trailing, 30).padding(.vertical, 12)
-        .background(tint.opacity(0.06))
-        .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
+        .padding(12)
+        .background(tint.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(tint.opacity(0.2)))
+        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(attention.title). \(attention.detail)")
     }
@@ -587,7 +598,9 @@ struct AccountsView: View {
                 .buttonStyle(.plain).accessibilityLabel("Dismiss notice")
         }
         .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
-        .padding(.horizontal, 24).padding(.vertical, 10).background(AppTheme.paper)
+        .padding(12)
+        .background(AppTheme.soft, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
     }
 
     private func chooseProjectFolder() {
@@ -751,10 +764,21 @@ private struct AssistantRow: View {
                 .popover(isPresented: $showingUsage) { usageDetails }
             selectionControl.frame(width: 100)
         }
-        .padding(.vertical, 8).frame(minHeight: 76)
+        .padding(.horizontal, 12)
+        .padding(.vertical, needsReconnect ? 12 : 8).frame(minHeight: 76)
         .background(needsReconnect ? Palette.alert.opacity(0.06) : .clear,
-                    in: RoundedRectangle(cornerRadius: 6))
-        .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
+                    in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            if needsReconnect {
+                RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.alert.opacity(0.2))
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if !needsReconnect {
+                Rectangle().fill(AppTheme.line).frame(height: 1).padding(.horizontal, 12)
+            }
+        }
+        .padding(.vertical, needsReconnect ? 4 : 0)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(displayLabel), \(account.provider.workspaceTitle), \(statusDescription)")
     }

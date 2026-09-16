@@ -30,6 +30,10 @@ struct ReleaseNote: Equatable {
 /// `testTheCurrentVersionHasANote`.
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
+        ReleaseNote(version: "0.22.0", headline: "Today, with room to breathe.", changes: [
+            .init(title: "Start with today", detail: "Usage opens on today's recorded tokens, inputs, outputs and projects. Switch to 7 or 30 days whenever you need the bigger picture."),
+            .init(title: "More room for your work", detail: "Repeated page headers are gone. Privacy and refresh sit in the sidebar, while account alerts have proper spacing and rounded edges.")
+        ]),
         ReleaseNote(version: "0.21.0", headline: "Your GenGen, everywhere.", changes: [
             .init(title: "Your GenGen certificate", detail: "When GenGen is reached, save your certificate from AI Podium. It includes your lifetime total and eligibility, without account or project details."),
             .init(title: "Make your profile yours", detail: "Import your certificate in GenGen Studio to create a profile frame, LinkedIn and X banners, or a certificate post. Photos stay on your device.")
