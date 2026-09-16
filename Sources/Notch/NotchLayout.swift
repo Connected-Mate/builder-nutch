@@ -39,7 +39,8 @@ enum NotchLayout {
     static let cornerRadius = Design.px(78.8)
     static let padTop       = Design.px(69.5)   // body top -> first ring
     static let padBottom    = Design.px(50.1)   // last label -> body bottom
-    static let cellSpacing  = Design.px(83.5)   // label bottom -> next ring top
+    // Keep the ring pitch while giving the selected model its own line.
+    static var cellSpacing: CGFloat { Design.px(83.5) - modelLabelGap - cardBodyLineHeight }
 
     // The resting pill. Not in the design frame — it is the notch folded away,
     // sized to read as a deliberate handle rather than a sliver of chrome.
@@ -52,6 +53,9 @@ enum NotchLayout {
     static let progressStroke = Design.px(8)
     static let glyphSize     = Design.px(46)
     static let ringLabelGap  = Design.px(26.9)
+    static let modelLabelGap = Design.px(8)
+    static let modelChoiceHeight: CGFloat = 24
+    static var modelPickerHeight: CGFloat { cardBodyLineHeight + sessionRowGap + modelChoiceHeight }
 
     // The activity indicator. Not in the design frame — sized to sit in the gap
     // between the glyph (46px across) and the inside edge of the track (86px),
@@ -185,7 +189,9 @@ enum NotchLayout {
     }
 
     /// Ring plus its percent label.
-    static var cellExtent: CGFloat { ringDiameter + ringLabelGap + percentLineHeight }
+    static var cellExtent: CGFloat {
+        ringDiameter + ringLabelGap + percentLineHeight + modelLabelGap + cardBodyLineHeight
+    }
 
     /// What one cell claims along the stack.
     ///
@@ -273,12 +279,14 @@ enum NotchLayout {
                            sessionCap: Int = defaultSessionCap,
                            statusMessage: String? = nil,
                            blockMessage: String? = nil,
-                           identitySubtitle: Bool = false) -> CGFloat {
+                           identitySubtitle: Bool = false,
+                           modelPicker: Bool = false) -> CGFloat {
         let header = max(glyphSize, cardTitleLineHeight)
         var height = 2 * cardPadding + header
         if identitySubtitle {
             height += sessionRowGap + cardBodyLineHeight
         }
+        if modelPicker { height += headerToBlock + modelPickerHeight }
 
         // The blocked line sits under the header, above everything else — it
         // is the reading that stops you working, so it leads.
@@ -420,7 +428,7 @@ enum NotchLayout {
             // bottom of the card.
             let height = cardHeight(windowCount: windowCount,
                                     sessionCount: n + 1, sessionCap: n,
-                                    identitySubtitle: true)
+                                    identitySubtitle: true, modelPicker: true)
             guard height <= cardBudget else { break }
             fits = n
         }
@@ -444,7 +452,7 @@ enum NotchLayout {
     static func maxCardHeight(sessionCap: Int) -> CGFloat {
         cardHeight(windowCount: maxWindowCount,
                    sessionCount: sessionCap + 1, sessionCap: sessionCap,
-                   identitySubtitle: true)
+                   identitySubtitle: true, modelPicker: true)
     }
 
     static let defaultMaxCardHeight = maxCardHeight(sessionCap: defaultSessionCap)

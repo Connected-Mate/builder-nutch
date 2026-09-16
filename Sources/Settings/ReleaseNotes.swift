@@ -30,6 +30,10 @@ struct ReleaseNote: Equatable {
 /// `testTheCurrentVersionHasANote`.
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
+        ReleaseNote(version: "0.24.1", headline: "Your model, at a glance.", changes: [
+            .init(title: "Choose from the notch", detail: "Choose the Claude model directly in its notch details. Its name appears below the percentage; shared allowances stay explicitly shared."),
+            .init(title: "A model limit is not an expired account", detail: "A spent model allowance no longer marks the entire subscription as unavailable or asks you to add another account.")
+        ]),
         ReleaseNote(version: "0.24.0", headline: "Keep your model. Use the right account.", changes: [
             .init(title: "Rotation follows your model", detail: "A Fable limit no longer blocks another selected model. Shared limits and unavailable readings still protect account switching."),
             .init(title: "An available model for a new session", detail: "New session tries your chosen model across accounts first, then a model with confirmed remaining usage. Existing Claude terminals keep their own model; use /model there.")

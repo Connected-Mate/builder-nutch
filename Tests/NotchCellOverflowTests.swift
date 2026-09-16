@@ -59,6 +59,10 @@ final class NotchCellOverflowTests: XCTestCase {
     }
 
     func testNoCellIsEverWiderThanTheNotch() {
+        for name in ["Fable", "Opus", "Sonnet", "Haiku", "Model ?", "Modèle ?"] {
+            XCTAssertLessThanOrEqual(intrinsicWidth(ProviderCell(snapshot: unavailable(id: "a"),
+                modelLabel: name)), budget, "The model label escapes the notch: \(name)")
+        }
         // A broken account, which is the case that shipped wrong.
         XCTAssertLessThanOrEqual(
             intrinsicWidth(ProviderCell(snapshot: unavailable(id: "a"), needsAttention: true)),

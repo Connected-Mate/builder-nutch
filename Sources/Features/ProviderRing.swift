@@ -206,6 +206,7 @@ private struct ActivityArc: View {
 /// A ring and the percent burned underneath it.
 struct ProviderCell: View {
     let snapshot: ProviderSnapshot
+    var modelLabel: String? = nil
     var activity: ActivitySummary?
     var isRefreshing: Bool = false
     var displayMode: UsageDisplayMode = .used
@@ -242,7 +243,8 @@ struct ProviderCell: View {
             // `NotchLayout`, and a cell that quietly lost a line would slide
             // its ring off the centres every hover band and tooltip tail is
             // aimed at.
-            Text(percentText)
+            VStack(spacing: NotchLayout.modelLabelGap) {
+                Text(percentText)
                 .font(Typography.percent)
                 .foregroundStyle(Palette.textPrimary)
                 // Never squeezed: across a horizontal edge the cell is only as
@@ -253,8 +255,16 @@ struct ProviderCell: View {
                 .frame(height: NotchLayout.percentLineHeight)
                 .contentTransition(.numericText())
                 .animation(NotchMotion.reading, value: percentText)
+                Text(modelLabel ?? "")
+                .font(Typography.cardBody)
+                .foregroundStyle(Palette.textSecondary)
+                .lineLimit(1)
+                .frame(width: NotchLayout.sideBodyDepth - 8,
+                       height: NotchLayout.cardBodyLineHeight)
+                .accessibilityHidden(modelLabel == nil)
+            }
         }
-        .frame(height: NotchLayout.cellExtent)
+        .frame(height: NotchLayout.cellExtent, alignment: .top)
     }
 }
 
@@ -399,7 +409,7 @@ struct InlineAccountRotation: View {
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(height: NotchLayout.percentLineHeight)
         }
-        .frame(height: NotchLayout.cellExtent)
+        .frame(height: NotchLayout.cellExtent, alignment: .top)
         .contentShape(Rectangle())
         .onTapGesture {
             if !account.isCurrent { onChooseNext(account.id) }

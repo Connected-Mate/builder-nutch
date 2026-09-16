@@ -112,6 +112,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await manager.refresh(account) }
         }
         controller.onAccountPicker = { [weak self] id in self?.accountPicker(for: id) }
+        controller.model.onChooseClaudeModel = { [weak self, weak manager] model in
+            do { try manager?.setClaudeModel(model) }
+            catch {
+                manager?.notice = error.localizedDescription
+                self?.openAccounts()
+            }
+            self?.updateNotch()
+        }
         controller.model.onMoveAccount = { [weak self, weak manager, weak controller] provider, order in
             do { try manager?.setRotationOrder(order, for: provider) }
             catch { manager?.notice = error.localizedDescription }
@@ -230,6 +238,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateNotch() {
         guard let manager = accountManager, let controller = notchController else { return }
+        controller.model.claudeModel = manager.rotationClaudeModel
+        controller.model.claudeModelSnapshotIDs = Set(manager.accounts.filter { $0.provider == .claude }.map { $0.id.uuidString })
+        controller.model.isChoosingClaudeModelDisabled = manager.isLaunchingClaude
         controller.model.sessions = profileSessions
         if let id = manager.systemClaudeAccountID?.uuidString {
             let merged = (profileSessions[id] ?? []) + defaultClaudeSessions

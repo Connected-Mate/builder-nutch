@@ -5,6 +5,20 @@ import XCTest
 /// These pin the ratios the frame fixes, so a change to `Design.scale` resizes
 /// everything without silently reshaping it.
 final class NotchLayoutTests: XCTestCase {
+    func testModelPickerReservesItsSpaceIncludingTheInteractiveCardBudget() {
+        let ordinary = NotchLayout.cardHeight(windowCount: 4, identitySubtitle: true)
+        let withModel = NotchLayout.cardHeight(windowCount: 4, identitySubtitle: true, modelPicker: true)
+        XCTAssertEqual(withModel - ordinary,
+                       NotchLayout.headerToBlock + NotchLayout.modelPickerHeight, accuracy: 0.001)
+        for budget: CGFloat in [360, 540, 740] {
+            let cap = NotchLayout.sessionsFitting(cardBudget: budget, windowCount: 4)
+            if cap > 0 {
+                XCTAssertLessThanOrEqual(NotchLayout.cardHeight(windowCount: 4, sessionCount: cap + 1,
+                    sessionCap: cap, identitySubtitle: true, modelPicker: true), budget)
+            }
+        }
+    }
+
     func testRingIsTheSpecAnchor() {
         XCTAssertEqual(NotchLayout.ringDiameter, 44, accuracy: 0.001)
     }

@@ -359,7 +359,8 @@ final class NotchWindowController {
                 sessionCap: model.sessionCap,
                 statusMessage: snapshot.statusMessage,
                 blockMessage: snapshot.block?.summary(now: model.now),
-                identitySubtitle: snapshot.accountEmail?.isEmpty == false)
+                identitySubtitle: snapshot.accountEmail?.isEmpty == false,
+                modelPicker: model.canChooseModel(for: snapshot.id))
             : NotchLayout.automaticSwitchCardHeight(
                 identitySubtitle: snapshot.accountEmail?.isEmpty == false,
                 reason: accountSwitch?.reason ?? ""))

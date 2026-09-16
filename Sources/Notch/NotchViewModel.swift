@@ -5,6 +5,28 @@ import Combine
 final class NotchViewModel: ObservableObject {
     @Published var snapshots: [ProviderSnapshot] = []
     @Published var usageDisplayMode: UsageDisplayMode = .remaining
+    /// Explicit request context, never inferred from a provider logo or quota.
+    @Published var claudeModel: String?
+    @Published var claudeModelSnapshotIDs: Set<String> = []
+    @Published var isChoosingClaudeModelDisabled = false
+    var onChooseClaudeModel: ((String?) -> Void)?
+
+    func canChooseModel(for snapshotID: String) -> Bool {
+        claudeModelSnapshotIDs.contains(snapshotID)
+    }
+
+    func modelLabel(for snapshotID: String) -> String? {
+        guard canChooseModel(for: snapshotID) else { return nil }
+        return ClaudeModelPolicy.family(for: claudeModel)?.rawValue
+            ?? NSLocalizedString("Model ?", comment: "Unknown model in the compact notch")
+    }
+
+    func chooseClaudeModel(_ model: String?, for snapshotID: String) {
+        guard canChooseModel(for: snapshotID), !isChoosingClaudeModelDisabled,
+              model == nil || ClaudeModelPolicy.family(for: model) != nil else { return }
+        // The account manager publishes only a successfully saved selection.
+        onChooseClaudeModel?(model)
+    }
     @Published var accountPicker: NotchAccountPicker?
     var onMoveAccount: ((AccountProvider, [UUID]) -> Void)?
     var onChooseNextAccount: ((UUID) -> Void)?

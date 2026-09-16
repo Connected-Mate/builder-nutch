@@ -46,7 +46,11 @@ struct NotchRootView: View {
                         now: model.now,
                         displayMode: model.usageDisplayMode,
                         direction: model.edge.tooltipDirection,
-                        sessionCap: model.sessionCap
+                        sessionCap: model.sessionCap,
+                        modelPicker: model.canChooseModel(for: snapshot.id)
+                            ? NotchModelPicker(selectedModel: model.claudeModel,
+                                isDisabled: model.isChoosingClaudeModelDisabled,
+                                onChoose: { model.chooseClaudeModel($0, for: snapshot.id) }) : nil
                     )
                         // Deliberately *no* `.id` here: the card is one object
                         // that travels and resizes between cells, which reads
@@ -102,6 +106,7 @@ struct NotchRootView: View {
         parts.append(snapshot.hasReading
             ? snapshot.headlineText(for: model.usageDisplayMode) + " " + model.usageDisplayMode.unit
             : "Usage unavailable")
+        if let label = model.modelLabel(for: snapshot.id) { parts.append(label) }
         parts.append("Details \(model.selectedIndex == index ? "open" : "closed")")
         return parts.joined(separator: ". ") + "."
     }
@@ -201,6 +206,7 @@ struct NotchRootView: View {
                 ForEach(Array(model.snapshots.enumerated()), id: \.element.id) { index, snapshot in
                     ProviderCell(
                         snapshot: snapshot,
+                        modelLabel: model.modelLabel(for: snapshot.id),
                         activity: model.activity(for: snapshot.id),
                         isRefreshing: model.refreshing.contains(snapshot.id),
                         displayMode: model.usageDisplayMode,
@@ -334,7 +340,8 @@ struct NotchRootView: View {
                     sessionCap: model.sessionCap,
                     statusMessage: snapshot.statusMessage,
                     blockMessage: snapshot.block?.summary(now: model.now),
-                    identitySubtitle: snapshot.accountEmail?.isEmpty == false))
+                    identitySubtitle: snapshot.accountEmail?.isEmpty == false,
+                    modelPicker: model.canChooseModel(for: snapshot.id)))
         return place.point(
             along: model.slack + model.ringCenter(index: index),
             across: model.tooltipInset + card / 2

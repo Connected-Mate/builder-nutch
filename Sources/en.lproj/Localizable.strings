@@ -456,3 +456,17 @@
 "A Fable limit no longer blocks another selected model. Shared limits and unavailable readings still protect account switching." = "A Fable limit no longer blocks another selected model. Shared limits and unavailable readings still protect account switching.";
 "An available model for a new session" = "An available model for a new session";
 "New session tries your chosen model across accounts first, then a model with confirmed remaining usage. Existing Claude terminals keep their own model; use /model there." = "New session tries your chosen model across accounts first, then a model with confirmed remaining usage. Existing Claude terminals keep their own model; use /model there.";
+
+/* Model-aware notch */
+"Model ?" = "Model ?";
+"Model for limits" = "Model for limits";
+"Auto" = "Auto";
+"Shared · %@" = "Shared · %@";
+"Use %@ for limits and rotation" = "Use %@ for limits and rotation";
+"No account can currently use %1$@. Other models remain available." = "No account can currently use %1$@. Other models remain available.";
+"the selected model" = "the selected model";
+"Your model, at a glance." = "Your model, at a glance.";
+"Choose from the notch" = "Choose from the notch";
+"Choose the Claude model directly in its notch details. Its name appears below the percentage; shared allowances stay explicitly shared." = "Choose the Claude model directly in its notch details. Its name appears below the percentage; shared allowances stay explicitly shared.";
+"A model limit is not an expired account" = "A model limit is not an expired account";
+"A spent model allowance no longer marks the entire subscription as unavailable or asks you to add another account." = "A spent model allowance no longer marks the entire subscription as unavailable or asks you to add another account.";

@@ -721,3 +721,17 @@
 "A Fable limit no longer blocks another selected model. Shared limits and unavailable readings still protect account switching." = "Une limite Fable ne bloque plus un autre modèle sélectionné. Les limites communes et les relevés indisponibles restent pris en compte.";
 "An available model for a new session" = "Un modèle disponible pour une nouvelle session";
 "New session tries your chosen model across accounts first, then a model with confirmed remaining usage. Existing Claude terminals keep their own model; use /model there." = "Nouvelle session cherche d’abord un compte pour votre modèle, puis un modèle au quota disponible confirmé. Les terminaux Claude déjà ouverts conservent leur modèle ; utilisez /model dans ceux-ci.";
+
+/* Model-aware notch */
+"Model ?" = "Modèle ?";
+"Model for limits" = "Modèle suivi";
+"Auto" = "Auto";
+"Shared · %@" = "Partagé · %@";
+"Use %@ for limits and rotation" = "Suivre les limites et la rotation de %@";
+"No account can currently use %1$@. Other models remain available." = "Aucun compte ne peut actuellement utiliser %1$@. D’autres modèles restent disponibles.";
+"the selected model" = "le modèle choisi";
+"Your model, at a glance." = "Votre modèle, en un regard.";
+"Choose from the notch" = "Choisissez depuis le panneau latéral";
+"Choose the Claude model directly in its notch details. Its name appears below the percentage; shared allowances stay explicitly shared." = "Choisissez le modèle Claude directement dans ses détails. Son nom apparaît sous le pourcentage ; les limites partagées restent clairement identifiées.";
+"A model limit is not an expired account" = "Un modèle limité n’est pas un compte expiré";
+"A spent model allowance no longer marks the entire subscription as unavailable or asks you to add another account." = "Une limite propre à un modèle ne marque plus tout l’abonnement comme indisponible et ne demande plus d’ajouter un autre compte.";

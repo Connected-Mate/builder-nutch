@@ -179,6 +179,7 @@ private struct LimitWindowRow: View {
     let fidelity: Fidelity
     let now: Date
     let displayMode: UsageDisplayMode
+    var shared: Bool = false
 
     private var band: UsageBand { UsageBand.band(for: window.usedFraction ?? 0) }
     private var trackWidth: CGFloat { NotchLayout.cardWidth - 2 * NotchLayout.cardPadding }
@@ -196,7 +197,9 @@ private struct LimitWindowRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SplitRow(leading: window.label, trailing: resetText)
+            SplitRow(leading: shared
+                ? String(format: NSLocalizedString("Shared · %@", comment: "Shared subscription allowance"), window.label)
+                : window.label, trailing: resetText)
 
             // No bar without a denominator — an empty track would read as "none
             // used", which is not what "we do not know the limit" means.
@@ -221,6 +224,7 @@ private struct ProviderTooltip: View {
     let snapshot: ProviderSnapshot
     let now: Date
     let displayMode: UsageDisplayMode
+    var modelPicker: NotchModelPicker? = nil
 
     /// Only worth saying when the numbers are not current. A remembered reading
     /// has to be dated, or it quietly passes itself off as live.
@@ -239,6 +243,10 @@ private struct ProviderTooltip: View {
                     .foregroundStyle(Palette.textPrimary)
             }
 
+            if let modelPicker {
+                modelPicker.padding(.top, NotchLayout.headerToBlock)
+            }
+
             if let block = snapshot.block {
                 BlockedRow(text: block.summary(now: now))
                     .padding(.top, NotchLayout.headerToBlock)
@@ -253,11 +261,56 @@ private struct ProviderTooltip: View {
             } else {
                 ForEach(Array(snapshot.windows.enumerated()), id: \.element.id) { index, window in
                     LimitWindowRow(window: window, fidelity: snapshot.fidelity, now: now,
-                                   displayMode: displayMode)
+                                   displayMode: displayMode,
+                                   shared: modelPicker != nil && !window.isModelSpecific)
                         .padding(.top, index == 0 ? NotchLayout.headerToBlock : NotchLayout.blockSpacing)
                 }
             }
         }
+    }
+}
+
+/// Direct choices keep interaction inside the clicked card, including in a
+/// non-activating panel. A native menu would extend past its hit-test region.
+struct NotchModelPicker: View {
+    var selectedModel: String?
+    var isDisabled = false
+    let onChoose: (String?) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: NotchLayout.sessionRowGap) {
+            HStack {
+                Text("Model for limits").foregroundStyle(Palette.textSecondary)
+                Spacer(minLength: NotchLayout.sessionRowGap)
+                Button("Auto") { onChoose(nil) }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.textSecondary)
+                    .accessibilityLabel("Follow Claude settings")
+                    .help("Follow Claude settings")
+            }
+            .font(Typography.cardBody)
+            .frame(height: NotchLayout.cardBodyLineHeight)
+            HStack(spacing: NotchLayout.sessionRowGap) {
+                ForEach(ClaudeModelPolicy.Family.allCases, id: \.self) { family in
+                    let selected = ClaudeModelPolicy.family(for: selectedModel) == family
+                    Button { onChoose(family.alias) } label: {
+                        Text(family.rawValue)
+                            .font(Typography.cardBody)
+                            .foregroundStyle(selected ? Palette.card : Palette.textPrimary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: NotchLayout.modelChoiceHeight)
+                            .background(selected ? Palette.textPrimary : Palette.barTrack,
+                                        in: RoundedRectangle(cornerRadius: NotchLayout.sessionRowGap))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(String(format: NSLocalizedString("Use %@ for limits and rotation", comment: "Model selector"), family.rawValue))
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+        }
+        .frame(height: NotchLayout.modelPickerHeight)
+        .disabled(isDisabled)
+        .help("Keeps your model across accounts. In an already open Claude session, change the model with /model.")
     }
 }
 
@@ -425,6 +478,7 @@ struct TooltipCard: View {
     /// How many sessions this screen has room to list. Solved from the display
     /// rather than fixed, so a big screen hides nothing.
     var sessionCap: Int = NotchLayout.defaultSessionCap
+    var modelPicker: NotchModelPicker? = nil
 
     /// The same figure the hover region uses, so what is drawn and what is
     /// reachable can never drift apart.
@@ -440,7 +494,8 @@ struct TooltipCard: View {
             sessionCap: sessionCap,
             statusMessage: snapshot.statusMessage,
             blockMessage: snapshot.block?.summary(now: now),
-            identitySubtitle: snapshot.accountEmail?.isEmpty == false
+            identitySubtitle: snapshot.accountEmail?.isEmpty == false,
+            modelPicker: modelPicker != nil
         )
     }
 
@@ -457,7 +512,8 @@ struct TooltipCard: View {
                         .transition(.opacity.animation(NotchMotion.crossfade))
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
-                        ProviderTooltip(snapshot: snapshot, now: now, displayMode: displayMode)
+                        ProviderTooltip(snapshot: snapshot, now: now, displayMode: displayMode,
+                                        modelPicker: modelPicker)
                         if let activity {
                             SessionList(summary: activity, now: now, cap: sessionCap)
                         }

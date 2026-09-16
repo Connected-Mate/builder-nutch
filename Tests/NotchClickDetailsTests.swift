@@ -4,6 +4,32 @@ import XCTest
 
 @MainActor
 final class NotchClickDetailsTests: XCTestCase {
+    func testModelChoiceUsesOnlyManagedClaudeContextAndDoesNotInventActualModel() {
+        let model = NotchViewModel()
+        model.claudeModelSnapshotIDs = ["managed-claude"]
+        var choices: [String?] = []
+        model.onChooseClaudeModel = { choices.append($0) }
+        XCTAssertNotNil(model.modelLabel(for: "managed-claude"))
+        XCTAssertNil(model.modelLabel(for: "custom-with-claude-logo"))
+        model.chooseClaudeModel("sonnet", for: "custom-with-claude-logo")
+        model.chooseClaudeModel("unknown", for: "managed-claude")
+        XCTAssertTrue(choices.isEmpty)
+        model.selectedIndex = 0
+        model.chooseClaudeModel("sonnet", for: "managed-claude")
+        XCTAssertEqual(choices, ["sonnet"])
+        XCTAssertNil(model.claudeModel, "Only the persisted manager selection may change the label")
+        model.claudeModel = "claude-sonnet-5"
+        XCTAssertEqual(model.modelLabel(for: "managed-claude"), "Sonnet")
+        XCTAssertEqual(model.selectedIndex, 0, "Choosing a model must keep its details open")
+        model.isChoosingClaudeModelDisabled = true
+        model.chooseClaudeModel("fable", for: "managed-claude")
+        XCTAssertEqual(choices.count, 1)
+        model.isChoosingClaudeModelDisabled = false
+        model.chooseClaudeModel(nil, for: "managed-claude")
+        XCTAssertEqual(choices.count, 2)
+        XCTAssertNil(choices.last!)
+    }
+
     private func globalPoint(_ controller: NotchWindowController, index: Int, across: CGFloat? = nil) throws -> CGPoint {
         let frame = try XCTUnwrap(controller.panelFrameForTesting)
         let model = controller.model
