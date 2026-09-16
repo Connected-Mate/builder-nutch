@@ -11,7 +11,7 @@ final class ClaudeModelLauncherTests: XCTestCase {
 
     func testPreferenceIsBoundedTopLevelAndDoesNotFollowSymlinks() throws {
         let root = try temporary(), settings = root.appendingPathComponent("settings.json")
-        for model in ["opus", "sonnet[1m]", "claude-sonnet-4-6", "claude-3-5-haiku-20241022"] {
+        for model in ["fable", "claude-fable-5-1", "fable[1m]", "opus", "sonnet[1m]", "claude-sonnet-4-6", "claude-3-5-haiku-20241022"] {
             let data = try JSONSerialization.data(withJSONObject: ["model": model])
             try data.write(to: settings)
             XCTAssertEqual(ClaudeModelLauncher.readPreference(directory: root), model)

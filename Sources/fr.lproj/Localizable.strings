@@ -702,3 +702,22 @@
 "Usage ranks the models actually recorded in your history, with their tokens, provider and source tools. The same model used in several tools is counted together." = "L’usage classe les modèles réellement enregistrés dans votre historique, avec leurs tokens, leur fournisseur et les outils utilisés. Un même modèle utilisé dans plusieurs outils est regroupé.";
 "A podium for your period" = "Un podium pour votre période";
 "Your image shows the top models for today, this week, this month or one project. Missing model names stay explicit, and saved history keeps its original totals." = "Votre image présente les modèles les plus utilisés aujourd’hui, cette semaine, ce mois-ci ou sur un projet. Les modèles non renseignés restent signalés et l’historique conserve ses totaux.";
+
+/* Model-aware account rotation */
+"Follow Claude settings" = "Suivre les réglages Claude";
+"Rotation model: %@" = "Modèle de rotation : %@";
+"New session" = "Nouvelle session";
+"Keeps your model across accounts. In an already open Claude session, change the model with /model." = "Conserve votre modèle entre les comptes. Dans une session Claude déjà ouverte, changez-le avec /model.";
+"Tries your model on available accounts first, then a model with confirmed remaining usage." = "Cherche d’abord un compte disponible pour votre modèle, puis un modèle dont le quota restant est confirmé.";
+"Rotation follows this model. In an already open Claude session, use /model to select it there too. New session applies it for you." = "La rotation suit ce modèle. Dans une session Claude déjà ouverte, sélectionnez-le aussi avec /model. Nouvelle session l’applique pour vous.";
+"Choose a rotation model before opening a session." = "Choisissez un modèle de rotation avant d’ouvrir une session.";
+"No account can currently serve %1$@. New session opened with %2$@." = "Aucun compte ne peut utiliser %1$@ pour le moment. Nouvelle session ouverte avec %2$@.";
+"New session opened with %@. Your model is kept when accounts change." = "Nouvelle session ouverte avec %@. Votre modèle est conservé lors des changements de compte.";
+"Choose a supported Claude model." = "Choisissez un modèle Claude pris en charge.";
+"Choose an available project folder." = "Choisissez un dossier de projet disponible.";
+"The session environment could not be prepared." = "Impossible de préparer cette session.";
+"Keep your model. Use the right account." = "Gardez votre modèle. Utilisez le bon compte.";
+"Rotation follows your model" = "La rotation suit votre modèle";
+"A Fable limit no longer blocks another selected model. Shared limits and unavailable readings still protect account switching." = "Une limite Fable ne bloque plus un autre modèle sélectionné. Les limites communes et les relevés indisponibles restent pris en compte.";
+"An available model for a new session" = "Un modèle disponible pour une nouvelle session";
+"New session tries your chosen model across accounts first, then a model with confirmed remaining usage. Existing Claude terminals keep their own model; use /model there." = "Nouvelle session cherche d’abord un compte pour votre modèle, puis un modèle au quota disponible confirmé. Les terminaux Claude déjà ouverts conservent leur modèle ; utilisez /model dans ceux-ci.";

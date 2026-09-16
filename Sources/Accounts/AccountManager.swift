@@ -16,6 +16,11 @@ final class AccountManager: ObservableObject {
     @Published private(set) var automaticSwitch: AutomaticAccountSwitch?
     /// The login actually installed for ordinary Claude Code sessions on this Mac.
     @Published private(set) var systemClaudeAccountID: UUID?
+    @Published private(set) var claudeModel: String?
+    @Published private(set) var claudeSessionModel: String?
+    @Published private(set) var observedClaudeModel: String?
+    @Published private(set) var isLaunchingClaude = false
+    var rotationClaudeModel: String? { claudeSessionModel ?? claudeModel ?? observedClaudeModel }
     private let systemCredentials: ClaudeSystemCredentials?
     private let systemClaudeLocation: ClaudeCredentialLocation
     private let claudeReader: (any ClaudeAccountReading)?
@@ -167,6 +172,11 @@ final class AccountManager: ObservableObject {
             // Mac was on the queued account, so only a real divergence adopts.
             lastKnownSystemClaude = catalog.systemClaudeAccountID ?? catalog.selected[.claude]
             lastAutomaticSwitch = catalog.lastAutomaticSwitch
+            claudeModel = catalog.claudeModel
+            claudeSessionModel = catalog.claudeSessionModel
+            observedClaudeModel = catalog.claudeModelObservationRecorded == true
+                ? catalog.claudeObservedModel
+                : ClaudeModelLauncher.readPreference(directory: systemClaudeLocation.directory)
             normalizeRotationOrder()
             states = Dictionary(uniqueKeysWithValues: accounts.map {
                 ($0.id, $0.isBrowserOnly ? Self.browserState($0) : ManagedAccountState(message: "Refresh to check this account."))
@@ -175,6 +185,7 @@ final class AccountManager: ObservableObject {
             self.storage = nil; catalogError = error; notice = error.localizedDescription
         }
         loaded = true
+        reloadClaudeModelPreference()
         recoverClaudeCacheMarkers()
         shareSavedClaudeLogins()
         updateHealth()
@@ -222,7 +233,94 @@ final class AccountManager: ObservableObject {
             automaticSelection: automaticSelectionOverride ?? automaticSelection, ignoredExistingProfiles: ignoredExistingProfiles,
             rotationOrder: rotationOrder, switchThresholdPercent: switchThresholdPercent,
             switchAheadMinutes: switchAheadMinutes, systemClaudeAccountID: lastKnownSystemClaude,
-            lastAutomaticSwitch: lastAutomaticSwitch))
+            lastAutomaticSwitch: lastAutomaticSwitch, claudeModel: claudeModel,
+            claudeSessionModel: claudeSessionModel, claudeObservedModel: observedClaudeModel,
+            claudeModelObservationRecorded: true))
+    }
+
+    /// Raw limits stay visible in details. Routing only sees limits applicable
+    /// to the model the person selected; an unrelated Fable pool is not global.
+    func selectionState(for account: ManagedAccount, now: Date = Date()) -> ManagedAccountState {
+        let raw = state(for: account)
+        return account.provider == .claude
+            ? ClaudeModelPolicy.project(raw, model: rotationClaudeModel, now: now) : raw
+    }
+
+    private var selectionStates: [UUID: ManagedAccountState] {
+        Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, selectionState(for: $0)) })
+    }
+
+    func setClaudeModel(_ model: String?) throws {
+        guard !isLaunchingClaude else { throw ManagedAccountError.busy }
+        guard model == nil || ClaudeModelPolicy.family(for: model) != nil else { throw ManagedAccountError.invalidResponse }
+        let old = (claudeModel, claudeSessionModel)
+        claudeModel = model; claudeSessionModel = nil
+        do { try persist(accounts: accounts, selected: selected) }
+        catch { (claudeModel, claudeSessionModel) = old; throw error }
+        usageForecasts = [:]
+        updateHealth()
+    }
+
+    private func reloadClaudeModelPreference() {
+        guard case .selected(let value) = ClaudeModelLauncher.readPreferenceResult(directory: systemClaudeLocation.directory),
+              value != observedClaudeModel else { return }
+        observedClaudeModel = value
+        // A later /model choice in Claude wins over an older app preference.
+        claudeModel = nil; claudeSessionModel = nil; usageForecasts = [:]
+        if loaded { try? persist(accounts: accounts, selected: selected) }
+    }
+
+    /// Creates a session through the official CLI. Existing terminals are never
+    /// injected with commands or told their in-memory model changed when it did not.
+    func launchClaudeSession(project: URL) async {
+        guard !hasShutDown, !authenticationInProgress, !isSwitchingClaude, !isLaunchingClaude else { return }
+        isLaunchingClaude = true
+        defer { isLaunchingClaude = false }
+        reloadClaudeModelPreference()
+        guard let preferred = claudeModel ?? observedClaudeModel else {
+            notice = NSLocalizedString("Choose a rotation model before opening a session.", comment: "Model launch")
+            return
+        }
+        do {
+            guard let executable = resolveExecutable(.claude), systemCredentials != nil else { throw ManagedAccountError.unavailable }
+            var directory: ObjCBool = false
+            guard project.isFileURL, FileManager.default.fileExists(atPath: project.path, isDirectory: &directory), directory.boolValue else {
+                throw CocoaError(.fileReadNoSuchFile)
+            }
+            await refreshAccounts(accounts.filter { $0.provider == .claude })
+            guard !hasShutDown, !authenticationInProgress else { return }
+            guard (claudeModel ?? observedClaudeModel) == preferred else { throw ManagedAccountError.cancelled }
+            guard let choice = ClaudeModelPolicy.fallbackChoice(preferredModel: preferred,
+                accounts: accounts, states: states, order: rotationOrder[.claude] ?? [],
+                currentID: systemClaudeAccountID),
+                let target = accounts.first(where: { $0.id == choice.accountID }) else { throw ManagedAccountError.unavailable }
+            let scripts = try usableStorage().root.appendingPathComponent("launchers", isDirectory: true)
+            try AccountStorage.privateDirectory(scripts)
+            let script = scripts.appendingPathComponent("\(UUID().uuidString).command")
+            // Quota fallback was checked above. Do not install a second model
+            // controller whose in-flight choices this account router cannot see.
+            try AccountStorage.write(Data(try ClaudeModelLauncher.script(executable: executable,
+                project: project, model: choice.model, fallbackModels: []).utf8), to: script, mode: 0o700)
+            let previous = claudeSessionModel
+            claudeSessionModel = choice.model
+            do {
+                try await activateSystemClaude(target, automatic: false)
+                guard (claudeModel ?? observedClaudeModel) == preferred,
+                      claudeSessionModel == choice.model else { throw ManagedAccountError.cancelled }
+                try persist(accounts: accounts, selected: selected)
+                guard openTerminal(script) else { throw CocoaError(.executableLoad) }
+            } catch {
+                if claudeSessionModel == choice.model { claudeSessionModel = previous }
+                try? persist(accounts: accounts, selected: selected)
+                throw error
+            }
+            usageForecasts = [:]
+            systemSwitchPaused = false
+            notice = choice.isFallback
+                ? String(format: NSLocalizedString("No account can currently serve %1$@. New session opened with %2$@.", comment: "Model fallback launch"), preferred, choice.model)
+                : String(format: NSLocalizedString("New session opened with %@. Your model is kept when accounts change.", comment: "Model launch"), choice.model)
+        } catch { notice = error.localizedDescription }
+        updateHealth()
     }
 
     @discardableResult
@@ -761,7 +859,7 @@ final class AccountManager: ObservableObject {
                               from account: ManagedAccount) -> String {
         switch cause {
         case .spent(let remaining):
-            let window = states[account.id]?.bindingWindow?.label
+            let window = selectionState(for: account).bindingWindow?.label
                 ?? NSLocalizedString("usage limit", comment: "Generic limit name")
             return String(format: NSLocalizedString("%1$@ had %2$d%% left on its %3$@.", comment: "Switch reason"),
                           account.label, Int(remaining.rounded()), window)
@@ -791,7 +889,7 @@ final class AccountManager: ObservableObject {
         await resolveLoginIdentities()
         guard !hasShutDown, !isSwitchingClaude, !busyIDs.contains(target.id), !authenticationInProgress else { throw ManagedAccountError.busy }
         updateSystemClaudeIdentity()
-        if !automatic, let refusal = explicitClaudeSwitchRefusal(state(for: target), allowModelLimited: allowModelLimitedClaude) {
+        if !automatic, let refusal = explicitClaudeSwitchRefusal(selectionState(for: target), allowModelLimited: allowModelLimitedClaude) {
             throw NSError(domain: "AccountManager.ClaudeSwitch", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: refusal])
         }
@@ -806,7 +904,7 @@ final class AccountManager: ObservableObject {
               let currentIdentity = try macLogin?.identity ?? credentials.identity(at: systemClaudeLocation),
               let targetIdentity = try credentials.identity(at: credentialLocation(for: target))
         else { throw ManagedAccountError.notConnected }
-        let pauseRotationForModel = !automatic && allowModelLimitedClaude && state(for: target).rateLimitStatus().kind == .modelRestricted
+        let pauseRotationForModel = !automatic && allowModelLimitedClaude && selectionState(for: target).rateLimitStatus().kind == .modelRestricted
         let modelChoiceNotice = NSLocalizedString("Automatic rotation is paused. Choose an available model with /model.", comment: "Explicit model-limited account use")
         guard currentID != target.id else {
             if pauseRotationForModel {
@@ -887,7 +985,7 @@ final class AccountManager: ObservableObject {
 
     private func reconcileSystemClaudeSelection() async {
         defer { updateHealth() }
-        guard systemCredentials != nil, !isSwitchingClaude, !hasShutDown else { return }
+        guard systemCredentials != nil, !isSwitchingClaude, !hasShutDown, !isLaunchingClaude else { return }
         updateSystemClaudeIdentity()
         // A restore waits for nobody: paused or not, the displaced login is
         // either put back or adopted, so the app's record never sits at odds
@@ -904,7 +1002,7 @@ final class AccountManager: ObservableObject {
         // on this Mac fails until someone signs in. Moving to an account that
         // works is the whole point of having several.
         if let current = states[currentID], current.requiresSignIn, !current.isBusy, !busyIDs.contains(currentID),
-           let rescue = AccountSelection.rotating(provider: .claude, accounts: accounts, states: states,
+           let rescue = AccountSelection.rotating(provider: .claude, accounts: accounts, states: selectionStates,
                 order: rotationOrder[.claude] ?? [], currentID: currentID,
                 thresholdPercent: 0, keepCurrent: false, now: Date()),
            rescue.id != currentID, !busyIDs.contains(rescue.id) {
@@ -916,7 +1014,7 @@ final class AccountManager: ObservableObject {
             }
             return
         }
-        guard let decision = AccountSelection.systemClaudeDecision(accounts: accounts, states: states,
+        guard let decision = AccountSelection.systemClaudeDecision(accounts: accounts, states: selectionStates,
                 order: rotationOrder[.claude] ?? [], currentID: currentID,
                 preferredID: selected[.claude], thresholdPercent: switchThresholdPercent,
                 forecasts: usageForecasts, switchAheadMinutes: switchAheadMinutes),
@@ -1168,6 +1266,7 @@ final class AccountManager: ObservableObject {
     }
 
     func refresh(_ account: ManagedAccount) async {
+        reloadClaudeModelPreference()
         guard !hasShutDown, !busyIDs.contains(account.id),
               loginAccountID == nil || loginAccountID == account.id,
               authorizationAccountID == nil || authorizationAccountID == account.id else { return }
@@ -1266,6 +1365,7 @@ final class AccountManager: ObservableObject {
     }
 
     func refreshAll() async {
+        reloadClaudeModelPreference()
         guard !hasShutDown, !authenticationInProgress else { return }
         recoverClaudeCacheMarkers()
         let audit = auditQueueIfDue()
@@ -1342,8 +1442,9 @@ final class AccountManager: ObservableObject {
 
     /// Keeps a short burn-rate history for the window closest to running out.
     private func recordUsage(for account: ManagedAccount, now: Date = Date()) {
-        guard account.provider.supportsAutomaticSelection, let state = states[account.id],
-              state.isConnected, state.isFresh(at: now),
+        guard account.provider.supportsAutomaticSelection else { return }
+        let state = selectionState(for: account, now: now)
+        guard state.isConnected, state.isFresh(at: now),
               let used = state.windows.compactMap(\.usedFraction).max() else { return }
         var forecast = usageForecasts[account.id] ?? UsageForecast()
         forecast.record(usedFraction: used, at: state.refreshedAt ?? now)
@@ -1632,6 +1733,7 @@ final class AccountManager: ObservableObject {
 
     func launch(_ account: ManagedAccount, project: URL, allowModelLimitedClaude: Bool = false) async {
         guard !hasShutDown else { return }
+        guard !isLaunchingClaude else { notice = ManagedAccountError.busy.localizedDescription; return }
         // Doing nothing here is what "the account stays stuck" looked like: the
         // click landed while a sign-in was still open in the browser.
         guard !authenticationInProgress else {
@@ -1777,9 +1879,9 @@ final class AccountManager: ObservableObject {
         if !state.isConnected { status = .needsAuth }
         else if account.isBrowserOnly { status = .unsupported("Open \(provider.title) to see usage. Browser sign-in is kept by the website.") }
         else if !state.windows.isEmpty && !state.isFresh() { status = .stale(since: state.refreshedAt ?? .distantPast) }
-        else if let message = state.message { status = .unsupported(message) }
+        else if let message = selectionState(for: account).message { status = .unsupported(message) }
         else { status = .ok }
-        let restriction = state.rateLimitStatus()
+        let restriction = selectionState(for: account).rateLimitStatus()
         let block: UsageBlock?
         switch restriction.kind {
         case .quotaExhausted, .modelRestricted, .providerRestricted:
@@ -1820,7 +1922,7 @@ final class AccountManager: ObservableObject {
             // Claude's selection only becomes a switch after the system login
             // was actually updated. Other providers keep their existing flow.
             if provider == .claude && systemCredentials != nil { continue }
-            guard let candidate = AccountSelection.rotating(provider: provider, accounts: accounts, states: states,
+            guard let candidate = AccountSelection.rotating(provider: provider, accounts: accounts, states: selectionStates,
                 order: rotationOrder[provider] ?? [], currentID: selected[provider],
                 thresholdPercent: switchThresholdPercent) else { continue }
             if selected[provider] != candidate.id {
@@ -1883,7 +1985,7 @@ final class AccountManager: ObservableObject {
                 title: NSLocalizedString("Automatic switching resumed", comment: "Resolution"), resolvedAt: now)
         case .queueEmpty:
             guard let current = claudeQueue().first, !claudeCandidateIsBusy(excluding: current.id),
-                  AccountSelection.rotating(provider: .claude, accounts: accounts, states: states,
+                  AccountSelection.rotating(provider: .claude, accounts: accounts, states: selectionStates,
                     order: rotationOrder[.claude] ?? [], currentID: current.id,
                     thresholdPercent: 0, keepCurrent: false, now: now) != nil else { return nil }
             return AccountResolution(kind: .switchResumed, accountID: current.id,
@@ -1927,7 +2029,8 @@ final class AccountManager: ObservableObject {
     /// person or a maintainer has to guess at.
     func unavailability(_ account: ManagedAccount, now: Date = Date()) -> String? {
         guard account.provider.supportsAutomaticSelection else { return "not a switchable provider" }
-        guard let state = states[account.id] else { return "no reading yet" }
+        guard states[account.id] != nil else { return "no reading yet" }
+        let state = selectionState(for: account, now: now)
         if state.isBusy { return "being refreshed right now" }
         if !state.isConnected { return "not connected" }
         if state.requiresKeychainAccess { return "waiting for Keychain permission" }
@@ -1948,7 +2051,8 @@ final class AccountManager: ObservableObject {
     /// Why this account could not take a session, in the person's words. Nil when
     /// nothing is wrong with it.
     private func blockedReason(_ account: ManagedAccount) -> String? {
-        guard let state = states[account.id] else { return nil }
+        guard states[account.id] != nil else { return nil }
+        let state = selectionState(for: account)
         if !state.isFresh() { return state.message }
         if let window = state.bindingWindow, (window.usedFraction ?? 0) >= 1 {
             if window.isModelSpecific, (state.accountRemainingPercent ?? 0) > 0 {
@@ -1975,7 +2079,7 @@ final class AccountManager: ObservableObject {
         guard provider.supportsAutomaticSelection else { return nil }
         let currentID = provider == .claude ? (systemClaudeAccountID ?? selected[provider]) : selected[provider]
         guard let currentID else { return nil }
-        return AccountSelection.rotating(provider: provider, accounts: accounts, states: states,
+        return AccountSelection.rotating(provider: provider, accounts: accounts, states: selectionStates,
             order: rotationOrder[provider] ?? [], currentID: currentID,
             thresholdPercent: 0, keepCurrent: false, now: now)
     }
@@ -2058,7 +2162,7 @@ final class AccountManager: ObservableObject {
         if automaticSelection, systemCredentials != nil, let current,
            !claudeCandidateIsBusy(excluding: current.id), !usageChecksArePaused,
            !anotherClaudeReadingIsUnknown(excluding: current.id, now: now),
-           AccountSelection.rotating(provider: .claude, accounts: accounts, states: states,
+           AccountSelection.rotating(provider: .claude, accounts: accounts, states: selectionStates,
                 order: rotationOrder[.claude] ?? [], currentID: current.id,
                 thresholdPercent: 0, keepCurrent: false, now: now) == nil {
             return AccountAttention(kind: .queueEmpty, accountID: current.id,

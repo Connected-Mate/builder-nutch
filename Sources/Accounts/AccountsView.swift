@@ -495,6 +495,24 @@ struct AccountsView: View {
                     .accessibilityLabel("Order & threshold…")
                 }
                 Spacer(minLength: 8)
+                if filter == .claude {
+                    Menu {
+                        Button("Follow Claude settings") { chooseClaudeModel(nil) }
+                        Divider()
+                        ForEach(ClaudeModelPolicy.Family.allCases, id: \.self) { family in
+                            Button { chooseClaudeModel(family.alias) } label: {
+                                if ClaudeModelPolicy.family(for: manager.rotationClaudeModel) == family {
+                                    Label(family.rawValue, systemImage: "checkmark")
+                                } else { Text(family.rawValue) }
+                            }
+                        }
+                    } label: {
+                        Text("Rotation model: \(manager.rotationClaudeModel.flatMap { ClaudeModelPolicy.family(for: $0)?.rawValue } ?? NSLocalizedString("Follow Claude settings", comment: "Model choice"))")
+                            .font(AppTheme.font(size: 11))
+                    }
+                    .menuStyle(.borderlessButton).fixedSize().disabled(manager.isLaunchingClaude)
+                    .help("Keeps your model across accounts. In an already open Claude session, change the model with /model.")
+                }
                 Menu {
                     Button("Choose project folder…", action: chooseProjectFolder)
                     if filter == .claude || filter == .codex {
@@ -512,6 +530,12 @@ struct AccountsView: View {
                         Text(displayName(for: selectedAccount)).font(AppTheme.font(size: 12, weightValue: 550)).lineLimit(1)
                     }
                     Spacer(minLength: 8)
+                    if selectedAccount.provider == .claude && manager.canSwitchClaudeLogin {
+                        Button("New session") { Task { await manager.launchClaudeSession(project: projectURL) } }
+                            .buttonStyle(AppButtonStyle(compact: true))
+                            .disabled(manager.authenticationInProgress || manager.busyIDs.count > 0 || manager.isLaunchingClaude)
+                            .help("Tries your model on available accounts first, then a model with confirmed remaining usage.")
+                    }
                     Button {
                         Task { await manager.launch(selectedAccount, project: projectURL) }
                     } label: {
@@ -526,6 +550,13 @@ struct AccountsView: View {
         .padding(.horizontal, 24).padding(.vertical, 12)
         .background(AppTheme.sidebar)
         .overlay(alignment: .top) { Rectangle().fill(AppTheme.line).frame(height: 1) }
+    }
+
+    private func chooseClaudeModel(_ model: String?) {
+        do {
+            try manager.setClaudeModel(model)
+            manager.notice = NSLocalizedString("Rotation follows this model. In an already open Claude session, use /model to select it there too. New session applies it for you.", comment: "Model choice scope")
+        } catch { localError = error.localizedDescription }
     }
 
     private func displayName(for account: ManagedAccount) -> String {
@@ -685,9 +716,10 @@ private struct AssistantRow: View {
     private var needsReconnect: Bool { state.requiresSignIn && !isLoginPending }
     private var usesMacClaude: Bool { account.provider == .claude && manager.canSwitchClaudeLogin }
     private var isCurrentClaude: Bool { usesMacClaude && manager.systemClaudeAccountID == account.id }
+    private var routingState: ManagedAccountState { manager.selectionState(for: account) }
     private var hasClaudeRestriction: Bool {
         guard usesMacClaude else { return false }
-        switch state.rateLimitStatus().kind {
+        switch routingState.rateLimitStatus().kind {
         case .quotaExhausted, .modelRestricted, .providerRestricted: return true
         default: return false
         }
@@ -884,9 +916,9 @@ private struct AssistantRow: View {
     }
 
     private var restrictedModelName: String? {
-        guard state.rateLimitStatus().kind == .modelRestricted else { return nil }
-        return state.windows.first(where: { $0.isModelSpecific && ($0.isBlocked || ($0.usedFraction ?? 0) >= 1) })?.modelName
-            ?? state.providerRestriction?.modelName
+        guard routingState.rateLimitStatus().kind == .modelRestricted else { return nil }
+        return routingState.windows.first(where: { $0.isModelSpecific && ($0.isBlocked || ($0.usedFraction ?? 0) >= 1) })?.modelName
+            ?? routingState.providerRestriction?.modelName
     }
 
     private var statusText: Text {
@@ -903,15 +935,15 @@ private struct AssistantRow: View {
         if state.requiresSignIn { return "Sign in to this account again." }
         if !state.isConnected { return state.message ?? "Connect this account." }
         if account.isBrowserOnly { return "Browser profile ready" }
-        let rateLimit = state.rateLimitStatus()
+        let rateLimit = routingState.rateLimitStatus()
         if let name = restrictedModelName {
             return String(format: NSLocalizedString("%@ limit reached", comment: "Name the restricted model beside its account"), name)
         }
         if rateLimit.kind != .notReported { return rateLimit.title }
         if !state.windows.isEmpty && !state.isFresh() { return "Last known usage · refresh to update" }
-        if AccountUsageNotice.modelLimit(state) != nil { return "Model limit · See usage details" }
+        if AccountUsageNotice.modelLimit(routingState) != nil { return "Model limit · See usage details" }
         if account.provider == .claude && manager.systemClaudeAccountID == account.id { return "Current account on this Mac" }
-        if let message = state.message {
+        if let message = routingState.message {
             if account.provider == .claude && state.needsFirstUsage &&
                 message == "Usage appears after the first Claude Code session launched here." {
                 return "Usage appears after your first session"

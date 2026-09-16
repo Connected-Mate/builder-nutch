@@ -20,6 +20,12 @@ struct AccountCatalog: Codable {
     /// The last handoff this app made on its own, so it can still be explained
     /// after a relaunch.
     var lastAutomaticSwitch: RecordedAccountSwitch? = nil
+    /// Model requested for account rotation and new sessions. No model is inferred
+    /// from the most restrictive quota bucket.
+    var claudeModel: String? = nil
+    var claudeSessionModel: String? = nil
+    var claudeObservedModel: String? = nil
+    var claudeModelObservationRecorded: Bool? = nil
 }
 
 struct AccountStorage {

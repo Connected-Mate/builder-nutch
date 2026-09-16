@@ -437,3 +437,22 @@
 "Usage ranks the models actually recorded in your history, with their tokens, provider and source tools. The same model used in several tools is counted together." = "Usage ranks the models actually recorded in your history, with their tokens, provider and source tools. The same model used in several tools is counted together.";
 "A podium for your period" = "A podium for your period";
 "Your image shows the top models for today, this week, this month or one project. Missing model names stay explicit, and saved history keeps its original totals." = "Your image shows the top models for today, this week, this month or one project. Missing model names stay explicit, and saved history keeps its original totals.";
+
+/* Model-aware account rotation */
+"Follow Claude settings" = "Follow Claude settings";
+"Rotation model: %@" = "Rotation model: %@";
+"New session" = "New session";
+"Keeps your model across accounts. In an already open Claude session, change the model with /model." = "Keeps your model across accounts. In an already open Claude session, change the model with /model.";
+"Tries your model on available accounts first, then a model with confirmed remaining usage." = "Tries your model on available accounts first, then a model with confirmed remaining usage.";
+"Rotation follows this model. In an already open Claude session, use /model to select it there too. New session applies it for you." = "Rotation follows this model. In an already open Claude session, use /model to select it there too. New session applies it for you.";
+"Choose a rotation model before opening a session." = "Choose a rotation model before opening a session.";
+"No account can currently serve %1$@. New session opened with %2$@." = "No account can currently serve %1$@. New session opened with %2$@.";
+"New session opened with %@. Your model is kept when accounts change." = "New session opened with %@. Your model is kept when accounts change.";
+"Choose a supported Claude model." = "Choose a supported Claude model.";
+"Choose an available project folder." = "Choose an available project folder.";
+"The session environment could not be prepared." = "The session environment could not be prepared.";
+"Keep your model. Use the right account." = "Keep your model. Use the right account.";
+"Rotation follows your model" = "Rotation follows your model";
+"A Fable limit no longer blocks another selected model. Shared limits and unavailable readings still protect account switching." = "A Fable limit no longer blocks another selected model. Shared limits and unavailable readings still protect account switching.";
+"An available model for a new session" = "An available model for a new session";
+"New session tries your chosen model across accounts first, then a model with confirmed remaining usage. Existing Claude terminals keep their own model; use /model there." = "New session tries your chosen model across accounts first, then a model with confirmed remaining usage. Existing Claude terminals keep their own model; use /model there.";

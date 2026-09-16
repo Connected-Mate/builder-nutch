@@ -64,7 +64,7 @@ final class ClaudeSystemRotationTests: XCTestCase {
     }
 
     @MainActor
-    private func fixture() throws -> (AccountManager, Runner, Keychain, ClaudeSystemCredentials, ClaudeCredentialLocation, [ManagedAccount], () -> Int) {
+    private func fixture(openSucceeds: Bool = true) throws -> (AccountManager, Runner, Keychain, ClaudeSystemCredentials, ClaudeCredentialLocation, [ManagedAccount], () -> Int) {
         let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("claude-rotation-\(UUID().uuidString)")
         try AccountStorage.privateDirectory(root)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
@@ -74,7 +74,7 @@ final class ClaudeSystemRotationTests: XCTestCase {
         let credentials = ClaudeSystemCredentials(keychain: keychain, account: "tester")
         var opened = 0
         let manager = AccountManager(rootURL: root.appendingPathComponent("catalog"), runner: runner,
-            executable: { _ in URL(fileURLWithPath: "/fake/claude") }, openTerminal: { _ in opened += 1; return true },
+            executable: { _ in URL(fileURLWithPath: "/fake/claude") }, openTerminal: { _ in opened += 1; return openSucceeds },
             systemCredentials: credentials, systemClaudeDirectory: location.directory, claudeReader: runner)
         let accounts = try ["A", "B"].map { try manager.add(provider: .claude, label: $0, emailHint: "same-hint@example.test") }
         func seed(_ location: ClaudeCredentialLocation, id: String) throws {
@@ -87,6 +87,143 @@ final class ClaudeSystemRotationTests: XCTestCase {
         for account in accounts { try seed(ClaudeCredentialLocation(directory: manager.configurationDirectory(for: account), isDefault: false), id: account.label) }
         try seed(location, id: "A")
         return (manager, runner, keychain, credentials, location, accounts, { opened })
+    }
+
+    @MainActor
+    func testSonnetSelectionDoesNotTreatFableAsAWholeAccountBlock() async throws {
+        let (manager, runner, _, credentials, system, accounts, _) = try fixture()
+        runner.used["A"] = 50
+        runner.extraWindows = [LimitWindow(id: "seven_day_fable", label: "Fable", usedFraction: 1, modelName: "Fable")]
+        try manager.setClaudeModel("sonnet")
+        await manager.refreshAll()
+        manager.automaticSelection = true
+        await manager.launch(accounts[1], project: system.directory)
+        XCTAssertTrue(manager.automaticSelection)
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "B")
+        XCTAssertEqual(manager.nextUsableAccount(for: .claude)?.id, accounts[0].id)
+        XCTAssertNil(manager.snapshot(for: accounts[1]).block)
+        XCTAssertEqual(manager.state(for: accounts[1]).windows.count, 2, "Detail evidence retained")
+    }
+
+    @MainActor
+    func testHealthySonnetDoesNotRotateBecauseFableIsSpent() async throws {
+        let (manager, runner, _, credentials, system, _, _) = try fixture()
+        runner.used["A"] = 20
+        runner.extraWindows = [LimitWindow(id: "seven_day_fable", label: "Fable", usedFraction: 1, modelName: "Fable")]
+        try manager.setClaudeModel("sonnet")
+        manager.automaticSelection = true
+        await manager.refreshAll()
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "A")
+    }
+
+    @MainActor
+    func testChosenModelAndGeneralExhaustionRemainBlocking() async throws {
+        let (manager, runner, _, credentials, system, accounts, _) = try fixture()
+        runner.used["A"] = 50
+        runner.extraWindows = [LimitWindow(id: "seven_day_fable", label: "Fable", usedFraction: 1, modelName: "Fable")]
+        try manager.setClaudeModel("fable")
+        await manager.refreshAll()
+        await manager.launch(accounts[1], project: system.directory)
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "A")
+        XCTAssertNil(manager.nextUsableAccount(for: .claude))
+        try manager.setClaudeModel("sonnet")
+        runner.used["B"] = 100
+        await manager.launch(accounts[1], project: system.directory)
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "A")
+    }
+
+    @MainActor
+    func testNewSessionChoosesVerifiedFallbackAndKeepsPreference() async throws {
+        let (manager, runner, _, _, system, _, opened) = try fixture()
+        runner.used = ["A": 20, "B": 0]
+        runner.extraWindows = [
+            LimitWindow(id: "seven_day_fable", label: "Fable", usedFraction: 1, modelName: "Fable"),
+            LimitWindow(id: "seven_day_sonnet", label: "Sonnet", usedFraction: 0.2, modelName: "Sonnet")]
+        try manager.setClaudeModel("fable")
+        await manager.refreshAll()
+        await manager.launchClaudeSession(project: system.directory)
+        XCTAssertEqual(opened(), 1)
+        XCTAssertEqual(manager.claudeModel, "fable")
+        XCTAssertEqual(manager.rotationClaudeModel, "sonnet")
+        XCTAssertTrue(manager.notice?.contains("sonnet") == true)
+        XCTAssertFalse(manager.isLaunchingClaude)
+        let launchers = system.directory.deletingLastPathComponent().appendingPathComponent("catalog/launchers")
+        let scripts = try FileManager.default.contentsOfDirectory(at: launchers, includingPropertiesForKeys: nil)
+        let script = try String(contentsOf: XCTUnwrap(scripts.first), encoding: .utf8)
+        XCTAssertTrue(script.contains("--model 'sonnet'"))
+        XCTAssertFalse(script.contains("--fallback-model"), "No unobserved second model controller")
+    }
+
+    @MainActor
+    func testFollowingClaudeKeepsLaunchedFallbackAcrossAppRestart() async throws {
+        let (manager, runner, _, credentials, system, _, opened) = try fixture()
+        let settings = system.directory.appendingPathComponent("settings.json")
+        try AccountStorage.write(Data("{\"model\":\"fable\"}".utf8), to: settings)
+        runner.used = ["A": 20, "B": 0]
+        runner.extraWindows = [
+            LimitWindow(id: "seven_day_fable", label: "Fable", usedFraction: 1, modelName: "Fable"),
+            LimitWindow(id: "seven_day_sonnet", label: "Sonnet", usedFraction: 0.2, modelName: "Sonnet")]
+        await manager.refreshAll()
+        await manager.launchClaudeSession(project: system.directory)
+        XCTAssertEqual(opened(), 1)
+        XCTAssertNil(manager.claudeModel)
+        XCTAssertEqual(manager.rotationClaudeModel, "sonnet")
+        let restarted = AccountManager(rootURL: system.directory.deletingLastPathComponent().appendingPathComponent("catalog"),
+            runner: runner, executable: { _ in URL(fileURLWithPath: "/fake/claude") },
+            systemCredentials: credentials, systemClaudeDirectory: system.directory, claudeReader: runner)
+        XCTAssertEqual(restarted.rotationClaudeModel, "sonnet")
+        XCTAssertNil(restarted.claudeModel)
+        XCTAssertEqual(restarted.observedClaudeModel, "fable")
+        XCTAssertEqual(try String(contentsOf: settings, encoding: .utf8), "{\"model\":\"fable\"}")
+        try AccountStorage.write(Data("{".utf8), to: settings)
+        await restarted.refreshAll()
+        XCTAssertEqual(restarted.rotationClaudeModel, "sonnet", "Unreadable settings are not a model choice")
+        try AccountStorage.write(Data("{\"model\":\"fable\"}".utf8), to: settings)
+        await restarted.refreshAll()
+        XCTAssertEqual(restarted.rotationClaudeModel, "sonnet", "An unchanged restored setting must retain fallback")
+        restarted.shutdown()
+    }
+
+    @MainActor
+    func testLaterClaudeModelChangeWinsOverEarlierAppChoice() async throws {
+        let (manager, _, _, _, system, _, _) = try fixture()
+        try manager.setClaudeModel("fable")
+        let settings = system.directory.appendingPathComponent("settings.json")
+        try AccountStorage.write(Data("{\"model\":\"sonnet\"}".utf8), to: settings)
+        await manager.refreshAll()
+        XCTAssertEqual(manager.rotationClaudeModel, "sonnet")
+        XCTAssertNil(manager.claudeModel)
+    }
+
+    @MainActor
+    func testFailedTerminalOpenDoesNotClaimFallbackModel() async throws {
+        let (manager, runner, _, _, system, _, _) = try fixture(openSucceeds: false)
+        runner.used = ["A": 20, "B": 0]
+        runner.extraWindows = [
+            LimitWindow(id: "seven_day_fable", label: "Fable", usedFraction: 1, modelName: "Fable"),
+            LimitWindow(id: "seven_day_sonnet", label: "Sonnet", usedFraction: 0.2, modelName: "Sonnet")]
+        try manager.setClaudeModel("fable")
+        await manager.refreshAll()
+        await manager.launchClaudeSession(project: system.directory)
+        XCTAssertNil(manager.claudeSessionModel)
+        XCTAssertEqual(manager.rotationClaudeModel, "fable")
+        XCTAssertFalse(manager.isLaunchingClaude)
+        let catalog = try AccountStorage(root: system.directory.deletingLastPathComponent().appendingPathComponent("catalog")).load()
+        XCTAssertNil(catalog.claudeSessionModel)
+    }
+
+    @MainActor
+    func testNewSessionRefusesUnverifiedModelFallback() async throws {
+        let (manager, runner, _, credentials, system, _, opened) = try fixture()
+        runner.used["A"] = 50
+        runner.extraWindows = [LimitWindow(id: "seven_day_fable", label: "Fable", usedFraction: 1, modelName: "Fable")]
+        try manager.setClaudeModel("fable")
+        await manager.refreshAll()
+        await manager.launchClaudeSession(project: system.directory)
+        XCTAssertEqual(opened(), 0)
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "A")
+        XCTAssertEqual(manager.rotationClaudeModel, "fable")
+        XCTAssertFalse(manager.isLaunchingClaude)
     }
 
     @MainActor
