@@ -2,6 +2,19 @@ import XCTest
 @testable import Codenotch
 
 final class UsageChartPresentationTests: XCTestCase {
+    @MainActor
+    func testTodayPreservesOneEmptyDayUsingTheReportCalendar() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Kolkata"))
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-09-14T19:00:00Z"))
+        let keys = UsageInsightsView.dayKeys(from: calendar.startOfDay(for: now), to: now, calendar: calendar)
+        XCTAssertEqual(keys, ["2026-09-15"])
+        let days = UsageChartDay.make(keys: keys, timeline: [], partialHistory: false)
+        XCTAssertEqual(days.count, 1)
+        XCTAssertEqual(days.first?.tokens.total, 0)
+        XCTAssertEqual(days.first?.availability, .complete)
+    }
+
     func testAbsentDaysStayInOrderAndHaveExactlyZeroHeight() {
         let tokens = UsageTokenTotals(input: 100, output: 20, thinking: 10,
                                       measurements: 1, inputMeasurements: 1, outputMeasurements: 1)

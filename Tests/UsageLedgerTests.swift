@@ -719,6 +719,53 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertEqual(UsageLedgerEngine.percent(5, of: 0), 0)
     }
 
+    func testTodayUsesLocalMidnightAcrossDaylightSavingAndCutsEveryTotal() throws {
+        var paris = Calendar(identifier: .gregorian)
+        paris.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Paris"))
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-03-29T12:00:00Z"))
+        let midnight = paris.startOfDay(for: now)
+        // Spring-forward day is only 23 hours: a rolling 24-hour window leaks
+        // yesterday's work. Include exact midnight and exclude future minutes.
+        var session = digest(session: "straddling", project: "/p/Today", weightPerHour: 100,
+                             hours: [midnight.addingTimeInterval(-60), midnight,
+                                     now.addingTimeInterval(-60), now.addingTimeInterval(60)])
+        for key in Array(session.activityMinutes.keys) {
+            session.activityMinutes[key]?.tokens.thinking = 7
+        }
+        session.tokens.thinking = 28
+        let result = UsageLedgerEngine.report(sessions: [session], summary: UsageScanSummary(), days: 1,
+                                              now: now, calendar: paris, timeline: UsageAccountTimeline())
+        XCTAssertEqual(result.windowStart, midnight)
+        XCTAssertEqual(result.windowEnd, now)
+        XCTAssertEqual(result.days, 1)
+        XCTAssertEqual(result.tokens.input, 20)
+        XCTAssertEqual(result.tokens.output, 40)
+        XCTAssertEqual(result.tokens.thinking, 14, "Reasoning stays a subset of today's output")
+        XCTAssertEqual(result.tokens.total, 60)
+        XCTAssertEqual(result.messages, 2)
+        XCTAssertEqual(result.sessionCount, 1)
+        XCTAssertEqual(result.timeline.map(\.day), ["2026-03-29"])
+        XCTAssertEqual(result.timeline.first?.tokens, result.tokens)
+        let project = try XCTUnwrap(result.accounts.first?.projects.first)
+        XCTAssertEqual(project.tokens, result.tokens)
+        XCTAssertEqual(project.days.first?.tokens, result.tokens)
+        XCTAssertEqual(UsageShareSnapshot(report: result, period: .day).todayTokens, result.tokens)
+    }
+
+    func testTodayEmptyDoesNotIncludeYesterdayOrChangeLongerPeriods() {
+        let yesterday = utc.startOfDay(for: epoch).addingTimeInterval(-60)
+        let session = digest(session: "yesterday", project: "/p/Yesterday", weightPerHour: 100,
+                             hours: [yesterday])
+        let today = report([session], days: 1)
+        XCTAssertEqual(today.tokens.total, 0)
+        XCTAssertEqual(today.sessionCount, 0)
+        XCTAssertTrue(today.accounts.isEmpty)
+        XCTAssertTrue(today.timeline.isEmpty)
+        XCTAssertEqual(UsageShareSnapshot(report: today, period: .day).todayTokens.total, 0)
+        XCTAssertEqual(report([session], days: 7).tokens.total, 30)
+        XCTAssertEqual(report([session], days: 30).tokens.total, 30)
+    }
+
     func testASessionWithNoUsableDirectoryIsFiledOnItsOwn() {
         var homeless = UsageSessionDigest(sessionID: "nowhere")
         homeless.activityMinutes["\(Int(epoch.timeIntervalSince1970 / 60))"] = UsageTimeBucket(

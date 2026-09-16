@@ -7,7 +7,7 @@ final class UsageInsightsModel: ObservableObject {
     @Published private(set) var report: UsageLedgerReport?
     @Published private(set) var isLoading = false
     @Published private(set) var failure: String?
-    @Published var days = 7 { didSet { if days != oldValue { Task { await updatePeriod() } } } }
+    @Published var days = 1 { didSet { if days != oldValue { Task { await updatePeriod() } } } }
 
     private let ledger: UsageLedger
     private let home: URL
@@ -145,11 +145,7 @@ struct UsageInsightsView: View {
             }
             Group {
                 if let report = model.report {
-                    if report.sessionCount == 0 && !report.scan.hitLimit && report.milestones == nil {
-                        empty
-                    } else {
-                        content(report)
-                    }
+                    content(report)
                 } else if model.isLoading {
                     ProgressView().controlSize(.small)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -191,7 +187,7 @@ struct UsageInsightsView: View {
                 }
                 footnote(report)
             }
-            .padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 24)
+            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 24)
         }
     }
 
@@ -406,12 +402,13 @@ struct UsageInsightsView: View {
         return formatter
     }()
 
-    static func dayKeys(from start: Date, to end: Date) -> [String] {
+    static func dayKeys(from start: Date, to end: Date, calendar: Calendar = .current) -> [String] {
+        let formatter = UsageLedgerEngine.dayFormatter(calendar: calendar)
         var keys: [String] = []
-        var cursor = Calendar.current.startOfDay(for: start)
+        var cursor = calendar.startOfDay(for: start)
         while cursor <= end, keys.count < 366 {
-            keys.append(dayKeyFormatter.string(from: cursor))
-            guard let next = Calendar.current.date(byAdding: .day, value: 1, to: cursor) else { break }
+            keys.append(formatter.string(from: cursor))
+            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
             cursor = next
         }
         return keys

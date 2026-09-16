@@ -24,7 +24,8 @@ struct UsageStatisticsView: View {
         self.isLoading = isLoading
         self.onShare = onShare
         self.sharePreview = sharePreview
-        chartDays = UsageChartDay.make(keys: UsageInsightsView.dayKeys(from: report.windowStart, to: report.windowEnd),
+        chartDays = UsageChartDay.make(keys: UsageInsightsView.dayKeys(from: report.windowStart, to: report.windowEnd,
+                                      calendar: report.calendar ?? .current),
                                       timeline: report.timeline, partialHistory: report.scan.hitLimit)
     }
 
@@ -56,7 +57,6 @@ struct UsageStatisticsView: View {
                 .shadow(color: .black.opacity(0.22), radius: 2, y: 3)
                 .shadow(color: .black.opacity(0.22), radius: 14, y: 12)
         }
-        .padding(.horizontal, -12)
         .padding(.bottom, 12)
         .opacity(entered || reduceMotion ? 1 : 0)
         .offset(y: entered || reduceMotion ? 0 : 4)
@@ -73,20 +73,41 @@ struct UsageStatisticsView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Text("Recorded tokens")
-                .font(AppTheme.font(size: 12, weightValue: 550))
-            Spacer(minLength: 4)
-            Picker("Period", selection: $days) {
-                Text("7 days").tag(7)
-                Text("30 days").tag(30)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                headerTitle
+                Spacer(minLength: 4)
+                periodPicker
+                shareAction
             }
-            .pickerStyle(.segmented).labelsHidden().frame(width: 136).controlSize(.small)
-            .disabled(isLoading)
-            if let onShare {
-                UsageShareButton(snapshot: sharePreview, action: onShare)
+            VStack(alignment: .leading, spacing: 8) {
+                headerTitle
+                HStack(spacing: 8) {
+                    periodPicker
+                    Spacer(minLength: 4)
+                    shareAction
+                }
             }
         }
+    }
+
+    private var headerTitle: some View {
+        Text("Recorded tokens")
+            .font(AppTheme.font(size: 12, weightValue: 550)).fixedSize()
+    }
+
+    private var periodPicker: some View {
+        Picker("Period", selection: $days) {
+            Text("Today").tag(1)
+            Text("7 days").tag(7)
+            Text("30 days").tag(30)
+        }
+        .pickerStyle(.segmented).labelsHidden().frame(width: 194).controlSize(.small)
+        .disabled(isLoading)
+    }
+
+    @ViewBuilder private var shareAction: some View {
+        if let onShare { UsageShareButton(snapshot: sharePreview, action: onShare) }
     }
 
     private var totals: some View {
@@ -95,7 +116,8 @@ struct UsageStatisticsView: View {
                 Text(display(report.tokens.total, availability: totalAvailability, compact: true))
                     .font(AppTheme.font(size: 32, weightValue: 550)).tracking(-1).monospacedDigit()
                     .lineLimit(1).minimumScaleFactor(0.7)
-                Text(String(format: NSLocalizedString("Last %d days", comment: "Usage period"), report.days))
+                Text(report.days == 1 ? NSLocalizedString("Today", comment: "Usage period")
+                     : String(format: NSLocalizedString("Last %d days", comment: "Usage period"), report.days))
                     .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
                 if report.scan.hitLimit {
                     Text("Partial history")
@@ -161,8 +183,31 @@ struct UsageStatisticsView: View {
             }
             .font(AppTheme.font(size: 11))
             .lineLimit(1).minimumScaleFactor(0.8)
-            chart
+            if report.days == 1 {
+                todayActivity
+            } else {
+                chart
+            }
         }
+    }
+
+    /// The ledger records daily totals; a one-day view must not suggest an
+    /// hourly history or compare today's bar against its own maximum.
+    private var todayActivity: some View {
+        HStack(spacing: 8) {
+            Image(systemName: report.sessionCount == 0 ? "moon.zzz" : "clock")
+                .foregroundStyle(AppTheme.muted).accessibilityHidden(true)
+            Text(report.sessionCount == 0 && !report.scan.hitLimit
+                 ? LocalizedStringKey("No sessions today.")
+                 : LocalizedStringKey("Recorded since local midnight."))
+                .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+            Spacer(minLength: 4)
+            Text(report.generatedAt.formatted(Date.FormatStyle(date: .omitted, time: .shortened,
+                calendar: report.calendar ?? .current, timeZone: report.calendar?.timeZone ?? .current)))
+                .font(AppTheme.font(size: 10)).monospacedDigit().foregroundStyle(AppTheme.muted)
+        }
+        .padding(.vertical, 8)
+        .overlay(alignment: .top) { Rectangle().fill(AppTheme.line).frame(height: 1) }
     }
 
     private var chart: some View {
