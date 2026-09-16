@@ -314,3 +314,12 @@
 "An incomplete Mac login no longer blocks switching when a verified saved login is available. Your saved accounts stay preserved." = "An incomplete Mac login no longer blocks switching when a verified saved login is available. Your saved accounts stay preserved.";
 
 "Sculpted reflections, deeper shadows and stronger provider lighting bring your AI Podium to life. Usage and level badges share the same refined finish." = "Sculpted reflections, deeper shadows and stronger provider lighting bring your AI Podium to life. Usage and level badges share the same refined finish.";
+
+/* 0.19.3 */
+"Clear alerts. More room." = "Clear alerts. More room.";
+"The actual percentage" = "The actual percentage";
+"Usage alerts show the measured percentage and the limit concerned, instead of the threshold crossed." = "Usage alerts show the measured percentage and the limit concerned, instead of the threshold crossed.";
+"Find accounts that need you" = "Find accounts that need you";
+"Expired sign-ins stand out in red in the account list, with a clear Reconnect action." = "Expired sign-ins stand out in red in the account list, with a clear Reconnect action.";
+"A compact header" = "A compact header";
+"Smaller page headers leave more room for accounts and activity." = "Smaller page headers leave more room for accounts and activity.";

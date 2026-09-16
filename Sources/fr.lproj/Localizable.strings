@@ -579,3 +579,12 @@
 "An incomplete Mac login no longer blocks switching when a verified saved login is available. Your saved accounts stay preserved." = "Une connexion Mac incomplète ne bloque plus le changement de compte lorsqu’une connexion sauvegardée a pu être vérifiée. Vos comptes sauvegardés sont préservés.";
 
 "Sculpted reflections, deeper shadows and stronger provider lighting bring your AI Podium to life. Usage and level badges share the same refined finish." = "Des reflets travaillés, des ombres plus profondes et les lumières de votre IA donnent du relief à AI Podium. La consommation et les badges de niveau partagent ces nouvelles finitions.";
+
+/* 0.19.3 */
+"Clear alerts. More room." = "Des alertes claires. Plus de place.";
+"The actual percentage" = "Le pourcentage réel";
+"Usage alerts show the measured percentage and the limit concerned, instead of the threshold crossed." = "Les alertes affichent le pourcentage mesuré et la limite concernée, au lieu du palier franchi.";
+"Find accounts that need you" = "Repérez les comptes à reconnecter";
+"Expired sign-ins stand out in red in the account list, with a clear Reconnect action." = "Les connexions expirées sont signalées en rouge dans la liste, avec un bouton Reconnecter.";
+"A compact header" = "Un en-tête compact";
+"Smaller page headers leave more room for accounts and activity." = "Les en-têtes réduits laissent plus de place aux comptes et à votre activité.";

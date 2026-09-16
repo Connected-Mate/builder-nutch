@@ -30,6 +30,11 @@ struct ReleaseNote: Equatable {
 /// `testTheCurrentVersionHasANote`.
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
+        ReleaseNote(version: "0.19.3", headline: "Clear alerts. More room.", changes: [
+            .init(title: "The actual percentage", detail: "Usage alerts show the measured percentage and the limit concerned, instead of the threshold crossed."),
+            .init(title: "Find accounts that need you", detail: "Expired sign-ins stand out in red in the account list, with a clear Reconnect action."),
+            .init(title: "A compact header", detail: "Smaller page headers leave more room for accounts and activity.")
+        ]),
         ReleaseNote(version: "0.19.2", headline: "Keep switching. Keep building.", changes: [
             .init(title: "Recover a blocked Claude switch", detail: "An incomplete Mac login no longer blocks switching when a verified saved login is available. Your saved accounts stay preserved.")
         ]),

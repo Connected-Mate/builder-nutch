@@ -191,7 +191,7 @@ struct UsageInsightsView: View {
                 }
                 footnote(report)
             }
-            .padding(24)
+            .padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 24)
         }
     }
 

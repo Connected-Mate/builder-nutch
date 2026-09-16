@@ -326,7 +326,7 @@ struct AccountsView: View {
         HStack(spacing: 12) {
             Text(LocalizedStringKey(navigation.showingSettings ? "Settings" : showingCustom ? "Custom assistants" :
                     showingAdd ? "Add an assistant" : showingUsage ? "Usage" : filter?.workspaceTitle ?? "Accounts"))
-                .font(AppTheme.font(size: 19, weightValue: 650)).tracking(-0.4)
+                .font(AppTheme.font(size: 14, weightValue: 600)).lineLimit(1)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
             if !navigation.showingSettings && !showingCustom {
@@ -349,7 +349,8 @@ struct AccountsView: View {
                 }
             }
         }
-        .padding(.horizontal, 24).padding(.vertical, 16)
+        .frame(minHeight: 32)
+        .padding(.horizontal, 24).padding(.vertical, 4)
         .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
     }
 
@@ -612,6 +613,7 @@ private struct WorkspaceQuietButtonStyle: ButtonStyle {
 
 private struct WorkspaceSelectionStyle: ButtonStyle {
     var primary = false
+    var attention = false
     @State private var hovered = false
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
@@ -619,9 +621,9 @@ private struct WorkspaceSelectionStyle: ButtonStyle {
             .font(AppTheme.font(size: 11, weightValue: 500))
             .padding(.horizontal, 12).frame(minHeight: 36)
             .foregroundStyle(primary ? AppTheme.surface : AppTheme.ink)
-            .background(primary ? AppTheme.ink : hovered ? AppTheme.soft : AppTheme.surface,
+            .background(primary ? AppTheme.ink : attention ? Palette.alertBlaze.opacity(hovered ? 0.5 : 0.3) : hovered ? AppTheme.soft : AppTheme.surface,
                         in: RoundedRectangle(cornerRadius: 5))
-            .overlay(RoundedRectangle(cornerRadius: 5).stroke(primary ? AppTheme.ink : AppTheme.line))
+            .overlay(RoundedRectangle(cornerRadius: 5).stroke(primary ? AppTheme.ink : attention ? Palette.alert : AppTheme.line))
             .opacity(enabled ? (configuration.isPressed ? 0.75 : 1) : 0.4)
             .onHover { hovered = $0 }
     }
@@ -663,6 +665,8 @@ private struct AssistantRow: View {
     @State private var showingUsage = false
     @AppStorage("accounts.hidePersonalDetails") private var hidePersonalDetails = false
 
+    private var needsReconnect: Bool { state.requiresSignIn && !isLoginPending }
+
     private var displayLabel: String {
         guard hidePersonalDetails else { return account.label }
         let position = manager.accounts.filter { $0.provider == account.provider }.firstIndex { $0.id == account.id } ?? 0
@@ -686,7 +690,18 @@ private struct AssistantRow: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Button(action: personalize) {
                         HStack(spacing: 5) {
-                            Text(displayLabel).font(AppTheme.font(size: 13, weightValue: 550)).lineLimit(1)
+                            HStack(spacing: 5) {
+                                if needsReconnect {
+                                    Image(systemName: "exclamationmark.circle.fill")
+                                        .font(.system(size: 10)).accessibilityHidden(true)
+                                }
+                                Text(displayLabel).font(AppTheme.font(size: 13, weightValue: 550)).lineLimit(1)
+                            }
+                            .padding(.horizontal, needsReconnect ? 6 : 0)
+                            .padding(.vertical, needsReconnect ? 2 : 0)
+                            .foregroundStyle(AppTheme.ink)
+                            .background(needsReconnect ? Palette.alertBlaze : .clear,
+                                        in: RoundedRectangle(cornerRadius: 4))
                             if !hidePersonalDetails { Image(systemName: "pencil").font(.system(size: 9)) }
                         }
                     }
@@ -696,8 +711,9 @@ private struct AssistantRow: View {
                         Text(hidePersonalDetails ? "Personal details hidden" : email).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
                             .lineLimit(1).truncationMode(.middle).help(hidePersonalDetails ? "Personal details hidden" : email)
                     }
-                    Text(LocalizedStringKey(statusDescription)).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
-                        .lineLimit(1).help(statusDescription)
+                    Text(LocalizedStringKey(statusDescription)).font(AppTheme.font(size: 11))
+                        .foregroundStyle(needsReconnect ? AppTheme.ink : AppTheme.muted)
+                        .lineLimit(1).help(needsReconnect ? state.message ?? statusDescription : statusDescription)
                 }
                 Spacer(minLength: 8)
                 Menu {
@@ -736,6 +752,8 @@ private struct AssistantRow: View {
             selectionControl.frame(width: 100)
         }
         .padding(.vertical, 8).frame(minHeight: 76)
+        .background(needsReconnect ? Palette.alert.opacity(0.06) : .clear,
+                    in: RoundedRectangle(cornerRadius: 6))
         .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(displayLabel), \(account.provider.workspaceTitle), \(statusDescription)")
@@ -774,9 +792,9 @@ private struct AssistantRow: View {
                 .buttonStyle(WorkspaceSelectionStyle())
                 .disabled(state.isBusy || loginInProgress || !manager.busyIDs.isEmpty)
                 .help("Only this click may ask macOS for access. Cancelling leaves the account paused.")
-        } else if !state.isConnected {
-            Button(isLoginPending ? "Signing in…" : "Connect", action: connect)
-                .buttonStyle(WorkspaceSelectionStyle()).disabled(state.isBusy || loginInProgress)
+        } else if !state.isConnected || state.requiresSignIn {
+            Button(isLoginPending ? "Signing in…" : state.requiresSignIn ? "Reconnect" : "Connect", action: connect)
+                .buttonStyle(WorkspaceSelectionStyle(attention: needsReconnect)).disabled(state.isBusy || loginInProgress)
         } else {
             Button {
                 do { try manager.setNext(account) } catch { reportError(error.localizedDescription) }
@@ -801,6 +819,7 @@ private struct AssistantRow: View {
     private var statusDescription: String {
         if isLoginPending { return "Sign-in in progress" }
         if state.isBusy { return "Checking…" }
+        if state.requiresSignIn { return "Sign in to this account again." }
         if !state.isConnected { return state.message ?? "Connect this account." }
         if account.isBrowserOnly { return "Browser profile ready" }
         let rateLimit = state.rateLimitStatus()
