@@ -33,6 +33,10 @@ struct UsageMilestoneProgress: Codable, Equatable {
     private let evaluatedAt: Date?
     private let evaluationCalendar: Calendar?
 
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.totalTokens == rhs.totalTokens && lhs.stamps == rhs.stamps && lhs.genGen == rhs.genGen
+    }
+
     var level: Int { stamps.last(where: \.reached)?.level ?? 0 }
     /// No recorded consumption must not look like an earned White badge.
     var podiumTier: UsagePodiumTier? { totalTokens > 0 ? UsagePodiumTier(rawValue: level) : nil }

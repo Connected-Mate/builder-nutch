@@ -329,3 +329,10 @@
 "GenGen stamp reached." = "GenGen stamp reached.";
 "Obsidian or two months at Graphite" = "Obsidian or two months at Graphite";
 "Achievement date unavailable" = "Achievement date unavailable";
+
+/* 0.20.0 */
+"Your work. Your history. Your stamp." = "Your work. Your history. Your stamp.";
+"Earn the GenGen stamp" = "Earn the GenGen stamp";
+"Reach Obsidian or spend two calendar months at Graphite to unlock GenGen. Your saved history determines eligibility; unknown dates are never invented." = "Reach Obsidian or spend two calendar months at Graphite to unlock GenGen. Your saved history determines eligibility; unknown dates are never invented.";
+"Share it with your work" = "Share it with your work";
+"GenGen appears in your saved levels and AI Podium exports, independently of the period or project you choose." = "GenGen appears in your saved levels and AI Podium exports, independently of the period or project you choose.";

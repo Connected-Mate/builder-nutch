@@ -225,6 +225,42 @@ final class UsageMilestoneTests: XCTestCase {
         XCTAssertEqual(restarted.persistence.state, .saved)
     }
 
+    func testRefreshTimeChangesProgressOnlyWhenGenGenChanges() {
+        let reached = date("2026-01-31T12:00:00Z")
+        let tokens = UsageTokenTotals(input: UsagePodiumTier.graphite.threshold)
+        var history = UsageSessionDigest(sessionID: "same-history")
+        history.tokens = tokens
+        history.activityMinutes = [String(Int(reached.timeIntervalSince1970 / 60)):
+            UsageTimeBucket(tokens: tokens, messages: 1)]
+        let early = UsageMilestoneProgress(sessions: [history], now: date("2026-02-01T12:00:00Z"), calendar: utcCalendar)
+        let later = UsageMilestoneProgress(sessions: [history], now: date("2026-03-01T12:00:00Z"), calendar: utcCalendar)
+        let unlocked = UsageMilestoneProgress(sessions: [history], now: date("2026-03-31T12:00:00Z"), calendar: utcCalendar)
+        XCTAssertEqual(early, later)
+        XCTAssertNotEqual(later, unlocked)
+    }
+
+    func testLedgerAndExportUseTheSameCalendarForGenGen() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("milestone-calendar-\(UUID().uuidString)")
+        let source = root.appendingPathComponent("sessions")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        // UTC's two-month boundary is one hour later than Paris after DST.
+        let record: [String: Any] = ["type": "assistant", "uuid": "calendar-request", "sessionId": "calendar-session",
+            "timestamp": "2026-01-31T22:30:00Z", "cwd": "/fixture",
+            "message": ["id": "calendar-message", "model": "claude-sonnet-5",
+                        "usage": ["input_tokens": UsagePodiumTier.graphite.threshold, "output_tokens": 0]]]
+        var data = try JSONSerialization.data(withJSONObject: record)
+        data.append(0x0a)
+        try data.write(to: source.appendingPathComponent("history.jsonl"))
+        let ledger = UsageLedger(sources: [.init(projectsRoot: source, managedAccountID: nil)],
+                                cacheURL: root.appendingPathComponent("cache.json"), calendar: utcCalendar)
+        let report = await ledger.report(now: date("2026-03-31T21:30:00Z"))
+        let progress = try XCTUnwrap(report.milestones)
+        XCTAssertNotNil(progress.stamps.first { $0.level == 6 }?.reachedAt)
+        XCTAssertFalse(progress.genGen.reached)
+        XCTAssertEqual(progress.genGen, UsageShareSnapshot(report: report).genGen)
+    }
+
     func testUnreadableHistoryDoesNotPretendNoStampsHaveBeenReached() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("milestone-invalid-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

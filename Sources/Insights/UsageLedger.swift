@@ -588,7 +588,9 @@ private struct UsageLedgerState {
         var report = UsageLedgerEngine.report(sessions: sessions, summary: captured.scan, days: days, now: now,
                                               calendar: engine.calendar, timeline: engine.timeline)
         report.persistence = captured.persistence
-        if lastArchive != nil { report.milestones = UsageMilestoneProgress(sessions: sessions, now: now) }
+        if lastArchive != nil {
+            report.milestones = UsageMilestoneProgress(sessions: sessions, now: now, calendar: engine.calendar)
+        }
         return report
     }
 

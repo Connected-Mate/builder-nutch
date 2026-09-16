@@ -594,3 +594,10 @@
 "GenGen stamp reached." = "Sceau GenGen obtenu.";
 "Obsidian or two months at Graphite" = "Obsidienne ou deux mois au niveau Graphite";
 "Achievement date unavailable" = "Date d’obtention indisponible";
+
+/* 0.20.0 */
+"Your work. Your history. Your stamp." = "Votre travail. Votre historique. Votre tampon.";
+"Earn the GenGen stamp" = "Décrochez le tampon GenGen";
+"Reach Obsidian or spend two calendar months at Graphite to unlock GenGen. Your saved history determines eligibility; unknown dates are never invented." = "Atteignez Obsidian ou restez deux mois calendaires à Graphite pour débloquer GenGen. Votre historique détermine votre progression ; aucune date inconnue n’est inventée.";
+"Share it with your work" = "Partagez-le avec vos réalisations";
+"GenGen appears in your saved levels and AI Podium exports, independently of the period or project you choose." = "GenGen apparaît dans vos niveaux et vos exports AI Podium, quelle que soit la période ou le projet choisi.";
