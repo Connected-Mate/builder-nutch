@@ -34,7 +34,7 @@ struct UsageShareView: View {
         GeometryReader { available in
             let ratio = UsageShareCard.width / UsageShareCard.height
             let previewWidth = min(960, max(240, available.size.width - 48),
-                                   max(240, (available.size.height - 184) * ratio))
+                                   max(240, (available.size.height - 228) * ratio))
             VStack(spacing: 12) {
                 HStack {
                     Text(verbatim: "AI Podium").font(AppTheme.font(size: 18, weightValue: 550))
@@ -92,6 +92,24 @@ struct UsageShareView: View {
                         .buttonStyle(AppButtonStyle(compact: true))
                     Button { save() } label: { Label("Save image…", systemImage: "square.and.arrow.down") }
                         .buttonStyle(AppButtonStyle(primary: true, compact: true))
+                }
+                .disabled(saving)
+                HStack(spacing: 8) {
+                    if canExportCertificate {
+                        Text("From your saved history · accounts and projects stay private.")
+                            .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
+                        Spacer(minLength: 0)
+                        Button { saveCertificate() } label: {
+                            Label("GenGen certificate…", systemImage: "seal")
+                        }
+                        .buttonStyle(AppButtonStyle(compact: true))
+                    } else {
+                        Text("GenGen: Obsidian or two calendar months at Graphite.")
+                            .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
+                        Spacer(minLength: 0)
+                        Link("Learn more", destination: UsageGenGenCertificate.studioURL)
+                            .font(AppTheme.font(size: 11))
+                    }
                 }
                 .disabled(saving)
                 Group {
@@ -162,6 +180,34 @@ struct UsageShareView: View {
         do {
             try UsageShareExporter.copy(UsageShareExporter.pngData(snapshot: snapshot, locale: locale))
             status = NSLocalizedString("Image copied. Paste it into your post.", comment: "Usage export success")
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private var canExportCertificate: Bool {
+        guard let progress = report.milestones else { return false }
+        return progress.genGen(at: report.generatedAt, calendar: report.calendar ?? .current).reached
+    }
+
+    private func saveCertificate() {
+        error = nil; status = nil
+        do {
+            let data = try UsageGenGenCertificate(report: report).jsonData()
+            saving = true
+            onSavingChange(true)
+            UsageGenGenCertificate.save(data) { result in
+                saving = false
+                onSavingChange(false)
+                switch result {
+                case .success(let url):
+                    guard url != nil else { return }
+                    let opened = NSWorkspace.shared.open(UsageGenGenCertificate.studioURL)
+                    status = NSLocalizedString(opened
+                        ? "Certificate saved. Import the file in GenGen Studio to create your profile ring, banner or post."
+                        : "Certificate saved. Open GenGen Studio and import the file to create your profile ring, banner or post.",
+                        comment: "GenGen certificate saved")
+                case .failure(let failure): error = failure.localizedDescription
+                }
+            }
         } catch { self.error = error.localizedDescription }
     }
 

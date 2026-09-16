@@ -591,6 +591,16 @@
 
 /* Sceau GenGen d’AI Podium */
 "GenGen stamp" = "Sceau GenGen";
+"GenGen certificate…" = "Certificat GenGen…";
+"Choose a city time zone on your Mac before exporting this certificate." = "Choisissez un fuseau horaire correspondant à une ville sur votre Mac avant d’exporter ce certificat.";
+"From your saved history · accounts and projects stay private." = "Depuis votre historique sauvegardé · comptes et projets restent privés.";
+"GenGen: Obsidian or two calendar months at Graphite." = "GenGen : Obsidienne ou deux mois calendaires au niveau Graphite.";
+"Learn more" = "En savoir plus";
+"GenGen requires Obsidian or two calendar months at Graphite in your saved history." = "GenGen nécessite Obsidienne ou deux mois calendaires au niveau Graphite dans votre historique sauvegardé.";
+"This token total is too large for a portable certificate." = "Ce total de tokens est trop élevé pour un certificat portable.";
+"The saved history dates cannot be used for a certificate." = "Les dates de l’historique sauvegardé ne peuvent pas servir à créer un certificat.";
+"Certificate saved. Import the file in GenGen Studio to create your profile ring, banner or post." = "Certificat enregistré. Importez le fichier dans GenGen Studio pour créer votre cadre de profil, bannière ou publication.";
+"Certificate saved. Open GenGen Studio and import the file to create your profile ring, banner or post." = "Certificat enregistré. Ouvrez GenGen Studio et importez le fichier pour créer votre cadre de profil, bannière ou publication.";
 "GenGen stamp reached." = "Sceau GenGen obtenu.";
 "Obsidian or two months at Graphite" = "Obsidienne ou deux mois au niveau Graphite";
 "Achievement date unavailable" = "Date d’obtention indisponible";

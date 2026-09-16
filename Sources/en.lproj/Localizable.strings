@@ -326,6 +326,16 @@
 
 /* GenGen AI Podium stamp */
 "GenGen stamp" = "GenGen stamp";
+"GenGen certificate…" = "GenGen certificate…";
+"Choose a city time zone on your Mac before exporting this certificate." = "Choose a city time zone on your Mac before exporting this certificate.";
+"From your saved history · accounts and projects stay private." = "From your saved history · accounts and projects stay private.";
+"GenGen: Obsidian or two calendar months at Graphite." = "GenGen: Obsidian or two calendar months at Graphite.";
+"Learn more" = "Learn more";
+"GenGen requires Obsidian or two calendar months at Graphite in your saved history." = "GenGen requires Obsidian or two calendar months at Graphite in your saved history.";
+"This token total is too large for a portable certificate." = "This token total is too large for a portable certificate.";
+"The saved history dates cannot be used for a certificate." = "The saved history dates cannot be used for a certificate.";
+"Certificate saved. Import the file in GenGen Studio to create your profile ring, banner or post." = "Certificate saved. Import the file in GenGen Studio to create your profile ring, banner or post.";
+"Certificate saved. Open GenGen Studio and import the file to create your profile ring, banner or post." = "Certificate saved. Open GenGen Studio and import the file to create your profile ring, banner or post.";
 "GenGen stamp reached." = "GenGen stamp reached.";
 "Obsidian or two months at Graphite" = "Obsidian or two months at Graphite";
 "Achievement date unavailable" = "Achievement date unavailable";
