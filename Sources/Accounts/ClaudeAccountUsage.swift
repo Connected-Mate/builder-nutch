@@ -55,10 +55,12 @@ enum ClaudeAccountUsage {
         if let plan = text(object["subscription_type"]) { state.plan = plan }
         for (key, label) in [("five_hour", "5h limit"), ("seven_day", "Weekly limit"),
                              ("seven_day_oauth_apps", "OAuth apps weekly limit"), ("seven_day_opus", "Opus weekly limit"),
-                             ("seven_day_sonnet", "Sonnet weekly limit")] {
+                             ("seven_day_sonnet", "Sonnet weekly limit"), ("seven_day_fable", "Fable weekly limit"),
+                             ("seven_day_haiku", "Haiku weekly limit")] {
             guard let value = rates[key], !(value is NSNull) else { continue }
             guard let row = value as? [String: Any] else { throw ManagedAccountError.invalidResponse }
-            let model = ["seven_day_opus": "Opus", "seven_day_sonnet": "Sonnet"][key]
+            let model = ["seven_day_opus": "Opus", "seven_day_sonnet": "Sonnet",
+                         "seven_day_fable": "Fable", "seven_day_haiku": "Haiku"][key]
             state.windows.append(try window(row, id: key, label: label, percentage: "utilization", modelName: model))
         }
         if let raw = rates["model_scoped"], !(raw is NSNull) {
@@ -68,7 +70,7 @@ enum ClaudeAccountUsage {
                 state.windows.append(try window(row, id: "model-\(index)", label: "\(name) weekly limit", percentage: "utilization", modelName: name))
             }
         }
-        let knownKeys: Set<String> = ["five_hour", "seven_day", "seven_day_oauth_apps", "seven_day_opus", "seven_day_sonnet", "model_scoped", "limits", "extra_usage"]
+        let knownKeys: Set<String> = ["five_hour", "seven_day", "seven_day_oauth_apps", "seven_day_opus", "seven_day_sonnet", "seven_day_fable", "seven_day_haiku", "model_scoped", "limits", "extra_usage"]
         // New server buckets must not disappear merely because this client
         // predates their names. Unknown numeric subscription windows constrain selection.
         for key in rates.keys.sorted() where !knownKeys.contains(key) {

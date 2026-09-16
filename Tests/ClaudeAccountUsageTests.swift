@@ -2,6 +2,20 @@ import XCTest
 @testable import Codenotch
 
 final class ClaudeAccountUsageTests: XCTestCase {
+    func testFlatFableAndHaikuBucketsRetainModelScopeButUnknownBucketsStayShared() throws {
+        let value = try data(["rate_limits_available": true, "rate_limits": [
+            "five_hour": ["utilization": 10], "seven_day_fable": ["utilization": 100],
+            "seven_day_haiku": ["utilization": 20], "seven_day_future": ["utilization": 100]]])
+        let parsed = try ClaudeAccountUsage.state(status: .init(isConnected: true), usage: value, now: now)
+        XCTAssertEqual(parsed.windows.first { $0.id == "seven_day_fable" }?.modelName, "Fable")
+        XCTAssertEqual(parsed.windows.first { $0.id == "seven_day_haiku" }?.modelName, "Haiku")
+        XCTAssertEqual(parsed.accountWindows.count, 2)
+        XCTAssertEqual(parsed.accountRemainingPercent, 0)
+        let projected = ClaudeModelPolicy.project(parsed, model: "Haiku", now: now)
+        XCTAssertEqual(projected.windows.count, 3)
+        XCTAssertNotNil(projected.message, "Unknown shared subscription bucket cannot be bypassed")
+    }
+
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private func temporary() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("claude-usage-\(UUID().uuidString)")
