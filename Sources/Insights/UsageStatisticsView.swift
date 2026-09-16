@@ -116,8 +116,10 @@ struct UsageStatisticsView: View {
                 Text(display(report.tokens.total, availability: totalAvailability, compact: true))
                     .font(AppTheme.font(size: 32, weightValue: 550)).tracking(-1).monospacedDigit()
                     .lineLimit(1).minimumScaleFactor(0.7)
-                Text(report.days == 1 ? NSLocalizedString("Today", comment: "Usage period")
-                     : String(format: NSLocalizedString("Last %d days", comment: "Usage period"), report.days))
+                Group {
+                    if report.days == 1 { Text("Today") }
+                    else { Text("Last \(report.days) days") }
+                }
                     .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
                 if report.scan.hitLimit {
                     Text("Partial history")

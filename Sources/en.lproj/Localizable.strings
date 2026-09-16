@@ -349,6 +349,7 @@
 
 /* GenGen Studio release */
 "No sessions today." = "No sessions today.";
+"Last %lld days" = "Last %lld days";
 "Recorded since local midnight." = "Recorded since local midnight.";
 "Today, with room to breathe." = "Today, with room to breathe.";
 "Start with today" = "Start with today";

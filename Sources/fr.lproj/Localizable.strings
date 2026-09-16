@@ -614,6 +614,7 @@
 
 /* GenGen Studio release */
 "No sessions today." = "Aucune session aujourd’hui.";
+"Last %lld days" = "%lld derniers jours";
 "Recorded since local midnight." = "Relevé depuis minuit, heure locale.";
 "Today, with room to breathe." = "Aujourd’hui, avec plus d’espace.";
 "Start with today" = "Votre journée en premier";
