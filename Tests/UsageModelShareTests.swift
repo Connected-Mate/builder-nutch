@@ -46,6 +46,9 @@ final class UsageModelShareTests: XCTestCase {
             XCTAssertEqual(snapshot.modelRanking.reduce(0) { $0 + $1.tokens.total }, snapshot.tokens.total)
             XCTAssertFalse(String(reflecting: snapshot).contains("/private/"))
             XCTAssertFalse(String(reflecting: snapshot).contains("fixture-"))
+            let spoken = UsageModelPresentation.rankingSummary(snapshot, locale: Locale(identifier: "en"))
+            XCTAssertTrue(spoken.contains("1. " + UsageModelPresentation.name(expected[index])))
+            XCTAssertFalse(spoken.contains("Today’s AI podium"))
         }
     }
 

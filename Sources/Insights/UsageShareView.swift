@@ -159,9 +159,7 @@ struct UsageShareView: View {
         formatter.dateStyle = .long
         formatter.timeStyle = .short
         let scope = snapshot.projectName ?? (snapshot.isProject ? NSLocalizedString("Project", comment: "Share scope") : NSLocalizedString("All projects", comment: "Share scope"))
-        let ranking = snapshot.todayRanking.enumerated().map { index, entry in
-            "\(index + 1). \(entry.provider == .claude ? "Claude" : "Codex")"
-        }.joined(separator: ", ")
+        let ranking = UsageModelPresentation.rankingSummary(snapshot, locale: locale)
         let tierSummary = snapshot.podiumTier.map { tier in
             " " + String(format: UsagePodiumTier.localized("Lifetime level: %d · %@", locale: locale),
                          tier.rawValue, tier.name(locale: locale))
@@ -170,7 +168,7 @@ struct UsageShareView: View {
             ? " " + UsagePodiumTier.localized("GenGen stamp reached.", locale: locale) : ""
         return String(format: NSLocalizedString("%@ · %@: %@ tokens. Recorded %@.", comment: "Accessible scoped token export"),
                       scope, NSLocalizedString(periodKey, comment: "Share period"), count, formatter.string(from: snapshot.generatedAt))
-            + (ranking.isEmpty ? "" : " " + NSLocalizedString("Today’s AI podium", comment: "Daily provider ranking") + ": " + ranking)
+            + (ranking.isEmpty ? "" : " " + ranking)
             + tierSummary
             + genGenSummary
     }

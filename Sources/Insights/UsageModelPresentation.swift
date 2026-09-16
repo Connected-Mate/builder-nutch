@@ -3,6 +3,26 @@ import SwiftUI
 /// The transcript source is an app, not necessarily the model's vendor:
 /// Claude Code can record an OpenAI model when a relay is used.
 enum UsageModelPresentation {
+    static func rankingSummary(_ snapshot: UsageShareSnapshot, locale: Locale) -> String {
+        let models = snapshot.modelRanking.filter { $0.modelID != nil }.prefix(3)
+        let readings: [String]
+        let title: String
+        if models.isEmpty {
+            title = localized("Tools used", locale: locale)
+            readings = snapshot.ranking.prefix(3).enumerated().map { index, entry in
+                "\(index + 1). \(source(entry.provider) ?? ""), \(localized("Model not recorded", locale: locale))"
+            }
+        } else {
+            title = localized("Most-used models", locale: locale)
+            readings = models.enumerated().map { index, entry in
+                "\(index + 1). \(name(entry.modelID, locale: locale)), "
+                    + context(modelID: entry.modelID, provider: entry.provider, sources: entry.sources)
+                    + ", \(count(entry.tokens.total, availability: entry.availability, locale: locale)) tokens"
+            }
+        }
+        return readings.isEmpty ? "" : title + ": " + readings.joined(separator: "; ")
+    }
+
     static func count(_ value: Int, availability: UsageMeasurementAvailability,
                       locale: Locale = .current) -> String {
         guard availability != .unavailable else { return "—" }
