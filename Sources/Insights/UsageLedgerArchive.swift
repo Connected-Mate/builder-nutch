@@ -261,7 +261,10 @@ struct UsageLedgerArchive: Codable, Equatable {
             var digest = session.metadata
             for legacy in session.legacy.values { digest.merge(legacy.remaining) }
             for event in session.events.values { event.add(to: &digest) }
-            digest.recordedEvents = nil
+            // Reports need the saved per-request model/date evidence. Dictionary
+            // copy-on-write shares these numeric observations with the archive;
+            // aggregate-only legacy portions still remain explicitly incomplete.
+            digest.recordedEvents = session.events
             return digest
         }
     }

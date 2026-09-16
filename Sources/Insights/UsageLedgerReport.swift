@@ -102,6 +102,8 @@ struct UsageLedgerReport: Codable, Equatable {
     /// Calendar that produced the day keys. Keep exports aligned when the Mac's
     /// timezone changes while an existing ledger is still running.
     var calendar: Calendar? = nil
+    /// Exact model observations; absent history remains explicitly unattributed.
+    var modelDays: [UsageModelDaySlice] = []
 
     static let empty = UsageLedgerReport(
         generatedAt: .distantPast, windowStart: .distantPast, windowEnd: .distantPast, days: 0,
@@ -135,5 +137,28 @@ struct UsageAccountTimeline: Equatable {
             if entry.start <= date { match = entry.accountID } else { break }
         }
         return match
+    }
+}
+
+// Keep reports encoded before model attribution readable. Defining the decoder
+// in an extension preserves the convenient defaulted memberwise initializer.
+extension UsageLedgerReport {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        generatedAt = try values.decode(Date.self, forKey: .generatedAt)
+        windowStart = try values.decode(Date.self, forKey: .windowStart)
+        windowEnd = try values.decode(Date.self, forKey: .windowEnd)
+        days = try values.decode(Int.self, forKey: .days)
+        totalWeight = try values.decode(Double.self, forKey: .totalWeight)
+        tokens = try values.decode(UsageTokenTotals.self, forKey: .tokens)
+        messages = try values.decode(Int.self, forKey: .messages)
+        sessionCount = try values.decode(Int.self, forKey: .sessionCount)
+        accounts = try values.decode([AccountUsageShare].self, forKey: .accounts)
+        timeline = try values.decode([UsageDaySlice].self, forKey: .timeline)
+        scan = try values.decode(UsageScanSummary.self, forKey: .scan)
+        persistence = try values.decodeIfPresent(UsagePersistenceStatus.self, forKey: .persistence) ?? .notCaptured
+        milestones = try values.decodeIfPresent(UsageMilestoneProgress.self, forKey: .milestones)
+        calendar = try values.decodeIfPresent(Calendar.self, forKey: .calendar)
+        modelDays = try values.decodeIfPresent([UsageModelDaySlice].self, forKey: .modelDays) ?? []
     }
 }

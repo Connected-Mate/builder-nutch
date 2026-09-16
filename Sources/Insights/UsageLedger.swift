@@ -281,11 +281,19 @@ struct UsageLedgerEngine {
         var accounts: [String: AccountAccumulator] = [:]
         var overall = Accumulator()
         var overallDays: [String: Accumulator] = [:]
+        var modelDays: [ModelDayIdentity: UsageTokenTotals] = [:]
 
         for session in sessions {
             guard let window = Self.window(of: session, from: windowStart, to: now, calendar: calendar),
                   window.total.weight > 0 else { continue }
 
+            for (day, models) in window.modelsByDay {
+                for (model, tokens) in models {
+                    let identity = ModelDayIdentity(provider: session.provider.rawValue, modelID: model.identifier,
+                        day: day, projectPath: session.resolvedProjectPath)
+                    modelDays[identity, default: UsageTokenTotals()] += tokens
+                }
+            }
             let key = Self.accountKey(for: session, activeAt: window.lastActivity ?? session.lastActivity, timeline: timeline)
             var account = accounts[key.key] ?? AccountAccumulator(key: key)
             account.absorb(session: session, window: window, attribution: key.attribution)
@@ -306,10 +314,22 @@ struct UsageLedgerEngine {
                                  tokens: $0.value.tokens, messages: $0.value.messages) }
             .sorted { $0.day < $1.day }
 
+        let modelSlices = modelDays.compactMap { key, tokens -> UsageModelDaySlice? in
+            guard let provider = UsageTranscriptFormat(rawValue: key.provider) else { return nil }
+            return UsageModelDaySlice(provider: provider, modelID: key.modelID,
+                day: key.day, projectPath: key.projectPath, tokens: tokens)
+        }.sorted {
+            if $0.day != $1.day { return $0.day < $1.day }
+            if $0.provider != $1.provider { return $0.provider.rawValue < $1.provider.rawValue }
+            if $0.projectPath != $1.projectPath { return $0.projectPath < $1.projectPath }
+            if ($0.modelID == nil) != ($1.modelID == nil) { return $0.modelID == nil }
+            return ($0.modelID ?? "") < ($1.modelID ?? "")
+        }
         return UsageLedgerReport(generatedAt: now, windowStart: windowStart, windowEnd: now, days: boundedDays,
                                  totalWeight: total, tokens: overall.tokens, messages: overall.messages,
                                  sessionCount: shares.reduce(0) { $0 + $1.sessionCount },
-                                 accounts: shares, timeline: timelineSlices, scan: summary, calendar: calendar)
+                                 accounts: shares, timeline: timelineSlices, scan: summary, calendar: calendar,
+                                 modelDays: modelSlices)
     }
 
     // MARK: - Window arithmetic
@@ -317,7 +337,30 @@ struct UsageLedgerEngine {
     /// The part of a session that falls inside the report window, cut at the
     /// recorded minute. A session that started last month still counts only for
     /// the activity observed inside this window.
+    private struct ModelDayIdentity: Hashable {
+        let provider: String
+        let modelID: String?
+        let day: String
+        let projectPath: String
+    }
+
+    struct ModelIdentity: Hashable {
+        let identifier: String?
+    }
+
     struct SessionWindow {
+        var modelsByDay: [String: [ModelIdentity: UsageTokenTotals]] = [:]
+        var dominantModel: String? {
+            var totals: [String: Int] = [:]
+            for models in modelsByDay.values {
+                for (model, tokens) in models {
+                    if let identifier = model.identifier { totals[identifier, default: 0] += tokens.total }
+                }
+            }
+            guard let largest = totals.sorted(by: { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }).first,
+                  largest.value > max(0, total.tokens.total - totals.values.reduce(0, +)) else { return nil }
+            return largest.key
+        }
         var total = UsageTimeBucket()
         var byDay: [String: UsageTimeBucket] = [:]
         var firstActivity: Date?
@@ -342,6 +385,14 @@ struct UsageLedgerEngine {
             window.lastActivity = max(window.lastActivity ?? date, date)
         }
         guard window.total.weight > 0 else { return nil }
+        // recordedEvents is deduplicated by request identity in the durable
+        // archive. Legacy lifetime modelWeights cannot prove a day's model.
+        for event in (session.recordedEvents ?? [:]).values {
+            guard let date = event.date, date >= start, date <= end, event.tokens.total > 0 else { continue }
+            let day = formatter.string(from: date)
+            guard window.byDay[day] != nil else { continue }
+            window.modelsByDay[day, default: [:]][ModelIdentity(identifier: event.model), default: UsageTokenTotals()] += event.tokens
+        }
         window.fraction = session.weight > 0 ? min(1, window.total.weight / session.weight) : 1
         // Exact endpoints refine the minute bucket for display.
         if let first = session.firstActivity, first >= start, first <= end { window.firstActivity = first }
@@ -496,7 +547,7 @@ struct UsageLedgerEngine {
                         sharePercent: UsageLedgerEngine.percent(entry.window.total.weight, of: project.totals.weight),
                         tokens: entry.window.total.tokens, messages: entry.window.total.messages,
                         firstActivity: entry.window.firstActivity, lastActivity: entry.window.lastActivity,
-                        dominantModel: entry.digest.modelWeights.max { $0.value < $1.value }?.key)
+                        dominantModel: entry.window.dominantModel)
                 }
                 .sorted { $0.weight > $1.weight }
 
