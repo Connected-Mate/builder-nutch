@@ -1,0 +1,126 @@
+.gengen-medallion {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  width: 220px;
+  max-width: 100%;
+  aspect-ratio: 1;
+  margin: 0;
+  padding: var(--space-sm);
+  border: 1px solid var(--podium-stage-metal);
+  border-radius: 50%;
+  color: var(--podium-stage-ink);
+  background:
+    repeating-conic-gradient(
+      from -30deg,
+      transparent 0deg 2deg,
+      color-mix(in srgb, var(--podium-stage-ink) 13%, transparent) 2deg 2.5deg,
+      transparent 2.5deg 5deg
+    ),
+    conic-gradient(
+      from -35deg,
+      var(--podium-stage-silver),
+      var(--podium-stage-metal) 12%,
+      var(--podium-stage-high) 28%,
+      var(--podium-stage-metal) 46%,
+      var(--podium-stage-silver) 52%,
+      var(--podium-stage-high) 70%,
+      var(--podium-stage-metal) 88%,
+      var(--podium-stage-silver)
+    );
+  box-shadow:
+    0 2px 0 var(--podium-stage-high),
+    0 4px 0 var(--podium-stage-metal),
+    0 6px 0 var(--podium-stage-high),
+    0 16px 24px color-mix(in srgb, var(--podium-stage) 18%, transparent),
+    0 32px 40px color-mix(in srgb, var(--podium-stage) 8%, transparent),
+    inset 0 1px 1px color-mix(in srgb, var(--podium-stage-ink) 70%, transparent),
+    inset 0 -2px 2px var(--podium-stage-high);
+}
+
+.gengen-medallion-face {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  width: 100%;
+  height: 100%;
+  border: 1px solid color-mix(in srgb, var(--podium-stage-silver) 60%, var(--podium-stage-high));
+  border-radius: inherit;
+  background:
+    radial-gradient(ellipse at 27% 16%, color-mix(in srgb, var(--podium-stage-metal) 70%, transparent), transparent 66%),
+    repeating-linear-gradient(115deg, transparent 0 2px, color-mix(in srgb, var(--podium-stage-ink) 2%, transparent) 2px 3px),
+    linear-gradient(145deg, var(--podium-stage-high), var(--podium-stage) 84%);
+  box-shadow:
+    inset 0 2px 3px var(--podium-stage),
+    inset 0 -1px 0 color-mix(in srgb, var(--podium-stage-ink) 24%, transparent),
+    inset 0 0 0 5px var(--podium-stage-high),
+    inset 0 0 0 6px color-mix(in srgb, var(--podium-stage-metal) 70%, var(--podium-stage-high));
+}
+
+.gengen-medallion-face::before,
+.gengen-medallion-face::after {
+  content: '';
+  position: absolute;
+  inset: var(--space-md);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.gengen-medallion-face::before {
+  border: 1px solid color-mix(in srgb, var(--podium-stage-metal) 50%, transparent);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--podium-stage) 75%, transparent);
+}
+
+.gengen-medallion-face::after {
+  border: 1px solid transparent;
+  border-top-color: color-mix(in srgb, var(--podium-stage-silver) 40%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--podium-stage-metal) 30%, transparent);
+}
+
+.gengen-medallion-label,
+.gengen-medallion-caption {
+  position: relative;
+  color: var(--podium-stage-silver);
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.16em;
+  text-shadow: 0 -1px 0 var(--podium-stage);
+}
+
+.gengen-medallion-wordmark {
+  position: relative;
+  color: var(--podium-stage-ink);
+  font-size: 2.5rem;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.065em;
+  text-shadow:
+    0 1px 0 var(--podium-stage-metal),
+    0 2px 0 var(--podium-stage-high),
+    0 3px 1px var(--podium-stage),
+    0 5px 6px color-mix(in srgb, var(--podium-stage) 70%, transparent);
+}
+
+@media (max-width: 600px) {
+  .gengen-medallion {
+    width: 180px;
+  }
+
+  .gengen-medallion-face {
+    gap: var(--space-sm);
+  }
+
+  .gengen-medallion-wordmark {
+    font-size: 2rem;
+  }
+
+  .gengen-medallion-label,
+  .gengen-medallion-caption {
+    letter-spacing: 0.12em;
+  }
+}
