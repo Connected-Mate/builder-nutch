@@ -222,6 +222,13 @@ final class AccountHealthTests: XCTestCase {
         XCTAssertNil(manager.attention)
         XCTAssertTrue(manager.health.isSwitchReady)
 
+        manager.applyState({ $0.windows[0] = LimitWindow(id: "five_hour", label: "5h limit", usedFraction: 1) }, to: second.id)
+        XCTAssertNil(manager.nextUsableAccount(for: .claude))
+        XCTAssertNil(manager.attention, "Current Sonnet usage remains possible without adding a subscription")
+        XCTAssertFalse(manager.health.reason?.contains("No account can currently use") == true,
+            "An unavailable backup must not declare the running model unavailable")
+        XCTAssertTrue(manager.health.reason?.contains("Claude 2") == true)
+
         try manager.setClaudeModel("fable")
         for account in [first, second] {
             manager.applyState({ $0.windows[0] = LimitWindow(id: "five_hour", label: "5h limit", usedFraction: 1) }, to: account.id)
@@ -233,6 +240,12 @@ final class AccountHealthTests: XCTestCase {
         }
         XCTAssertNil(manager.attention, "Failed readings remain unknown, not empty")
         XCTAssertFalse(manager.health.reason?.contains("Other models remain available") == true)
+        try manager.setClaudeModel("sonnet")
+        manager.applyState({ $0.usageCheckFailedAt = nil; $0.refreshedAt = Date() }, to: first.id)
+        try manager.remove(second)
+        XCTAssertNil(manager.attention)
+        XCTAssertEqual(manager.health.reason, NSLocalizedString("No other account has usage left.", comment: ""),
+            "A single usable account has no backup, but can still serve Sonnet")
     }
 
     @MainActor

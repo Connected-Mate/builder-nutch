@@ -2218,6 +2218,11 @@ final class AccountManager: ObservableObject {
         // with the raw order neighbour told the person an exhausted account was
         // next while two healthy ones sat behind it.
         let ready = nextUsableAccount(for: .claude, now: now)
+        let currentState = selectionState(for: current, now: now)
+        let currentCanServeModel = !currentState.needsAttention && currentState.providerRestriction == nil
+            && currentState.windows.allSatisfy { !$0.isBlocked }
+            && AccountSelection.rotating(provider: .claude, accounts: [current], states: [current.id: currentState],
+                order: [current.id], currentID: current.id, thresholdPercent: 0, now: now) != nil
         health.currentID = current.id
         health.currentName = label(current)
         health.currentRemainingPercent = states[current.id]?.accountRemainingPercent
@@ -2242,7 +2247,7 @@ final class AccountManager: ObservableObject {
         } else if ready == nil, !claudeCandidateIsBusy(excluding: current.id) {
             // Name the account that was supposed to be next and what stopped it,
             // rather than a blanket "nothing left" the person cannot act on.
-            if claudeHasOtherModelUsage(now: now) {
+            if !currentCanServeModel, claudeHasOtherModelUsage(now: now) {
                 let model = ClaudeModelPolicy.family(for: rotationClaudeModel)?.rawValue
                     ?? NSLocalizedString("the selected model", comment: "Health model")
                 health.reason = String(format: NSLocalizedString("No account can currently use %1$@. Other models remain available.", comment: "Health reason"), model)
