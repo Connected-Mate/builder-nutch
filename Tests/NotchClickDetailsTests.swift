@@ -183,7 +183,12 @@ final class NotchClickDetailsTests: XCTestCase {
         window.sendEvent(try event(.leftMouseUp, dragEnd, 8))
         XCTAssertEqual(moved?.0, .claude)
         XCTAssertEqual(moved?.1, [current, later, next])
-        XCTAssertNil(controller.model.accountPicker, "A completed reorder should restore the provider list")
+        XCTAssertEqual(controller.model.accountPicker?.accounts.map(\.id), [current, later, next],
+                       "A completed drop should leave the saved order visible")
+        pointer = CGPoint(x: -100000, y: -100000)
+        controller.dismissDetailsIfOutside()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.55))
+        XCTAssertNil(controller.model.accountPicker, "Outside clicking still closes the reordered accounts")
     }
 
     func testOutsideClickDismissesInlineAccountsAndFoldsTheNotch() throws {

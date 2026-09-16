@@ -529,7 +529,6 @@ final class NotchWindowController {
         guard accountDrag != nil, let picker = model.accountPicker else { return }
         model.onMoveAccount?(picker.provider, picker.accounts.map(\.id))
         accountDrag = nil
-        dismissAccountPicker()
     }
 
     private func localCursor(in frame: CGRect) -> CGPoint {
