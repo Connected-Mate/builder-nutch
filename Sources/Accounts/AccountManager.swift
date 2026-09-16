@@ -2105,6 +2105,33 @@ final class AccountManager: ObservableObject {
         accounts.contains { $0.provider == .claude && $0.id != currentID && states[$0.id]?.isBusy == true }
     }
 
+    /// A model pool being spent is not a spent subscription. Only fresh,
+    /// positive shared allowance and a safe model projection can establish this;
+    /// unknown scopes, failed checks and authentication failures still block it.
+    private func claudeHasOtherModelUsage(now: Date) -> Bool {
+        ClaudeModelPolicy.Family.allCases.contains { family in
+            let projected = states.filter { _, state in
+                let hasModelLimit = state.windows.contains { window in
+                    ClaudeModelPolicy.family(for: window.modelName) != nil
+                        && (window.isBlocked || (window.usedFraction ?? 0) >= 1)
+                } || state.providerRestriction.map { ClaudeModelPolicy.family(for: $0.modelName) != nil } == true
+                return hasModelLimit && !state.accountWindows.isEmpty && state.accountWindows.allSatisfy { window in
+                    guard !window.isBlocked, let used = window.usedFraction,
+                          used.isFinite, used >= 0, used < 1 else { return false }
+                    return window.resetsAt.map { $0 > now } ?? true
+                }
+            }.mapValues { ClaudeModelPolicy.project($0, model: family.alias, now: now) }
+                .filter { _, state in
+                    state.isConnected && !state.needsAttention && !state.isBusy
+                        && state.isFresh(at: now) && state.providerRestriction == nil
+                        && state.windows.allSatisfy { !$0.isBlocked }
+                }
+            return AccountSelection.rotating(provider: .claude, accounts: accounts, states: projected,
+                order: rotationOrder[.claude] ?? [], currentID: nil,
+                thresholdPercent: 0, now: now) != nil
+        }
+    }
+
     private func needsSignIn(_ account: ManagedAccount) -> Bool {
         guard let state = states[account.id], !account.isBrowserOnly else { return false }
         return state.requiresSignIn || (!state.isConnected && !state.isBusy)
@@ -2162,6 +2189,7 @@ final class AccountManager: ObservableObject {
         if automaticSelection, systemCredentials != nil, let current,
            !claudeCandidateIsBusy(excluding: current.id), !usageChecksArePaused,
            !anotherClaudeReadingIsUnknown(excluding: current.id, now: now),
+           !claudeHasOtherModelUsage(now: now),
            AccountSelection.rotating(provider: .claude, accounts: accounts, states: selectionStates,
                 order: rotationOrder[.claude] ?? [], currentID: current.id,
                 thresholdPercent: 0, keepCurrent: false, now: now) == nil {
@@ -2214,7 +2242,11 @@ final class AccountManager: ObservableObject {
         } else if ready == nil, !claudeCandidateIsBusy(excluding: current.id) {
             // Name the account that was supposed to be next and what stopped it,
             // rather than a blanket "nothing left" the person cannot act on.
-            if let next, let blocked = blockedReason(next) {
+            if claudeHasOtherModelUsage(now: now) {
+                let model = ClaudeModelPolicy.family(for: rotationClaudeModel)?.rawValue
+                    ?? NSLocalizedString("the selected model", comment: "Health model")
+                health.reason = String(format: NSLocalizedString("No account can currently use %1$@. Other models remain available.", comment: "Health reason"), model)
+            } else if let next, let blocked = blockedReason(next) {
                 health.reason = String(format: NSLocalizedString("%1$@ is next in your order, but %2$@", comment: "Health reason"), label(next), blocked)
             } else {
                 health.reason = NSLocalizedString("No other account has usage left.", comment: "Health reason")

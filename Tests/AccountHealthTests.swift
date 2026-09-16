@@ -194,6 +194,48 @@ final class AccountHealthTests: XCTestCase {
     }
 
     @MainActor
+    func testModelExhaustionDoesNotOfferAnotherSubscription() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("model-attention-\(UUID().uuidString)")
+        try AccountStorage.privateDirectory(root)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let manager = AccountManager(rootURL: root.appendingPathComponent("catalog"),
+            runner: OfficialAccountProcess(), executable: { _ in nil },
+            systemCredentials: ClaudeSystemCredentials(), systemClaudeDirectory: root.appendingPathComponent(".claude"))
+        let first = try manager.add(provider: .claude, label: "Claude 1", emailHint: nil)
+        let second = try manager.add(provider: .claude, label: "Claude 2", emailHint: nil)
+        for account in [first, second] {
+            manager.applyState({ $0.isConnected = true
+                $0.windows = [
+                    LimitWindow(id: "five_hour", label: "5h limit", usedFraction: 0.3),
+                    LimitWindow(id: "seven_day_fable", label: "Fable", usedFraction: 1, modelName: "Fable")]
+                $0.refreshedAt = Date() }, to: account.id)
+        }
+        manager.automaticSelection = true
+        // No observed/requested model is still not proof of global exhaustion.
+        XCTAssertNil(manager.attention)
+        XCTAssertTrue(manager.health.reason?.contains("Other models remain available") == true)
+        try manager.setClaudeModel("fable")
+        XCTAssertNil(manager.attention)
+        XCTAssertNil(manager.nextUsableAccount(for: .claude), "Fable routing remains blocked")
+        XCTAssertTrue(manager.health.reason?.contains("Fable") == true)
+        try manager.setClaudeModel("sonnet")
+        XCTAssertNil(manager.attention)
+        XCTAssertTrue(manager.health.isSwitchReady)
+
+        try manager.setClaudeModel("fable")
+        for account in [first, second] {
+            manager.applyState({ $0.windows[0] = LimitWindow(id: "five_hour", label: "5h limit", usedFraction: 1) }, to: account.id)
+        }
+        XCTAssertEqual(manager.attention?.kind, .queueEmpty, "Shared exhaustion remains global")
+        for account in [first, second] {
+            manager.applyState({ $0.windows[0] = LimitWindow(id: "five_hour", label: "5h limit", usedFraction: 0.3)
+                $0.usageCheckFailedAt = Date() }, to: account.id)
+        }
+        XCTAssertNil(manager.attention, "Failed readings remain unknown, not empty")
+        XCTAssertFalse(manager.health.reason?.contains("Other models remain available") == true)
+    }
+
+    @MainActor
     func testADormantAccountNeverPinsTheBannerRed() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("dormant-\(UUID().uuidString)")
         try AccountStorage.privateDirectory(root)
