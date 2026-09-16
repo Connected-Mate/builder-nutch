@@ -395,3 +395,7 @@
 "Keep a working login" = "Keep a working login";
 
 "A failed usage check or an exhausted shared allowance no longer lets a manual switch replace the current login." = "A failed usage check or an exhausted shared allowance no longer lets a manual switch replace the current login.";
+
+"Model limits in your language" = "Model limits in your language";
+
+"The model limit shown beside an account follows the app's language, including French." = "The model limit shown beside an account follows the app's language, including French.";

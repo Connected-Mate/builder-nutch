@@ -660,3 +660,7 @@
 "Keep a working login" = "Préservez le compte qui fonctionne";
 
 "A failed usage check or an exhausted shared allowance no longer lets a manual switch replace the current login." = "Une vérification échouée ou une limite commune atteinte empêche désormais de remplacer le compte actif par ce compte.";
+
+"Model limits in your language" = "Les limites dans votre langue";
+
+"The model limit shown beside an account follows the app's language, including French." = "La limite du modèle affichée près du compte suit la langue de l’application, y compris le français.";

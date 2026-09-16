@@ -744,7 +744,7 @@ private struct AssistantRow: View {
                         Text(hidePersonalDetails ? "Personal details hidden" : email).font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
                             .lineLimit(1).truncationMode(.middle).help(hidePersonalDetails ? "Personal details hidden" : email)
                     }
-                    Text(LocalizedStringKey(statusDescription)).font(AppTheme.font(size: 11))
+                    statusText.font(AppTheme.font(size: 11))
                         .foregroundStyle(needsReconnect ? AppTheme.ink : AppTheme.muted)
                         .lineLimit(1).help(needsReconnect ? state.message ?? statusDescription : statusDescription)
                 }
@@ -881,6 +881,20 @@ private struct AssistantRow: View {
         }
     }
 
+    private var restrictedModelName: String? {
+        guard state.rateLimitStatus().kind == .modelRestricted else { return nil }
+        return state.windows.first(where: { $0.isModelSpecific && ($0.isBlocked || ($0.usedFraction ?? 0) >= 1) })?.modelName
+            ?? state.providerRestriction?.modelName
+    }
+
+    private var statusText: Text {
+        if !isLoginPending, !state.isBusy, !state.requiresSignIn, state.isConnected,
+           let name = restrictedModelName {
+            return Text("\(name) limit reached")
+        }
+        return Text(LocalizedStringKey(statusDescription))
+    }
+
     private var statusDescription: String {
         if isLoginPending { return "Sign-in in progress" }
         if state.isBusy { return "Checking…" }
@@ -888,8 +902,7 @@ private struct AssistantRow: View {
         if !state.isConnected { return state.message ?? "Connect this account." }
         if account.isBrowserOnly { return "Browser profile ready" }
         let rateLimit = state.rateLimitStatus()
-        if rateLimit.kind == .modelRestricted,
-           let name = state.windows.first(where: { $0.isModelSpecific && ($0.isBlocked || ($0.usedFraction ?? 0) >= 1) })?.modelName ?? state.providerRestriction?.modelName {
+        if let name = restrictedModelName {
             return String(format: NSLocalizedString("%@ limit reached", comment: "Name the restricted model beside its account"), name)
         }
         if rateLimit.kind != .notReported { return rateLimit.title }
@@ -917,7 +930,7 @@ private struct AssistantRow: View {
             if account.isBrowserOnly {
                 Text("Usage stays on \(account.provider.title)’s website.")
             } else if state.windows.isEmpty {
-                Text(LocalizedStringKey(statusDescription))
+                statusText
             } else if account.provider == .codex {
                 ForEach(codexUsageGroups) { group in
                     VStack(alignment: .leading, spacing: 8) {
