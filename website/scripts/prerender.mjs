@@ -21,10 +21,10 @@ try {
   );
   const podiumURL = 'https://connected-mate.github.io/builder-nutch/ai-podium/';
   const podiumHTML = html
-    .replace(/<title>[^<]*<\/title>/, '<title>AI Podium — Your AI. Your next level.</title>')
-    .replace(/content="Builder Nutch — Build more\. Share your AI Podium\."/, 'content="AI Podium — Your AI. Your next level."')
-    .replace(/content="Manage your AI subscriptions[^\"]*"/, 'content="Your daily AI ranking and lifetime token level, from White to Black. Explore Gold, Platinum and more, then share your AI Podium from Builder Nutch for Mac."')
-    .replace(/content="Your token activity and today’s most-used AI[^\"]*"/, 'content="From White to Black, your level grows with your saved tokens. Share your day, week, month or project with AI Podium."')
+    .replace(/<title>[^<]*<\/title>/, '<title>AI Podium — Less AI talk. Show your work.</title>')
+    .replace(/content="Builder Nutch — Build more\. Share your AI Podium\."/, 'content="AI Podium — Less AI talk. Show your work."')
+    .replace(/content="Manage your AI subscriptions[^\"]*"/, 'content="Download Builder Nutch, recover your local Claude Code and Codex history, and share your AI Podium score alongside what you build. Free and open source for Mac."')
+    .replace(/content="Your token activity and today’s most-used AI[^\"]*"/, 'content="Real token history, your most-used AI and a score you can share. Recover your local activity and make your AI usage transparent with AI Podium."')
     .replaceAll('https://connected-mate.github.io/builder-nutch/"', `${podiumURL}"`)
     .replace('<div id="root"></div>', `<div id="root">${renderToString(createElement(AIPodium))}</div>`);
   await mkdir('dist/ai-podium', { recursive: true });

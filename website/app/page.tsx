@@ -232,15 +232,15 @@ export default function Home() {
         <section className="podium-section shell" id="ai-podium" aria-labelledby="podium-title">
           <div className="podium-intro">
             <span className="eyebrow"><span className="podium-index" aria-hidden="true">01—09</span> AI PODIUM</span>
-            <h2 id="podium-title">Your day.<br />Your AI Podium.</h2>
+            <h2 id="podium-title">Less AI talk.<br />Show your work.</h2>
             <p>
-              You built something. Show the AI behind it. Your token totals and
-              most-used assistants, together in one image, ready for X or LinkedIn.
+              Download the app. Recover your recorded Claude Code and Codex history.
+              Share your score alongside what you built. That’s AI Podium.
             </p>
             <ul className="podium-features">
               <li><Check size={17} /> Today, this week, this month — or one project</li>
               <li><Check size={17} /> Today’s top AI, ranked by recorded tokens</li>
-              <li><Check size={17} /> A daily reminder at 17:30 to share your day</li>
+              <li><Check size={17} /> Existing local history counts from the first launch</li>
             </ul>
             <a className="quiet-link" href={asset('ai-podium/')}>
               Discover AI Podium <ArrowUpRight size={16} />
