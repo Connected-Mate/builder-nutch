@@ -184,8 +184,8 @@ struct UsageShareView: View {
     }
 
     private var canExportCertificate: Bool {
-        guard let progress = report.milestones else { return false }
-        return progress.genGen(at: report.generatedAt, calendar: report.calendar ?? .current).reached
+        // Match every export precondition, including portable calendar, date and total checks.
+        (try? UsageGenGenCertificate(report: report)) != nil
     }
 
     private func saveCertificate() {

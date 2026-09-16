@@ -611,3 +611,10 @@
 "Reach Obsidian or spend two calendar months at Graphite to unlock GenGen. Your saved history determines eligibility; unknown dates are never invented." = "Atteignez Obsidian ou restez deux mois calendaires à Graphite pour débloquer GenGen. Votre historique détermine votre progression ; aucune date inconnue n’est inventée.";
 "Share it with your work" = "Partagez-le avec vos réalisations";
 "GenGen appears in your saved levels and AI Podium exports, independently of the period or project you choose." = "GenGen apparaît dans vos niveaux et vos exports AI Podium, quelle que soit la période ou le projet choisi.";
+
+/* GenGen Studio release */
+"Your GenGen, everywhere." = "Votre GenGen, partout.";
+"Your GenGen certificate" = "Votre certificat GenGen";
+"When GenGen is reached, save your certificate from AI Podium. It includes your lifetime total and eligibility, without account or project details." = "Une fois GenGen obtenu, enregistrez votre certificat depuis AI Podium. Il contient votre total cumulé et les conditions atteintes, sans compte ni projet.";
+"Make your profile yours" = "Votre profil, votre signature";
+"Import your certificate in GenGen Studio to create a profile frame, LinkedIn and X banners, or a certificate post. Photos stay on your device." = "Importez votre certificat dans GenGen Studio pour créer une photo de profil, vos bannières LinkedIn et X ou un visuel de certificat. Les photos restent sur votre appareil.";

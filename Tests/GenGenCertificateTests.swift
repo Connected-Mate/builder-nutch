@@ -103,10 +103,25 @@ final class GenGenCertificateTests: XCTestCase {
         XCTAssertThrowsError(try UsageGenGenCertificate(report: fixed, issuedAt: now))
     }
 
+    func testNonGregorianReportCannotUnlockBeforePortableCalendarDate() throws {
+        let graphite = date("2026-07-16T12:00:00Z")
+        let now = date("2026-09-14T12:00:00Z")
+        var value = report(10_000_000_000, reached: graphite, now: now)
+        var hebrew = Calendar(identifier: .hebrew)
+        hebrew.timeZone = TimeZone(secondsFromGMT: 0)!
+        value.calendar = hebrew
+        XCTAssertTrue(value.milestones!.genGen(at: now, calendar: hebrew).reached)
+        XCTAssertThrowsError(try UsageGenGenCertificate(report: value, issuedAt: now))
+        let portableDate = date("2026-09-16T12:00:00Z")
+        var later = report(10_000_000_000, reached: graphite, now: portableDate)
+        later.calendar = hebrew
+        XCTAssertNoThrow(try UsageGenGenCertificate(report: later, issuedAt: portableDate))
+    }
+
     func testSyntheticFixtureWritesAsImportableJSON() throws {
-        let now = date("2026-09-16T12:00:00Z")
+        let now = date("2026-09-15T12:00:00Z")
         let certificate = try UsageGenGenCertificate(report: report(10_000_000_000,
-            reached: date("2026-07-16T12:00:00Z"), now: now), issuedAt: now,
+            reached: date("2026-07-15T12:00:00Z"), now: now), issuedAt: now,
             id: UUID(uuidString: "00000000-0000-4000-8000-000000000002")!)
         // Synthetic contract fixture only; never real saved usage.
         let url = URL(fileURLWithPath: "/tmp/gengen-native-synthetic-certificate.json")

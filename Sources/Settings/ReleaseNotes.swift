@@ -30,6 +30,10 @@ struct ReleaseNote: Equatable {
 /// `testTheCurrentVersionHasANote`.
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
+        ReleaseNote(version: "0.21.0", headline: "Your GenGen, everywhere.", changes: [
+            .init(title: "Your GenGen certificate", detail: "When GenGen is reached, save your certificate from AI Podium. It includes your lifetime total and eligibility, without account or project details."),
+            .init(title: "Make your profile yours", detail: "Import your certificate in GenGen Studio to create a profile frame, LinkedIn and X banners, or a certificate post. Photos stay on your device.")
+        ]),
         ReleaseNote(version: "0.20.0", headline: "Your work. Your history. Your stamp.", changes: [
             .init(title: "Earn the GenGen stamp", detail: "Reach Obsidian or spend two calendar months at Graphite to unlock GenGen. Your saved history determines eligibility; unknown dates are never invented."),
             .init(title: "Share it with your work", detail: "GenGen appears in your saved levels and AI Podium exports, independently of the period or project you choose.")
