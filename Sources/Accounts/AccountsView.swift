@@ -114,6 +114,7 @@ struct AccountsView: View {
         .sheet(item: $connecting) { account in
             AddAssistantFlow(manager: manager, initialAccount: account) { localError = $0 }
                 .preferredColorScheme(.dark)
+                .environment(\.locale, (AppLanguage(rawValue: appLanguage) ?? .system).locale)
         }
         .sheet(isPresented: Binding(
             get: { !preferences.hasChosenUsageDisplay },
@@ -127,6 +128,7 @@ struct AccountsView: View {
         .sheet(item: $personalizing) { account in
             PersonalizeAssistantView(account: account, manager: manager) { localError = $0 }
                 .preferredColorScheme(.dark)
+                .environment(\.locale, (AppLanguage(rawValue: appLanguage) ?? .system).locale)
         }
         .sheet(isPresented: $showingOpenAIRelay) {
             ClaudeOpenAIRelayView(manager: manager, project: $projectURL, hidePersonalDetails: hidePersonalDetails)
@@ -1203,6 +1205,7 @@ private struct AddAssistantFlow: View {
     @State private var localError: String?
     private let startsConnectionOnAppear: Bool
     private var account: ManagedAccount? { manager.accounts.first { $0.id == createdAccountID } }
+    private var isPersonalizing: Bool { account.map { manager.state(for: $0).isConnected } ?? false }
 
     init(manager: AccountManager, initialAccount: ManagedAccount? = nil,
          reportError: @escaping (String) -> Void) {
@@ -1221,7 +1224,8 @@ private struct AddAssistantFlow: View {
                 } else { connectionStep(account, state) }
             } else { providerStep }
         }
-        .frame(width: 560, height: 470).background(AppTheme.surface).foregroundStyle(AppTheme.ink)
+        .frame(width: isPersonalizing ? 480 : 560, height: isPersonalizing ? nil : 420)
+        .background(AppTheme.surface).foregroundStyle(AppTheme.ink)
         .alert("Couldn't continue", isPresented: Binding(
             get: { localError != nil }, set: { if !$0 { localError = nil } }
         )) {
@@ -1355,6 +1359,7 @@ private struct AddAssistantFlow: View {
 
 private struct PersonalizeAssistantView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let account: ManagedAccount
     @ObservedObject var manager: AccountManager
     var completionTitle = "Save"
@@ -1369,51 +1374,73 @@ private struct PersonalizeAssistantView: View {
          reportError: @escaping (String) -> Void) {
         self.account = account; self.manager = manager; self.completionTitle = completionTitle
         self.reportError = reportError
-        let suffix = account.label.dropFirst(account.provider.title.count).trimmingCharacters(in: .whitespaces)
-        _nickname = State(initialValue: account.label == account.provider.title || Int(suffix) != nil ? "" : account.label)
+        _nickname = State(initialValue: AccountNaming.isDefault(account.label, provider: account.provider) ? "" : account.label)
         _selectedEmoji = State(initialValue: account.emoji)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack {
-                    Text("Make it yours").font(AppTheme.font(.title2, weight: .bold)); Spacer()
-                    ProviderGlyphView(glyph: account.provider.glyph, size: 24)
+        VStack(alignment: .leading, spacing: 24) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12).fill(AppTheme.soft)
+                    RoundedRectangle(cornerRadius: 12).strokeBorder(AppTheme.line)
+                    if let selectedEmoji {
+                        Text(selectedEmoji).font(.system(size: 25))
+                            .id(selectedEmoji).transition(.opacity)
+                    } else {
+                        ProviderGlyphView(glyph: account.provider.glyph, size: 25)
+                    }
                 }
-                Text(detail).font(AppTheme.font(.body)).foregroundStyle(AppTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 48, height: 48).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(completionTitle == "Finish" ? "Make it yours" : "Edit account")
+                        .font(AppTheme.font(size: 19, weightValue: 650))
+                    Text("Name and emoji are optional.")
+                        .font(AppTheme.font(size: 12)).foregroundStyle(AppTheme.muted)
+                }
+                Spacer(minLength: 0)
             }
-            .padding(28).background { ZStack { AppTheme.paper; AppDotBackground().opacity(0.5) } }
-            .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.line).frame(height: 1) }
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 8) {
-                    sectionLabel("NICKNAME")
+                    Text("Nickname").font(AppTheme.font(size: 12, weightValue: 550))
                     TextField("Optional — e.g. Work or Personal", text: $nickname)
-                        .textFieldStyle(.roundedBorder).focused($nicknameFocused).font(AppTheme.font(.body))
+                        .textFieldStyle(.plain).focused($nicknameFocused)
+                        .font(AppTheme.font(size: 13)).padding(12)
+                        .background(AppTheme.soft, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(nicknameFocused ? AppTheme.ink.opacity(0.6) : AppTheme.line)
+                        }
+                        .accessibilityLabel("Nickname")
                 }
                 VStack(alignment: .leading, spacing: 10) {
-                    sectionLabel("EMOJI")
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 44, maximum: 52), spacing: 8)], spacing: 8) {
-                        emojiButton(nil, "None")
-                        ForEach(emojis, id: \.self) { emojiButton($0, $0) }
+                    Text("Emoji").font(AppTheme.font(size: 12, weightValue: 550))
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
+                        emojiButton(nil)
+                        ForEach(emojis, id: \.self) { emojiButton($0) }
                     }
                 }
             }
-            .padding(.horizontal, 28).padding(.top, 22)
-            Spacer()
-            HStack {
-                Text("Sign-in and account identity stay unchanged.")
-                    .font(AppTheme.font(.callout)).foregroundStyle(AppTheme.muted)
-                Spacer()
-                Button(completionTitle == "Finish" ? "Skip" : "Cancel") { dismiss() }
-                    .buttonStyle(AppButtonStyle())
-                Button(completionTitle, action: save).buttonStyle(AppButtonStyle(primary: true))
-                    .keyboardShortcut(.defaultAction)
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 8) {
+                    Text("Sign-in and account identity stay unchanged.")
+                        .font(AppTheme.font(size: 11)).foregroundStyle(AppTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                }
+                HStack(spacing: 8) {
+                    Spacer()
+                    Button(completionTitle == "Finish" ? "Skip" : "Cancel") { dismiss() }
+                        .buttonStyle(AppButtonStyle(compact: true)).keyboardShortcut(.cancelAction)
+                    Button(completionTitle, action: save)
+                        .buttonStyle(AppButtonStyle(primary: true, compact: true))
+                        .keyboardShortcut(.defaultAction)
+                }
             }
-            .padding(28)
         }
-        .frame(width: 620, height: 390).background(AppTheme.surface).foregroundStyle(AppTheme.ink)
+        .padding(24).frame(width: 480)
+        .background(AppTheme.surface).foregroundStyle(AppTheme.ink)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: selectedEmoji)
         .onAppear { nicknameFocused = true }
         .alert("Couldn't save", isPresented: Binding(
             get: { localError != nil }, set: { if !$0 { localError = nil } }
@@ -1422,20 +1449,28 @@ private struct PersonalizeAssistantView: View {
         } message: { Text(localError ?? "") }
     }
 
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text).font(AppTheme.font(size: 11, weight: .bold)).tracking(1.1).foregroundStyle(AppTheme.muted)
-    }
-
-    private func emojiButton(_ emoji: String?, _ title: String) -> some View {
+    private func emojiButton(_ emoji: String?) -> some View {
         let active = selectedEmoji == emoji
         return Button { selectedEmoji = emoji } label: {
-            Text(title).font(emoji == nil ? AppTheme.font(.caption, weight: .semibold) : .system(size: 20))
-                .foregroundStyle(active ? AppTheme.surface : AppTheme.ink).frame(minWidth: 38, minHeight: 34)
-                .background(active ? AppTheme.ink : AppTheme.soft, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(active ? AppTheme.ink : AppTheme.line))
+            Group {
+                if let emoji {
+                    Text(emoji).font(.system(size: 20))
+                } else {
+                    ProviderGlyphView(glyph: account.provider.glyph, size: 20)
+                }
+            }
+            .frame(maxWidth: .infinity).frame(height: 40)
+            .background(active ? AppTheme.selected : AppTheme.soft, in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(active ? AppTheme.ink.opacity(0.7) : AppTheme.line)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
-        .buttonStyle(.plain).accessibilityLabel(emoji == nil ? "No emoji" : "Use \(emoji!)")
+        .buttonStyle(.plain)
+        .accessibilityLabel(emoji.map { Text("Use \($0)") } ?? Text("Use provider icon"))
         .accessibilityAddTraits(active ? .isSelected : [])
+        .help(emoji == nil ? "Use provider icon" : emoji!)
     }
 
     private func save() {
@@ -1444,14 +1479,5 @@ private struct PersonalizeAssistantView: View {
             try manager.personalize(account, label: trimmed.isEmpty ? account.label : trimmed, emoji: selectedEmoji)
             dismiss()
         } catch { localError = error.localizedDescription }
-    }
-
-    private var detail: String {
-        let connected = manager.state(for: account).isConnected
-        let prefix: String
-        if account.isBrowserOnly && connected { prefix = "Browser profile ready for \(account.provider.title)." }
-        else if connected { prefix = "Connected to \(account.provider.title)." }
-        else { prefix = "Customize this \(account.provider.title) account." }
-        return prefix + " A nickname and emoji are optional and only help you recognise it."
     }
 }

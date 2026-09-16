@@ -664,3 +664,13 @@
 "Model limits in your language" = "Les limites dans votre langue";
 
 "The model limit shown beside an account follows the app's language, including French." = "La limite du modèle affichée près du compte suit la langue de l’application, y compris le français.";
+
+"Edit account" = "Modifier le compte";
+
+"Name and emoji are optional." = "Le nom et l’emoji sont facultatifs.";
+
+"Nickname" = "Nom du compte";
+
+"Emoji" = "Emoji";
+
+"Use provider icon" = "Utiliser le logo de l’assistant";

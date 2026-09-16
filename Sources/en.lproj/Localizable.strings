@@ -399,3 +399,13 @@
 "Model limits in your language" = "Model limits in your language";
 
 "The model limit shown beside an account follows the app's language, including French." = "The model limit shown beside an account follows the app's language, including French.";
+
+"Edit account" = "Edit account";
+
+"Name and emoji are optional." = "Name and emoji are optional.";
+
+"Nickname" = "Nickname";
+
+"Emoji" = "Emoji";
+
+"Use provider icon" = "Use provider icon";
