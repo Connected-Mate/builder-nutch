@@ -69,23 +69,6 @@
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
-.gengen-seal {
-  margin: 0;
-  aspect-ratio: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-md);
-  border-radius: 50%;
-  border: 1px solid var(--podium-stage-metal);
-  color: var(--podium-stage-ink);
-  background: linear-gradient(135deg, var(--podium-stage-metal), var(--podium-stage-high) 42%, var(--podium-stage) 72%);
-  box-shadow: inset 0 1px 0 var(--podium-stage-silver), inset 0 0 0 7px var(--podium-stage-high), inset 0 0 0 8px var(--podium-stage-metal), 0 16px 32px #07080830;
-  transform: rotate(-8deg);
-}
-.gengen-seal strong { font-size: 2.5rem; font-weight: 650; letter-spacing: -0.05em; }
-.gengen-seal span { font-size: 0.625rem; letter-spacing: 0.14em; font-weight: 600; }
 .podium-gengen h2 { margin-block: var(--space-sm) var(--space-md); font-size: clamp(1.75rem, 3.3vw, 2.75rem); letter-spacing: -0.04em; }
 .podium-gengen p:not(.eyebrow) { font-size: 1rem; line-height: 1.65; max-width: 65ch; }
 .podium-gengen .gengen-detail { margin-top: var(--space-md); color: var(--muted); font-size: 0.875rem; }
@@ -276,25 +259,34 @@
 .podium-faq summary { cursor: pointer; padding-block: var(--space-lg); font-weight: 550; font-size: 1rem; }
 .podium-faq details p { max-width: 75ch; margin-bottom: var(--space-lg); color: var(--muted); font-size: 1rem; }
 .podium-download { padding-block: var(--space-2xl) var(--space-section); text-align: center; }
-.podium-download .button { margin-block: var(--space-xl) var(--space-md); }
 .podium-download p { font-size: 0.8125rem; color: var(--muted); }
+.podium-download h2 { margin-top: var(--space-md); }
+.podium-download .podium-invite-copy { max-width: 46ch; margin: var(--space-lg) auto 0; font-size: 1rem; }
+.podium-invite-actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: var(--space-lg); margin-top: var(--space-xl); }
+.podium-invite-actions .quiet-link { min-height: 44px; }
+.podium-invite-status { display: block; margin-top: var(--space-md); font-size: 0.8125rem; color: var(--muted); }
+.podium-invitation { display: block; width: 100%; max-width: 56ch; min-height: 112px; margin: var(--space-md) auto 0; padding: var(--space-md); resize: vertical; font: inherit; line-height: 1.5; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.podium-invitation:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 @media (max-width: 1100px) {
   .tier-picker {
     grid-template-columns: repeat(9, minmax(132px, 1fr));
     gap: 12px;
     overflow-x: auto;
-    padding: 5px 4px 24px;
-    margin-inline: -4px;
+    /* Keep lifted cards, selection rings and keyboard focus inside the scrollport. */
+    padding: var(--space-md) var(--space-sm) var(--space-lg);
+    margin: calc(-1 * var(--space-md)) calc(-1 * var(--space-sm)) calc(-1 * var(--space-lg));
     scroll-snap-type: x proximity;
-    scrollbar-color: var(--podium-stage-metal) var(--track);
+    scroll-padding-inline: var(--space-sm);
+    scrollbar-width: none;
   }
-  .tier-choice { min-height: 104px; padding: var(--space-md); scroll-snap-align: start; }
+  .tier-picker::-webkit-scrollbar { display: none; }
+  .tier-choice { min-height: 104px; padding: var(--space-md); scroll-snap-align: start; scroll-margin-inline: var(--space-sm); }
   .tier-choice strong { font-size: 1rem; }
 }
 @media (max-width: 700px) {
   .podium-history { grid-template-columns: 1fr; gap: var(--space-lg); }
   .podium-gengen { grid-template-columns: 1fr; gap: var(--space-xl); margin-top: var(--space-2xl); }
-  .gengen-seal { width: 180px; justify-self: center; }
+  .podium-gengen .gengen-medallion { justify-self: center; }
   .podium-heading-row { grid-template-columns: 1fr; gap: var(--space-lg); padding-block: var(--space-lg) var(--space-xl); }
   .podium-hero-copy { max-width: 100%; }
   .podium-section-heading { display: block; }

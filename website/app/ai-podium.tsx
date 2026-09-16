@@ -1,26 +1,46 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowDown, ArrowLeft, ArrowUpRight, Check, Download } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUpRight, Check, Copy, Download } from 'lucide-react';
 import { podiumTiers } from './podium-tiers';
+import GenGenSeal from './gengen-seal';
 
 const asset = (path: string) => `${import.meta.env.BASE_URL}${path}`;
 const download = 'https://github.com/Connected-Mate/builder-nutch/releases/latest';
+const invitation = 'You build with AI. What does your AI Podium look like? Share your score alongside what you’ve built: https://connected-mate.github.io/builder-nutch/ai-podium/';
 
 export default function AIPodium() {
   const [selected, setSelected] = useState(6);
+  const [invitationStatus, setInvitationStatus] = useState<'idle' | 'copied' | 'manual'>('idle');
   const pickerRef = useRef<HTMLFieldSetElement>(null);
   const tier = podiumTiers[selected];
   const next = podiumTiers[selected + 1];
   const tierStyle = { '--tier-surface': tier.color, '--tier-ink': tier.ink } as CSSProperties;
 
+  async function copyInvitation() {
+    try {
+      await navigator.clipboard.writeText(invitation);
+      setInvitationStatus('copied');
+    } catch {
+      setInvitationStatus('manual');
+    }
+  }
+
   useEffect(() => {
     const picker = pickerRef.current;
-    const choice = picker?.querySelector<HTMLButtonElement>('[aria-pressed="true"]');
-    if (!picker || !choice) return;
-    const rail = picker.getBoundingClientRect(), item = choice.getBoundingClientRect();
-    if (item.left < rail.left || item.right > rail.right) {
-      // Scroll the level strip only; never move the page away from the artwork.
-      picker.scrollLeft += item.left - rail.left - (rail.width - item.width) / 2;
-    }
+    if (!picker) return;
+    const keepSelectionVisible = () => {
+      const choice = picker.querySelector<HTMLButtonElement>('[aria-pressed="true"]');
+      if (!choice) return;
+      const rail = picker.getBoundingClientRect(), item = choice.getBoundingClientRect();
+      const gutter = parseFloat(getComputedStyle(picker).scrollPaddingLeft) || 0;
+      if (item.left < rail.left + gutter || item.right > rail.right - gutter) {
+        // Scroll only the level strip, including when its available width changes.
+        picker.scrollLeft += item.left - rail.left - (rail.width - item.width) / 2;
+      }
+    };
+    keepSelectionVisible();
+    const observer = new ResizeObserver(keepSelectionVisible);
+    observer.observe(picker);
+    return () => observer.disconnect();
   }, [selected]);
 
   return (
@@ -103,9 +123,7 @@ export default function AIPodium() {
           </figure>
         </section>
         <section className="podium-gengen shell" aria-labelledby="gengen-title">
-          <figure className="gengen-seal" aria-label="GenGen stamp example">
-            <span>AI PODIUM</span><strong>GenGen</strong><span>RECORDED ACTIVITY</span>
-          </figure>
+          <GenGenSeal />
           <div>
             <p className="eyebrow">THE NEXT STAMP</p>
             <h2 id="gengen-title">Keep building. Earn GenGen.</h2>
@@ -132,10 +150,21 @@ export default function AIPodium() {
           <details><summary>Which tokens count?</summary><p>Recorded input, cache and output from Claude Code and Codex. Reasoning is already part of output and is not counted twice. Missing readings are never invented; partial totals stay marked.</p></details>
           <details><summary>What appears in the image?</summary><p>Token totals, dates, your level and today’s AI ranking. Accounts and conversations stay private. A project name appears only when you choose a project and personal details are visible. Posting is always your choice.</p></details>
         </section>
-        <section className="podium-download shell">
-          <h2>Build something.<br />Show the AI behind it.</h2>
-          <a className="button" href={download}><Download size={18} /> Get Builder Nutch for Mac</a>
-          <p>macOS 26+ · Apple Silicon &amp; Intel · Free &amp; open source</p>
+        <section className="podium-download shell" aria-labelledby="podium-invite-title">
+          <p className="eyebrow">LET THE ACTIVITY SPEAK</p>
+          <h2 id="podium-invite-title">Big AI claims?<br />Ask for their score.</h2>
+          <p className="podium-invite-copy">Have doubts about someone’s AI claims? Ask them to share their AI Podium alongside what they’ve built.</p>
+          <div className="podium-invite-actions">
+            <button type="button" className="button" onClick={copyInvitation}>
+              {invitationStatus === 'copied' ? <Check size={18} /> : <Copy size={18} />}
+              {invitationStatus === 'copied' ? 'Invitation copied' : 'Ask for their score'}
+            </button>
+            <a className="quiet-link" href={download}>Get my AI Podium <ArrowUpRight size={16} /></a>
+          </div>
+          <output className="podium-invite-status">
+            {invitationStatus === 'copied' ? 'Ready to paste into your conversation.' : invitationStatus === 'manual' ? 'Copy the invitation below and send it yourself.' : 'Copy an invitation. You choose who to send it to.'}
+          </output>
+          {invitationStatus === 'manual' && <textarea className="podium-invitation" aria-label="Invitation to share an AI Podium" readOnly value={invitation} onFocus={(event) => event.currentTarget.select()} />}
         </section>
       </main>
       <footer className="shell">
