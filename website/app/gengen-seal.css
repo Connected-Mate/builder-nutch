@@ -7,6 +7,7 @@
   max-width: 100%;
   aspect-ratio: 1;
   margin: 0;
+  transform: rotate(-8deg);
   padding: var(--space-sm);
   border: 1px solid var(--podium-stage-metal);
   border-radius: 50%;

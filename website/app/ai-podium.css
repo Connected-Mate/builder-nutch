@@ -72,6 +72,7 @@
 .podium-gengen h2 { margin-block: var(--space-sm) var(--space-md); font-size: clamp(1.75rem, 3.3vw, 2.75rem); letter-spacing: -0.04em; }
 .podium-gengen p:not(.eyebrow) { font-size: 1rem; line-height: 1.65; max-width: 65ch; }
 .podium-gengen .gengen-detail { margin-top: var(--space-md); color: var(--muted); font-size: 0.875rem; }
+.gengen-page-link { margin-top: var(--space-lg); min-height: 44px; }
 .podium-levels { padding-top: var(--space-lg); }
 .podium-section-heading {
   display: flex;

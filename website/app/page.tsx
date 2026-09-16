@@ -438,6 +438,9 @@ export default function Home() {
           </p>
         </div>
         <div className="footer-links">
+          <a href={asset('gengen/')}>
+            GenGen <ArrowUpRight size={14} />
+          </a>
           <a
             href="https://x.com/AlexCormeraie"
             target="_blank"

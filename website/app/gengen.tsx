@@ -45,26 +45,27 @@ export default function GenGen() {
               <div className="gengen-paper-bottom">
                 <div className="gengen-paper-record">
                   <span className="gengen-paper-kicker">WHAT THE LABEL RECORDS</span>
-                  <p>AI activity, measured from<br />retained local history.</p>
+                  <p>AI activity, measured from <br />retained local history.</p>
                   <span className="gengen-paper-principle">The score starts the conversation.<br />The work gives it meaning.</span>
                 </div>
                 <GenGenSeal />
               </div>
             </div>
-            <figcaption>Illustrative label, not an issued certificate. Your own GenGen stamp appears in your AI Podium when your saved history meets either eligibility path.</figcaption>
+            <figcaption>Illustration of the GenGen label. Your earned stamp appears in your AI Podium when your saved history meets either eligibility path.</figcaption>
           </figure>
         </section>
 
         <section className="gengen-editorial shell" id="meaning" aria-labelledby="gengen-meaning-title">
           <div className="gengen-section-intro">
             <p className="eyebrow">THE GENERATIVE GENERATION</p>
-            <h2 id="gengen-meaning-title">Less commentary.<br />More contact.</h2>
+            <h2 id="gengen-meaning-title">Everyone has an opinion.<br />Show your practice.</h2>
           </div>
           <div className="gengen-prose">
             <p className="gengen-lead">The models change. The tools change. What you can build changes. Stay close to the work.</p>
-            <p>GenGen means <strong>generative generation</strong>: people learning by using AI, trying ideas, finding the limits and making something real. It is a way of working, not an age group or a job title.</p>
+            <p>GenGen means <strong>generative generation</strong>: people with their hands in it. Testing, getting things wrong, learning and shipping. We created this label to put that practice in view, beyond the posts and promises.</p>
+            <p>If you teach AI, advise on it or build with it, show your own practice. Yesterday’s experience needs today’s experiments. Keep trying the tools, questioning the results and showing what you learn.</p>
             <p>Big claims deserve something concrete. Ask for their score <em>and</em> their work. Share recent projects with dates, decisions and results. Recorded usage shows activity; the work shows what came of it.</p>
-            <p className="gengen-context">Tokens measure consumption. They cannot determine competence, productivity or quality. GenGen keeps that distinction clear: an activity label, with the work beside it.</p>
+            <p className="gengen-context">GenGen recognises recorded activity. Volume alone does not measure skill or the quality of your work.</p>
           </div>
         </section>
 
@@ -107,7 +108,7 @@ export default function GenGen() {
           <h2 id="gengen-scope-title">Local history. Visible limits.</h2>
           <div className="gengen-scope-copy">
             <p>The score counts recorded input, cache and output tokens from Claude Code and Codex. Reasoning is included in output, never added twice. Missing readings are not invented; partial totals remain marked. Deleted records that were never captured cannot be recovered.</p>
-            <div><p>GenGen is generated from history saved on your Mac. It is not a server-signed credential or an independent assessment of your work. The counting is open to inspection; share the context with the label.</p><a className="quiet-link" href="https://github.com/Connected-Mate/builder-nutch/tree/main/Sources/Insights">Read how measurement works <ArrowUpRight size={16} /></a></div>
+            <div><p>Your stamp comes from history saved on your Mac. It describes recorded activity, rather than an independently audited qualification. Share the dates, the score and the work together. The counting is open source.</p><a className="quiet-link" href="https://github.com/Connected-Mate/builder-nutch/tree/main/Sources/Insights">Read how measurement works <ArrowUpRight size={16} /></a></div>
           </div>
         </section>
 

@@ -53,6 +53,7 @@ export default function AIPodium() {
         <nav aria-label="Main navigation">
           <a href="#history">Your history</a>
           <a href="#levels">Your score</a>
+          <a href={asset('gengen/')}>GenGen</a>
           <a href="#sharing">How to share</a>
           <a href={download} className="button button-small">Get the Mac app <ArrowUpRight size={15} /></a>
         </nav>
@@ -129,6 +130,7 @@ export default function AIPodium() {
             <h2 id="gengen-title">Keep building. Earn GenGen.</h2>
             <p>Go beyond Graphite to Obsidian, at 100B saved tokens. Or keep Graphite for two calendar months from its recorded unlock date. Either path unlocks GenGen.</p>
             <p className="gengen-detail">Your saved history determines the stamp. If the Graphite date is unknown, we don’t invent one. Changing the period or project you share does not reset your progress.</p>
+            <a className="quiet-link gengen-page-link" href={asset('gengen/')}>Meet the generative generation <ArrowUpRight size={16} /></a>
           </div>
         </section>
         <section className="podium-sharing shell" id="sharing" aria-labelledby="sharing-title">

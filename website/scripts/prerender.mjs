@@ -11,6 +11,7 @@ const server = await createServer({
 try {
   const { default: Home } = await server.ssrLoadModule('/app/page.tsx');
   const { default: AIPodium } = await server.ssrLoadModule('/app/ai-podium.tsx');
+  const { default: GenGen } = await server.ssrLoadModule('/app/gengen.tsx');
   const html = await readFile('dist/index.html', 'utf8');
   await writeFile(
     'dist/index.html',
@@ -29,7 +30,17 @@ try {
     .replace('<div id="root"></div>', `<div id="root">${renderToString(createElement(AIPodium))}</div>`);
   await mkdir('dist/ai-podium', { recursive: true });
   await writeFile('dist/ai-podium/index.html', podiumHTML);
-  console.log('Pre-rendered the home and AI Podium pages for static hosting.');
+  const genGenURL = 'https://connected-mate.github.io/builder-nutch/gengen/';
+  const genGenHTML = html
+    .replace(/<title>[^<]*<\/title>/, '<title>GenGen — The generative generation.</title>')
+    .replace(/content="Builder Nutch — Build more\. Share your AI Podium\."/, 'content="GenGen — The generative generation."')
+    .replace(/content="Manage your AI subscriptions[^\"]*"/, 'content="Meet GenGen: the AI Podium label for recorded, hands-on AI activity. Discover the generative generation, how the stamp is earned and what it represents."')
+    .replace(/content="Your token activity and today’s most-used AI[^\"]*"/, 'content="Less talk. More hands-on work. GenGen turns saved AI usage into a label you can share alongside what you build."')
+    .replaceAll('https://connected-mate.github.io/builder-nutch/"', `${genGenURL}"`)
+    .replace('<div id="root"></div>', `<div id="root">${renderToString(createElement(GenGen))}</div>`);
+  await mkdir('dist/gengen', { recursive: true });
+  await writeFile('dist/gengen/index.html', genGenHTML);
+  console.log('Pre-rendered the home, AI Podium and GenGen pages for static hosting.');
 } finally {
   await server.close();
 }
