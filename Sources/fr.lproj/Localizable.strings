@@ -588,3 +588,9 @@
 "Expired sign-ins stand out in red in the account list, with a clear Reconnect action." = "Les connexions expirées sont signalées en rouge dans la liste, avec un bouton Reconnecter.";
 "A compact header" = "Un en-tête compact";
 "Smaller page headers leave more room for accounts and activity." = "Les en-têtes réduits laissent plus de place aux comptes et à votre activité.";
+
+/* Sceau GenGen d’AI Podium */
+"GenGen stamp" = "Sceau GenGen";
+"GenGen stamp reached." = "Sceau GenGen obtenu.";
+"Obsidian or two months at Graphite" = "Obsidienne ou deux mois au niveau Graphite";
+"Achievement date unavailable" = "Date d’obtention indisponible";

@@ -40,6 +40,8 @@ struct UsageShareSnapshot: Equatable {
     let isProject: Bool
     /// Frozen lifetime level, never recomputed from a period or project scope.
     let podiumTier: UsagePodiumTier?
+    /// Frozen from lifetime history at the report's own time and calendar.
+    let genGen: UsageGenGenAchievement
 
     var isPartial: Bool {
         availability != .complete || todayAvailability != .complete
@@ -138,6 +140,7 @@ struct UsageShareSnapshot: Equatable {
 
         self.generatedAt = report.generatedAt
         self.podiumTier = report.milestones?.podiumTier
+        self.genGen = report.milestones?.genGen(at: report.generatedAt, calendar: calendar) ?? .locked
         self.weekStart = weekStart
         self.monthStart = monthStart
         self.today = today

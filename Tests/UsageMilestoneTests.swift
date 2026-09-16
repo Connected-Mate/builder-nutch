@@ -12,6 +12,13 @@ final class UsageMilestoneTests: XCTestCase {
         XCTAssertEqual(UsagePodiumTier.localized("Next: %@", locale: english), "Next: %@")
     }
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
+    private var utcCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }
+
+    private func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
 
     func testPodiumTiersUseExactExistingLifetimeBoundaries() {
         XCTAssertNil(UsageMilestoneProgress(sessions: [], now: now).podiumTier)
@@ -96,6 +103,68 @@ final class UsageMilestoneTests: XCTestCase {
                                                          session("dated", input: 100_000, minute: 20_000_000)], now: now)
         XCTAssertEqual(progress.level, 2)
         XCTAssertTrue(progress.stamps.allSatisfy { $0.reachedAt == nil })
+    }
+
+    func testGenGenUnlocksOnTwoCalendarMonthBoundary() {
+        let reached = date("2026-01-31T12:00:00Z")
+        let progress = UsageMilestoneProgress(
+            sessions: [session("graphite", input: UsagePodiumTier.graphite.threshold,
+                               minute: Int(reached.timeIntervalSince1970 / 60))],
+            now: date("2026-03-31T12:00:00Z"), calendar: utcCalendar)
+
+        XCTAssertFalse(progress.genGen(at: date("2026-03-31T11:59:00Z"), calendar: utcCalendar).reached)
+        XCTAssertEqual(progress.genGen.reachedAt, date("2026-03-31T12:00:00Z"))
+        XCTAssertTrue(progress.genGen.reached)
+    }
+
+    func testGenGenCalendarMonthsHonorLeapDay() {
+        let reached = date("2023-12-29T09:30:00Z")
+        let progress = UsageMilestoneProgress(
+            sessions: [session("graphite", input: UsagePodiumTier.graphite.threshold,
+                               minute: Int(reached.timeIntervalSince1970 / 60))],
+            now: date("2024-02-29T09:30:00Z"), calendar: utcCalendar)
+
+        XCTAssertFalse(progress.genGen(at: date("2024-02-29T09:29:00Z"), calendar: utcCalendar).reached)
+        XCTAssertEqual(progress.genGen.reachedAt, date("2024-02-29T09:30:00Z"))
+    }
+
+    func testGenGenDoesNotStartTimerFromUnknownGraphiteDate() {
+        let progress = UsageMilestoneProgress(
+            sessions: [session("legacy-graphite", input: UsagePodiumTier.graphite.threshold)],
+            now: date("2027-01-01T00:00:00Z"), calendar: utcCalendar)
+
+        XCTAssertFalse(progress.genGen.reached)
+        XCTAssertNil(progress.genGen.reachedAt)
+    }
+
+    func testGenGenUnlocksAtObsidianAndStaysUnlockedAboveItWithoutInventingDate() {
+        for tier in [UsagePodiumTier.obsidian, .black] {
+            let progress = UsageMilestoneProgress(
+                sessions: [session("legacy-\(tier.rawValue)", input: tier.threshold)],
+                now: now, calendar: utcCalendar)
+            XCTAssertTrue(progress.genGen.reached)
+            XCTAssertNil(progress.genGen.reachedAt)
+        }
+    }
+
+    func testGenGenRemainsLockedWithoutRecordedConsumption() {
+        let progress = UsageMilestoneProgress(sessions: [], now: now, calendar: utcCalendar)
+        XCTAssertFalse(progress.genGen.reached)
+        XCTAssertNil(progress.genGen.reachedAt)
+    }
+
+    func testPreGenGenCodableProgressStillDecodesTruthfully() throws {
+        let current = UsageMilestoneProgress(
+            sessions: [session("legacy-obsidian", input: UsagePodiumTier.obsidian.threshold)],
+            now: now, calendar: utcCalendar)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(current)) as? [String: Any])
+        object.removeValue(forKey: "evaluatedAt")
+        object.removeValue(forKey: "evaluationCalendar")
+        let decoded = try JSONDecoder().decode(
+            UsageMilestoneProgress.self, from: JSONSerialization.data(withJSONObject: object))
+
+        XCTAssertTrue(decoded.genGen.reached)
+        XCTAssertNil(decoded.genGen.reachedAt)
     }
 
     func testInconsistentOrFutureTimingNeverInventsCrossingDate() {

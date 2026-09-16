@@ -28,6 +28,9 @@ struct UsageShareCard: View {
                         .background(UsagePodiumFinish(tier: tier, radius: 100))
                         .shadow(color: .black.opacity(0.5), radius: 4, y: 3)
                 }
+                if snapshot.genGen.reached {
+                    UsageGenGenBadge(prominent: true).padding(.leading, 4)
+                }
                 Spacer()
                 Text(date(snapshot.today, template: "d MMM yyyy"))
                     .font(AppTheme.font(size: 17, weightValue: 450))

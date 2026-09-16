@@ -28,6 +28,11 @@ struct UsageMilestonesView: View {
                     Rectangle().fill(AppTheme.line).frame(height: 1).accessibilityHidden(true)
                     ForEach(progress.stamps) { stamp in
                         stampRow(stamp)
+                        if stamp.level == UsagePodiumTier.graphite.rawValue {
+                            Rectangle().fill(AppTheme.line).frame(height: 1)
+                                .accessibilityHidden(true)
+                            genGenRow
+                        }
                         if stamp.id != progress.stamps.last?.id {
                             Rectangle().fill(AppTheme.line).frame(height: 1)
                                 .accessibilityHidden(true)
@@ -44,6 +49,7 @@ struct UsageMilestonesView: View {
                     .font(AppTheme.font(size: 12, weightValue: 550))
                 if let tier = progress.podiumTier {
                     UsagePodiumBadge(tier: tier)
+                    if progress.genGen.reached { UsageGenGenBadge() }
                 } else {
                     Text("No recorded data").foregroundStyle(AppTheme.muted)
                 }
@@ -100,6 +106,44 @@ struct UsageMilestonesView: View {
         }
         .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
+    }
+
+    private var genGenRow: some View {
+        HStack(spacing: 12) {
+            Group {
+                if progress.genGen.reached {
+                    UsageGenGenBadge()
+                } else {
+                    Text(verbatim: "GenGen")
+                        .font(AppTheme.font(size: 11, weightValue: 650))
+                        .foregroundStyle(AppTheme.muted)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .overlay(Capsule().strokeBorder(AppTheme.line, lineWidth: 1))
+                }
+            }
+            .frame(width: 110, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Obsidian or two months at Graphite")
+                    .foregroundStyle(AppTheme.muted)
+                if let date = progress.genGen.reachedAt {
+                    Text(String(format: UsagePodiumTier.localized("Reached on %@", locale: locale),
+                                date.formatted(.dateTime.locale(locale).day().month(.abbreviated).year())))
+                        .foregroundStyle(AppTheme.muted)
+                } else if progress.genGen.reached {
+                    Text("Achievement date unavailable")
+                        .foregroundStyle(AppTheme.muted)
+                }
+            }
+            Spacer(minLength: 8)
+            Text(genGenStatus)
+                .foregroundStyle(AppTheme.muted)
+        }
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var genGenStatus: LocalizedStringKey {
+        progress.genGen.reached ? "Reached" : "Locked"
     }
 
     private func stampStatus(_ stamp: UsageMilestoneStamp) -> LocalizedStringKey {

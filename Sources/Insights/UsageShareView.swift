@@ -148,10 +148,13 @@ struct UsageShareView: View {
             " " + String(format: UsagePodiumTier.localized("Lifetime level: %d · %@", locale: locale),
                          tier.rawValue, tier.name(locale: locale))
         } ?? ""
+        let genGenSummary = snapshot.genGen.reached
+            ? " " + UsagePodiumTier.localized("GenGen stamp reached.", locale: locale) : ""
         return String(format: NSLocalizedString("%@ · %@: %@ tokens. Recorded %@.", comment: "Accessible scoped token export"),
                       scope, NSLocalizedString(periodKey, comment: "Share period"), count, formatter.string(from: snapshot.generatedAt))
             + (ranking.isEmpty ? "" : " " + NSLocalizedString("Today’s AI podium", comment: "Daily provider ranking") + ": " + ranking)
             + tierSummary
+            + genGenSummary
     }
 
     private func copy() {

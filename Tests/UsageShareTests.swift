@@ -61,6 +61,47 @@ final class UsageShareSnapshotTests: XCTestCase {
         XCTAssertNil(UsageShareSnapshot(report: value).podiumTier, "Never infer lifetime level from selected usage")
         value.milestones = UsageMilestoneProgress(sessions: [], now: now)
         XCTAssertNil(UsageShareSnapshot(report: value).podiumTier, "No earned badge without recorded consumption")
+        XCTAssertFalse(UsageShareSnapshot(report: value).genGen.reached)
+    }
+
+    func testGenGenIsFrozenFromLifetimeHistoryAcrossExportScopes() {
+        let now = date("2026-09-15T10:00:00Z")
+        let reached = date("2026-07-15T10:00:00Z")
+        var value = report(now: now, slices: [slice("2026-09-15", input: 1)])
+        value.calendar = calendar
+        var lifetime = UsageSessionDigest(sessionID: "private-lifetime")
+        lifetime.tokens = UsageTokenTotals(input: UsagePodiumTier.graphite.threshold)
+        lifetime.activityMinutes = [
+            String(Int(reached.timeIntervalSince1970 / 60)):
+                UsageTimeBucket(tokens: lifetime.tokens, messages: 1)
+        ]
+        value.milestones = UsageMilestoneProgress(sessions: [lifetime], now: now, calendar: calendar)
+
+        for period in UsageSharePeriod.allCases {
+            for path: String? in [nil, "/private/missing-project"] {
+                let snapshot = UsageShareSnapshot(report: value, period: period, projectPath: path)
+                XCTAssertTrue(snapshot.genGen.reached)
+                XCTAssertEqual(snapshot.genGen.reachedAt, now)
+            }
+        }
+    }
+
+    func testExportGenGenUsesReportTimeAndCalendarInsteadOfCurrentClock() {
+        let generatedAt = date("2026-03-31T21:30:00Z")
+        let reached = date("2026-01-31T22:30:00Z")
+        var value = report(now: generatedAt, slices: [])
+        value.calendar = calendar
+        var lifetime = UsageSessionDigest(sessionID: "calendar-boundary")
+        lifetime.tokens = UsageTokenTotals(input: UsagePodiumTier.graphite.threshold)
+        lifetime.activityMinutes = [String(Int(reached.timeIntervalSince1970 / 60)):
+            UsageTimeBucket(tokens: lifetime.tokens, messages: 1)]
+        var changedCalendar = calendar
+        changedCalendar.timeZone = TimeZone(identifier: "UTC")!
+        value.milestones = UsageMilestoneProgress(sessions: [lifetime], now: generatedAt, calendar: changedCalendar)
+
+        XCTAssertFalse(value.milestones!.genGen.reached, "The UTC calendar reaches the boundary one hour later")
+        XCTAssertEqual(UsageShareSnapshot(report: value).genGen.reachedAt, generatedAt,
+                       "Export uses the report's Paris calendar and captured time")
     }
 
     func testMondayAndLocalMidnightUseReportTimeNotCurrentClock() {
@@ -201,6 +242,7 @@ final class UsageShareExportTests: XCTestCase {
                 report.milestones = UsageMilestoneProgress(sessions: [lifetime], now: report.generatedAt)
                 let snapshot = UsageShareSnapshot(report: report, period: .day)
                 XCTAssertEqual(snapshot.podiumTier, tier)
+                XCTAssertEqual(snapshot.genGen.reached, tier.rawValue >= UsagePodiumTier.obsidian.rawValue)
                 let data = try UsageShareExporter.pngData(snapshot: snapshot, locale: Locale(identifier: language))
                 let rep = try XCTUnwrap(NSBitmapImageRep(data: data))
                 XCTAssertEqual(rep.pixelsWide, 2400); XCTAssertEqual(rep.pixelsHigh, 1260)

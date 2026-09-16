@@ -45,6 +45,27 @@ struct UsagePodiumBadge: View {
     }
 }
 
+/// Compact neutral seal shared by saved history and its exported image.
+struct UsageGenGenBadge: View {
+    var prominent = false
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "seal.fill")
+                .font(.system(size: prominent ? 13 : 9, weight: .semibold))
+            Text(verbatim: "GenGen")
+        }
+        .font(AppTheme.font(size: prominent ? 16 : 11, weightValue: 650))
+        .padding(.horizontal, prominent ? 12 : 8).padding(.vertical, prominent ? 5 : 4)
+        .foregroundStyle(AppTheme.ink)
+        .background(AppTheme.soft, in: Capsule())
+        .overlay(Capsule().strokeBorder(AppTheme.line, lineWidth: 1))
+        .shadow(color: .black.opacity(0.3), radius: 3, y: 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("GenGen stamp reached."))
+    }
+}
+
 /// One finish for the saved-level badge and exported plate. The base palette
 /// remains canonical; reflected light and recessed edges give it material depth.
 /// No animation or window material: the PNG and its preview are identical.

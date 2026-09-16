@@ -10,6 +10,16 @@ struct UsageMilestoneStamp: Codable, Equatable, Identifiable {
     var id: Int { level }
 }
 
+/// A derived recognition inside AI Podium. It is never a skill, cost or
+/// productivity claim, and it deliberately carries no date when saved history
+/// can prove the threshold but not when it was crossed.
+struct UsageGenGenAchievement: Equatable {
+    let reached: Bool
+    let reachedAt: Date?
+
+    static let locked = UsageGenGenAchievement(reached: false, reachedAt: nil)
+}
+
 /// Derived from the saved archive, independently of the selected chart period.
 /// Keeping one source of truth makes stamps survive session/cache cleanup and
 /// avoids a second store that could drift from corrected usage readings.
@@ -19,19 +29,29 @@ struct UsageMilestoneProgress: Codable, Equatable {
 
     let totalTokens: Int
     let stamps: [UsageMilestoneStamp]
+    /// Optional for decoding reports written before GenGen existed.
+    private let evaluatedAt: Date?
+    private let evaluationCalendar: Calendar?
 
     var level: Int { stamps.last(where: \.reached)?.level ?? 0 }
     /// No recorded consumption must not look like an earned White badge.
     var podiumTier: UsagePodiumTier? { totalTokens > 0 ? UsagePodiumTier(rawValue: level) : nil }
     var nextPodiumTier: UsagePodiumTier? { UsagePodiumTier(rawValue: (podiumTier?.rawValue ?? -1) + 1) }
     var next: UsageMilestoneStamp? { stamps.first { !$0.reached } }
+    var genGen: UsageGenGenAchievement {
+        guard let evaluatedAt, let evaluationCalendar else {
+            return podiumTier.map({ $0.rawValue >= UsagePodiumTier.obsidian.rawValue }) == true
+                ? UsageGenGenAchievement(reached: true, reachedAt: nil) : .locked
+        }
+        return genGen(at: evaluatedAt, calendar: evaluationCalendar)
+    }
     var fractionToNext: Double {
         guard let next else { return 1 }
         let previous = stamps.last(where: \.reached)?.threshold ?? 0
         return min(1, max(0, Double(totalTokens - previous) / Double(next.threshold - previous)))
     }
 
-    init(sessions: [UsageSessionDigest], now: Date) {
+    init(sessions: [UsageSessionDigest], now: Date, calendar: Calendar = .current) {
         var total = 0
         var byMinute: [Int: Int] = [:]
         var timelineIsComplete = true
@@ -85,5 +105,23 @@ struct UsageMilestoneProgress: Codable, Equatable {
             UsageMilestoneStamp(level: index + 1, threshold: threshold,
                                 reached: total >= threshold, reachedAt: dates[index])
         }
+        evaluatedAt = now
+        evaluationCalendar = calendar
+    }
+
+    /// GenGen is reached at Obsidian, or after two whole calendar months at
+    /// Graphite. Calendar arithmetic preserves month-end and daylight-saving
+    /// behavior; a missing Graphite date never starts an invented timer.
+    func genGen(at date: Date, calendar: Calendar) -> UsageGenGenAchievement {
+        let graphite = stamps.first { $0.level == UsagePodiumTier.graphite.rawValue }
+        let obsidian = stamps.first { $0.level == UsagePodiumTier.obsidian.rawValue }
+        let durationDate = graphite?.reachedAt.flatMap {
+            calendar.date(byAdding: .month, value: 2, to: $0)
+        }.flatMap { $0 <= date ? $0 : nil }
+        let thresholdReached = (obsidian?.reached == true) || totalTokens >= UsagePodiumTier.obsidian.threshold
+        guard thresholdReached || durationDate != nil else { return .locked }
+        let thresholdDate = thresholdReached ? obsidian?.reachedAt : nil
+        return UsageGenGenAchievement(reached: true,
+                                      reachedAt: [thresholdDate, durationDate].compactMap { $0 }.min())
     }
 }

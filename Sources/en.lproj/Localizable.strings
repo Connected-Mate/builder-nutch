@@ -323,3 +323,9 @@
 "Expired sign-ins stand out in red in the account list, with a clear Reconnect action." = "Expired sign-ins stand out in red in the account list, with a clear Reconnect action.";
 "A compact header" = "A compact header";
 "Smaller page headers leave more room for accounts and activity." = "Smaller page headers leave more room for accounts and activity.";
+
+/* GenGen AI Podium stamp */
+"GenGen stamp" = "GenGen stamp";
+"GenGen stamp reached." = "GenGen stamp reached.";
+"Obsidian or two months at Graphite" = "Obsidian or two months at Graphite";
+"Achievement date unavailable" = "Achievement date unavailable";
