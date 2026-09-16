@@ -85,7 +85,7 @@ final class NotchWindowController {
     /// and `updateNotch` re-offers it on every change, so without this the
     /// green came back every minute for as long as that value stayed set.
     private var shownResolutionID: String?
-    private var accountDrag: (source: UUID, target: UUID)?
+    private var accountDrag: UUID?
     /// Whether we have pushed the pointing hand onto the cursor stack.
     private var isPointing = false
     /// The usable area the panel was last placed against.
@@ -497,7 +497,7 @@ final class NotchWindowController {
     private func previewAccountMove(from start: NSPoint, to current: NSPoint) {
         guard let panel, let picker = model.accountPicker else { return }
         let sourceID: UUID
-        if let existing = accountDrag?.source {
+        if let existing = accountDrag {
             sourceID = existing
         } else {
             guard let sourceIndex = accountIndex(at: start, in: panel),
@@ -508,24 +508,13 @@ final class NotchWindowController {
               !picker.accounts[sourceIndex].isCurrent,
               let targetIndex = accountIndex(at: current, in: panel),
               picker.accounts.indices.contains(targetIndex),
+              !picker.accounts[targetIndex].isCurrent,
               sourceIndex != targetIndex else { return }
 
-        let targetID = picker.accounts[targetIndex].id
         var accounts = picker.accounts
         let moving = accounts.remove(at: sourceIndex)
         accounts.insert(moving, at: min(targetIndex, accounts.count))
-        accounts = accounts.enumerated().map { index, account in
-            NotchAccountItem(
-                id: account.id,
-                name: account.name,
-                subtitle: account.subtitle,
-                usage: account.usage,
-                usedFraction: account.usedFraction,
-                isCurrent: index == 0,
-                isNext: index == 1
-            )
-        }
-        accountDrag = (sourceID, targetID)
+        accountDrag = sourceID
         withAnimation(NotchMotion.glide) {
             model.accountPicker = NotchAccountPicker(
                 provider: picker.provider,
@@ -537,8 +526,8 @@ final class NotchWindowController {
     }
 
     private func finishAccountMove() {
-        guard let drag = accountDrag else { return }
-        model.onMoveAccount?(drag.source, drag.target)
+        guard accountDrag != nil, let picker = model.accountPicker else { return }
+        model.onMoveAccount?(picker.provider, picker.accounts.map(\.id))
         accountDrag = nil
         dismissAccountPicker()
     }

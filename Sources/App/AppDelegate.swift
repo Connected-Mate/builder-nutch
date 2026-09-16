@@ -112,12 +112,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await manager.refresh(account) }
         }
         controller.onAccountPicker = { [weak self] id in self?.accountPicker(for: id) }
-        controller.model.onMoveAccount = { [weak self, weak manager, weak controller] source, target in
-            do { try manager?.moveInRotation(accountID: source, to: target) }
+        controller.model.onMoveAccount = { [weak self, weak manager, weak controller] provider, order in
+            do { try manager?.setRotationOrder(order, for: provider) }
             catch { manager?.notice = error.localizedDescription }
-            if let provider = manager?.accounts.first(where: { $0.id == source })?.provider {
-                controller?.model.accountPicker = self?.accountPicker(for: provider)
-            }
+            controller?.model.accountPicker = self?.accountPicker(for: provider)
         }
         // Picking an account in the notch means "use this one", not "queue it".
         // Set-next lived here before, and a person who chose an account while
@@ -356,16 +354,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     accounts: ordered, selectedID: selectedID,
                     sessions: notchController?.model.sessions ?? [:]))
             : selectedID
-        // The row is ordered around the same answer the badge gives.
-        //
-        // Ordering alone would be a layout question, but this view draws a
-        // connector between the first two cells and a rule after the second —
-        // the visible "NOW hands over to NEXT" — so a badge that sat anywhere
-        // but second would leave that path pointing at an account with no
-        // badge on it. Promoting it keeps the drawing and the claim agreeing.
-        let displayed = AccountActivitySelection.queue(
-            accounts: ordered, currentID: currentID, selectedID: selectedID,
-            next: .decided(nextUsableID))
+        // Keep the actual current account anchored, but preserve the person's
+        // saved order for every other row. NEXT is a badge, not a row promotion.
+        let displayed = AccountActivitySelection.manualQueue(accounts: ordered, currentID: currentID)
         // Read off the resolved row rather than off a position, so a row with
         // nobody able to take over carries a NOW and no NEXT at all instead of
         // badging whoever happens to be drawn second.
@@ -505,6 +496,12 @@ enum AccountActivitySelection {
         /// that could not take a session. `nil` is a real answer: nobody can
         /// take over at all, and the row then has a NOW and no NEXT.
         case decided(UUID?)
+    }
+
+    /// Anchor NOW without promoting the computed next account over manual order.
+    static func manualQueue(accounts: [ManagedAccount], currentID: UUID?) -> [ManagedAccount] {
+        guard let current = accounts.first(where: { $0.id == currentID }) else { return accounts }
+        return [current] + accounts.filter { $0.id != current.id }
     }
 
     /// NOW is first. When automatic rotation already chose another account,

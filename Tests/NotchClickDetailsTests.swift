@@ -148,7 +148,7 @@ final class NotchClickDetailsTests: XCTestCase {
             windowNumber: window.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0))
         window.sendEvent(up)
 
-        var moved: (UUID, UUID)?
+        var moved: (AccountProvider, [UUID])?
         controller.model.onMoveAccount = { moved = ($0, $1) }
         let frame = try XCTUnwrap(controller.panelFrameForTesting)
         let place = NotchPlacement(edge: controller.model.edge, panelSize: frame.size)
@@ -171,11 +171,18 @@ final class NotchClickDetailsTests: XCTestCase {
         window.sendEvent(try event(.leftMouseDragged, dragEnd, 4))
         XCTAssertEqual(controller.model.accountPicker?.accounts.map(\.id), [current, later, next],
                        "The dragged ring and its neighbours should reorder before mouse-up")
-        XCTAssertEqual(controller.model.accountPicker?.accounts.map(\.isNext), [false, true, false],
-                       "NEXT should travel with the live queue position")
-        window.sendEvent(try event(.leftMouseUp, dragEnd, 5))
-        XCTAssertEqual(moved?.0, later)
-        XCTAssertEqual(moved?.1, next)
+        XCTAssertEqual(controller.model.accountPicker?.accounts.map(\.isNext), [false, false, true],
+                       "NEXT must stay attached to the computed next account")
+        // Move across another ring and back: persist the final preview, not
+        // the last target interpreted against the original queue.
+        window.sendEvent(try event(.leftMouseDragged, dragLocation(2), 5))
+        XCTAssertEqual(controller.model.accountPicker?.accounts.map(\.id), [current, next, later])
+        window.sendEvent(try event(.leftMouseDragged, dragEnd, 6))
+        window.sendEvent(try event(.leftMouseDragged, dragLocation(0), 7))
+        XCTAssertEqual(controller.model.accountPicker?.accounts.map(\.isCurrent), [true, false, false])
+        window.sendEvent(try event(.leftMouseUp, dragEnd, 8))
+        XCTAssertEqual(moved?.0, .claude)
+        XCTAssertEqual(moved?.1, [current, later, next])
         XCTAssertNil(controller.model.accountPicker, "A completed reorder should restore the provider list")
     }
 

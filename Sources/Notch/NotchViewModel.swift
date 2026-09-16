@@ -6,7 +6,7 @@ final class NotchViewModel: ObservableObject {
     @Published var snapshots: [ProviderSnapshot] = []
     @Published var usageDisplayMode: UsageDisplayMode = .remaining
     @Published var accountPicker: NotchAccountPicker?
-    var onMoveAccount: ((UUID, UUID) -> Void)?
+    var onMoveAccount: ((AccountProvider, [UUID]) -> Void)?
     var onChooseNextAccount: ((UUID) -> Void)?
     var onDismissAccountPicker: (() -> Void)?
     /// Live agent sessions, keyed by the provider they belong to. They surface

@@ -171,6 +171,46 @@ final class AccountManagerTests: XCTestCase {
     }
 
     @MainActor
+    func testFinalDragOrderPersistsWithoutChangingSelectionAndRejectsInvalidOrders() throws {
+        let root = try temporary()
+        let manager = AccountManager(rootURL: root)
+        let accounts = try (1...4).map { try manager.add(provider: .codex, label: "Account \($0)", emailHint: nil) }
+        let other = try manager.add(provider: .claude, label: "Other provider", emailHint: nil)
+        try manager.select(accounts[0])
+        let original = accounts.map(\.id)
+        // D crosses B then C: its final preview has returned to the original order.
+        try manager.setRotationOrder([original[0], original[3], original[1], original[2]], for: .codex)
+        try manager.setRotationOrder(original, for: .codex)
+        let final = [original[0], original[2], original[3], original[1]]
+        try manager.setRotationOrder(final, for: .codex)
+        let restored = AccountManager(rootURL: root)
+        XCTAssertEqual(restored.rotationAccounts(for: .codex).map(\.id), final)
+        XCTAssertEqual(restored.selectedAccount(for: .codex)?.id, accounts[0].id)
+        XCTAssertEqual(restored.rotationAccounts(for: .claude).map(\.id), [other.id])
+        for invalid in [Array(final.dropLast()), [final[0], final[0], final[2], final[3]],
+                        [final[0], final[1], final[2], other.id]] {
+            XCTAssertThrowsError(try manager.setRotationOrder(invalid, for: .codex))
+            XCTAssertEqual(manager.rotationAccounts(for: .codex).map(\.id), final)
+        }
+        // Make only the temporary catalog unwritable; a failed commit must not
+        // publish an order that did not reach disk.
+        let catalog = root.appendingPathComponent("accounts.json")
+        try FileManager.default.removeItem(at: catalog)
+        try FileManager.default.createDirectory(at: catalog, withIntermediateDirectories: false)
+        XCTAssertThrowsError(try manager.setRotationOrder(original, for: .codex))
+        XCTAssertEqual(manager.rotationAccounts(for: .codex).map(\.id), final)
+        XCTAssertEqual(manager.selectedAccount(for: .codex)?.id, accounts[0].id)
+    }
+
+    func testManualQueueAnchorsActualCurrentWithoutPromotingNext() {
+        let now = Date()
+        let accounts = (1...4).map { ManagedAccount(id: UUID(), provider: .claude, label: "Account \($0)", createdAt: now) }
+        let displayed = AccountActivitySelection.manualQueue(accounts: accounts, currentID: accounts[2].id)
+        XCTAssertEqual(displayed.map(\.id), [accounts[2].id, accounts[0].id, accounts[1].id, accounts[3].id])
+        XCTAssertEqual(AccountActivitySelection.manualQueue(accounts: accounts, currentID: nil).map(\.id), accounts.map(\.id))
+    }
+
+    @MainActor
     func testAutomaticRotationPublishesTheExactAccountHandoff() async throws {
         let runner = SequencedQuotaRunner(outputs: [
             #"{"account":{"type":"chatgpt","email":"old@example.test"},"limits":{"rateLimits":{"primary":{"usedPercent":100,"windowDurationMins":300}}}}"#,

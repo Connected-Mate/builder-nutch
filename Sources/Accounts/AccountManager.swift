@@ -407,6 +407,21 @@ final class AccountManager: ObservableObject {
         updateHealth()
     }
 
+    /// Commit the final visible permutation, never a target from an earlier preview.
+    /// All accounts of this provider must be present exactly once.
+    func setRotationOrder(_ ids: [UUID], for provider: AccountProvider) throws {
+        let valid = Set(accounts.filter { $0.provider == provider }.map(\.id))
+        guard ids.count == valid.count, Set(ids) == valid else {
+            throw ManagedAccountError.unavailable
+        }
+        guard rotationOrder[provider] != ids else { return }
+        let previous = rotationOrder
+        rotationOrder[provider] = ids
+        do { try persist(accounts: accounts, selected: selected) }
+        catch { rotationOrder = previous; throw error }
+        updateHealth()
+    }
+
     func setNext(_ account: ManagedAccount) throws {
         try select(account)
         notice = "\(account.label) will be used for the next \(account.provider.title) session."
