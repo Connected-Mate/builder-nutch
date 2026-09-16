@@ -50,14 +50,19 @@ final class UsageThresholdNotifier {
 
         for snapshot in snapshots {
             for window in snapshot.windows {
-                guard let fraction = window.usedFraction, fraction.isFinite else { continue }
                 let key = "\(snapshot.id)|\(window.id)"
                 seen.insert(key)
+                // A cached response can still carry the last good number. It
+                // is useful in the UI when clearly marked, but it cannot prove
+                // that a threshold was crossed now. `unsupported`, however,
+                // can describe one unavailable feature beside fresh model
+                // windows, so those readings remain eligible.
+                guard Self.canNotify(status: snapshot.status),
+                      let percent = Self.thresholdPercent(for: window) else { continue }
                 // Floored, not rounded: 84.6% is not 85% yet, and a
                 // notification that arrives before the number it names does is
                 // the kind of small dishonesty that makes people stop trusting
                 // the rest of the readings.
-                let percent = min(100, max(0, Int((fraction * 100).rounded(.down))))
 
                 // The first time this app lays eyes on a window is not an
                 // event. This record lives in memory only, so every launch
@@ -86,9 +91,10 @@ final class UsageThresholdNotifier {
                 memory[key] = state
 
                 guard isEnabled, !isFirstSighting, let highest = crossed.max() else { continue }
-                let notice = Self.notice(
-                    snapshot: snapshot, window: window, threshold: highest, now: now
-                )
+                guard let notice = Self.notice(
+                    snapshot: snapshot, window: window,
+                    crossedThreshold: highest, now: now
+                ) else { continue }
                 notifier.post(notice)
                 posted.append(notice)
             }
@@ -100,8 +106,27 @@ final class UsageThresholdNotifier {
         return posted
     }
 
+    private static func canNotify(status: ProviderStatus) -> Bool {
+        switch status {
+        case .ok, .unsupported: return true
+        case .stale, .needsAuth, .accessDenied, .error: return false
+        }
+    }
+
+    private static func thresholdPercent(for window: LimitWindow) -> Int? {
+        guard let fraction = window.usedFraction, fraction.isFinite else { return nil }
+        return min(100, max(0, Int((fraction * 100).rounded(.down))))
+    }
+
+    private static func readingPercent(for window: LimitWindow) -> Int? {
+        guard let fraction = window.usedFraction, fraction.isFinite else { return nil }
+        return min(100, max(0, Int((fraction * 100).rounded())))
+    }
+
     static func notice(snapshot: ProviderSnapshot, window: LimitWindow,
-                       threshold: Int, now: Date) -> UserNotice {
+                       crossedThreshold: Int, now: Date) -> UserNotice? {
+        guard canNotify(status: snapshot.status),
+              let readingPercent = readingPercent(for: window) else { return nil }
         // A limit that belongs to one model is not the account running out.
         // "Claude · 85% used" would say the subscription is nearly spent when
         // in fact one model's weekly allowance is, and everything else on that
@@ -112,19 +137,19 @@ final class UsageThresholdNotifier {
             title = String(
                 format: NSLocalizedString("%1$@ · %2$@ %3$d%% used",
                                           comment: "Usage threshold title for one model's limit"),
-                snapshot.displayName, model, threshold
+                snapshot.displayName, model, readingPercent
             )
         } else {
             title = String(
                 format: NSLocalizedString("%1$@ · %2$d%% used",
                                           comment: "Usage threshold notification title"),
-                snapshot.displayName, threshold
+                snapshot.displayName, readingPercent
             )
         }
         var body = String(
             format: NSLocalizedString("%1$@ · %2$d%% left.",
                                       comment: "Usage threshold notification body"),
-            window.label, max(0, 100 - threshold)
+            window.label, max(0, 100 - readingPercent)
         )
         if let resetsAt = window.resetsAt {
             // A reset this app worked out from a sentence is marked as
@@ -140,7 +165,7 @@ final class UsageThresholdNotifier {
         // Notification Centre — same identifier, same slot, and the earlier one
         // disappears without ever having been read.
         let stamp = Int(window.resetsAt?.timeIntervalSince1970 ?? 0)
-        return UserNotice(id: "usage.\(snapshot.id).\(window.id).\(stamp).\(threshold)",
+        return UserNotice(id: "usage.\(snapshot.id).\(window.id).\(stamp).\(crossedThreshold)",
                           title: title, body: body)
     }
 }

@@ -383,7 +383,8 @@ final class UsageThresholdNotifierTests: XCTestCase {
         // 84.6% is not 85% yet.
         thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: 0.846, resetsAt: resets)], now: now)
         XCTAssertEqual(notifier.posted.count, 2, "75 should have been crossed, 85 should not")
-        XCTAssertTrue(notifier.posted[1].title.contains("75"))
+        XCTAssertTrue(notifier.posted[1].title.contains("85"),
+                      "Notification should match the rounded percentage shown in the app")
 
         thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: 0.85, resetsAt: resets)], now: now)
         XCTAssertEqual(notifier.posted.count, 3)
@@ -401,7 +402,64 @@ final class UsageThresholdNotifierTests: XCTestCase {
         thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: 0.05)], now: now)
         thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: 0.92)], now: now)
         XCTAssertEqual(notifier.posted.count, 1)
-        XCTAssertTrue(notifier.posted[0].title.contains("85"))
+        XCTAssertTrue(notifier.posted[0].title.contains("92"))
+        XCTAssertTrue(notifier.posted[0].body.contains("8"))
+        XCTAssertTrue(notifier.posted[0].id.hasSuffix(".85"),
+                      "The crossed threshold remains the deduplication identity")
+    }
+
+    func testNotificationUsesTheCapturedReadingRatherThanTheThreshold() {
+        let notifier = RecordingNotifier()
+        let thresholds = UsageThresholdNotifier(notifier: notifier)
+        thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: 0.45)], now: now)
+        thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: 0.60)], now: now)
+
+        XCTAssertEqual(notifier.posted.count, 1)
+        let notice = notifier.posted[0]
+        XCTAssertEqual(notice.title, "Provider a · 60% used")
+        XCTAssertTrue(notice.body.contains("Session · 40% left."))
+        XCTAssertTrue(notice.id.hasSuffix(".50"))
+    }
+
+    func testASecondaryWindowNamesItsOwnPeriodAndReading() {
+        let notifier = RecordingNotifier()
+        let thresholds = UsageThresholdNotifier(notifier: notifier)
+        func snapshot(weekly: Double) -> ProviderSnapshot {
+            ProviderSnapshot(
+                id: "a", displayName: "Claude", glyph: .claude,
+                fidelity: .official, status: .ok,
+                windows: [
+                    LimitWindow(id: "five_hour", label: "5-hour limit", usedFraction: 0.10),
+                    LimitWindow(id: "seven_day", label: "Weekly limit", usedFraction: weekly)
+                ],
+                headlineID: "five_hour"
+            )
+        }
+
+        thresholds.evaluate(snapshots: [snapshot(weekly: 0.45)], now: now)
+        thresholds.evaluate(snapshots: [snapshot(weekly: 0.60)], now: now)
+
+        XCTAssertEqual(notifier.posted.count, 1)
+        let notice = notifier.posted[0]
+        XCTAssertTrue(notice.title.contains("60"))
+        XCTAssertTrue(notice.body.contains("Weekly limit"))
+        XCTAssertFalse(notice.body.contains("5-hour"),
+                       "The headline period replaced the window that actually crossed")
+    }
+
+    func testStaleReadingCannotCrossAThresholdOrAdvanceDeduplication() {
+        let notifier = RecordingNotifier()
+        let thresholds = UsageThresholdNotifier(notifier: notifier)
+        thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: 0.45)], now: now)
+
+        var stale = makeSnapshot(id: "a", used: 0.60)
+        stale.status = .stale(since: now.addingTimeInterval(-300))
+        thresholds.evaluate(snapshots: [stale], now: now)
+        XCTAssertTrue(notifier.posted.isEmpty)
+
+        thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: 0.60)], now: now)
+        XCTAssertEqual(notifier.posted.count, 1)
+        XCTAssertTrue(notifier.posted[0].title.contains("60"))
     }
 
     func testTheSlateIsWipedWhenTheWindowRolls() {
@@ -420,7 +478,7 @@ final class UsageThresholdNotifierTests: XCTestCase {
 
         thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: 0.55, resetsAt: second)], now: now)
         XCTAssertEqual(notifier.posted.count, 2)
-        XCTAssertTrue(notifier.posted[1].title.contains("50"))
+        XCTAssertTrue(notifier.posted[1].title.contains("55"))
     }
 
     func testEachAccountKeepsItsOwnRecord() {
@@ -486,70 +544,76 @@ final class UsageThresholdNotifierTests: XCTestCase {
         // But a point crossed while the app is watching still arrives.
         thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: 0.77)], now: now)
         XCTAssertEqual(notifier.posted.count, 1)
-        XCTAssertTrue(notifier.posted[0].title.contains("75"))
+        XCTAssertTrue(notifier.posted[0].title.contains("77"))
     }
 
     /// One model's weekly allowance running out is not the subscription running
     /// out. The title has to say which, or it claims the account is nearly
     /// spent when everything except that one model still works.
-    func testAModelSpecificLimitNamesTheModelRatherThanTheAccount() {
-        let account = makeSnapshot(id: "a", used: 0.86, name: "Claude")
-        let whole = UsageThresholdNotifier.notice(
+    func testAModelSpecificLimitNamesTheModelRatherThanTheAccount() throws {
+        var account = makeSnapshot(id: "a", used: 0.86, name: "Claude")
+        // Some providers use this status for an unavailable feature while
+        // still returning fresh model allowance windows.
+        account.status = .unsupported("Account-wide allowance unavailable")
+        let whole = try XCTUnwrap(UsageThresholdNotifier.notice(
             snapshot: account,
             window: LimitWindow(id: "weekly", label: "Weekly limit", usedFraction: 0.86),
-            threshold: 85, now: now)
-        let oneModel = UsageThresholdNotifier.notice(
+            crossedThreshold: 85, now: now))
+        let oneModel = try XCTUnwrap(UsageThresholdNotifier.notice(
             snapshot: account,
             window: LimitWindow(id: "weekly", label: "Fable weekly limit",
                                 usedFraction: 0.86, modelName: "Fable"),
-            threshold: 85, now: now)
+            crossedThreshold: 85, now: now))
 
         XCTAssertFalse(whole.title.contains("Fable"))
         XCTAssertTrue(oneModel.title.contains("Fable"),
                       "A model's limit was reported as the whole account's")
         XCTAssertTrue(oneModel.title.contains("Claude"))
-        XCTAssertTrue(oneModel.title.contains("85"))
+        XCTAssertTrue(oneModel.title.contains("86"))
+        XCTAssertTrue(oneModel.body.contains("Fable weekly limit"))
+        XCTAssertTrue(oneModel.body.contains("14% left"))
     }
 
     func testAWindowWithNoDenominatorIsNeverGuessedAt() {
         let notifier = RecordingNotifier()
         let thresholds = UsageThresholdNotifier(notifier: notifier)
         thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: nil)], now: now)
+        thresholds.evaluate(snapshots: [makeSnapshot(id: "a", used: .nan)], now: now)
         XCTAssertTrue(notifier.posted.isEmpty)
     }
 
-    func testTheCopySaysWhoWhatAndWhen() {
+    func testTheCopySaysWhoWhatAndWhen() throws {
         let resets = now.addingTimeInterval(51 * 60)
-        let notice = UsageThresholdNotifier.notice(
+        let notice = try XCTUnwrap(UsageThresholdNotifier.notice(
             snapshot: makeSnapshot(id: "a", used: 0.76, resetsAt: resets, name: "Claude"),
             window: LimitWindow(id: "session", label: "Session",
                                 usedFraction: 0.76, resetsAt: resets),
-            threshold: 75, now: now
-        )
+            crossedThreshold: 75, now: now
+        ))
         XCTAssertTrue(notice.title.contains("Claude"))
-        XCTAssertTrue(notice.title.contains("75"))
+        XCTAssertTrue(notice.title.contains("76"))
         XCTAssertTrue(notice.body.contains("Session"))
-        XCTAssertTrue(notice.body.contains("25"), "Should say what is left, not only what is spent")
+        XCTAssertTrue(notice.body.contains("24"), "Should say what is left, not only what is spent")
         XCTAssertTrue(notice.body.contains("Resets"))
     }
 
     /// A reset worked out from a written hint rather than sent by the vendor
     /// must not be quoted to the minute. Kimi reports "resets in 2d 6h 36m" and
     /// nothing else, and a notification is read once and acted on.
-    func testADerivedResetIsMarkedApproximateInTheNotification() {
+    func testADerivedResetIsMarkedApproximateInTheNotification() throws {
         let resets = now.addingTimeInterval(51 * 60)
-        let sent = UsageThresholdNotifier.notice(
+        let sent = try XCTUnwrap(UsageThresholdNotifier.notice(
             snapshot: makeSnapshot(id: "a", used: 0.76, resetsAt: resets),
             window: LimitWindow(id: "session", label: "Session",
                                 usedFraction: 0.76, resetsAt: resets),
-            threshold: 75, now: now
-        )
-        let inferred = UsageThresholdNotifier.notice(
+            crossedThreshold: 75, now: now
+        ))
+        let inferred = try XCTUnwrap(UsageThresholdNotifier.notice(
             snapshot: makeSnapshot(id: "a", used: 0.76, resetsAt: resets, derivedReset: true),
             window: LimitWindow(id: "session", label: "Session",
                                 usedFraction: 0.76, resetsAt: resets, derivedReset: true),
-            threshold: 75, now: now
-        )
+            crossedThreshold: 75, now: now
+        ))
         XCTAssertNotEqual(sent.body, inferred.body,
                           "An inferred reset was quoted as precisely as a sent one")
         XCTAssertTrue(inferred.body.contains(
