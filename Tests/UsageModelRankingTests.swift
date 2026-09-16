@@ -176,4 +176,15 @@ final class UsageModelRankingTests: XCTestCase {
             summary: scan, days: 1, now: date("2026-09-16T12:00:00Z"), calendar: calendar, timeline: UsageAccountTimeline())
         XCTAssertEqual(UsageModelRanking.entries(in: value).first?.availability, .partial)
     }
+
+    func testSkippedMalformedAndOversizedInputRemainLowerBounds() {
+        let fields: [WritableKeyPath<UsageScanSummary, Int>] = [\.filesSkipped, \.malformedLines, \.oversizedLines]
+        for field in fields {
+            var scan = UsageScanSummary()
+            scan[keyPath: field] = 1
+            let value = UsageLedgerEngine.report(sessions: [session(events: [event(100, model: "known", at: "2026-09-16T10:00:00Z")])],
+                summary: scan, days: 1, now: date("2026-09-16T12:00:00Z"), calendar: calendar, timeline: UsageAccountTimeline())
+            XCTAssertEqual(UsageModelRanking.entries(in: value).first?.availability, .partial)
+        }
+    }
 }

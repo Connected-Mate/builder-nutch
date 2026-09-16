@@ -36,6 +36,9 @@ struct UsageShareSnapshot: Equatable {
     let tokens: UsageTokenTotals
     let availability: UsageMeasurementAvailability
     let todayRanking: [UsageShareProviderTotal]
+    /// Both rankings follow the selected calendar period and project.
+    let ranking: [UsageShareProviderTotal]
+    let modelRanking: [UsageModelTotal]
     let projectName: String?
     let isProject: Bool
     /// Frozen lifetime level, never recomputed from a period or project scope.
@@ -137,6 +140,32 @@ struct UsageShareSnapshot: Equatable {
         case .month:
             selected = (monthStart, monthSummary.tokens, monthSummary.availability)
         }
+
+        let selectedStartKey = formatter.string(from: selected.start)
+        var selectedProviders: [String: (provider: UsageTranscriptFormat, tokens: UsageTokenTotals)] = [:]
+        for account in report.accounts where projectWasFound {
+            let sourceDays = projectPath.map { path in
+                account.projects.filter { $0.path == path }.flatMap(\.days)
+            } ?? account.days
+            for day in sourceDays where day.day >= selectedStartKey && day.day <= todayKey {
+                var total = selectedProviders[account.provider.rawValue] ?? (account.provider, UsageTokenTotals())
+                total.tokens += day.tokens
+                selectedProviders[account.provider.rawValue] = total
+            }
+        }
+        self.ranking = selectedProviders.values.compactMap { entry in
+            guard entry.tokens.total > 0 else { return nil }
+            return UsageShareProviderTotal(provider: entry.provider, tokens: entry.tokens,
+                availability: UsageChartDay.totalAvailability(entry.tokens,
+                    partialHistory: selected.availability != .complete))
+        }.sorted {
+            $0.tokens.total != $1.tokens.total ? $0.tokens.total > $1.tokens.total
+                : $0.provider.rawValue < $1.provider.rawValue
+        }
+        var rankingReport = report
+        rankingReport.calendar = calendar
+        self.modelRanking = UsageModelRanking.entries(in: rankingReport, from: selected.start,
+            through: today, projectPath: projectPath)
 
         self.generatedAt = report.generatedAt
         self.podiumTier = report.milestones?.podiumTier

@@ -7,12 +7,25 @@ struct UsageShareCard: View {
 
     let snapshot: UsageShareSnapshot
     @Environment(\.locale) private var locale
-    private var accent: Color { UsageSharePalette.accent(for: snapshot.todayRanking.first?.provider) }
+    private var rankedModels: [UsageModelTotal] { Array(snapshot.modelRanking.filter { $0.modelID != nil }.prefix(3)) }
+    private var unassignedTokens: Int { snapshot.modelRanking.filter { $0.modelID == nil }.reduce(0) { $0 + $1.tokens.total } }
+    private var unassignedAvailability: UsageMeasurementAvailability {
+        snapshot.modelRanking.contains { $0.modelID == nil && $0.availability != .complete } ? .partial : .complete
+    }
+    private var leadingVisualProvider: UsageTranscriptFormat? {
+        guard let first = rankedModels.first else { return snapshot.ranking.first?.provider }
+        switch UsageModelPresentation.glyph(first.modelID) {
+        case .claude: return .claude
+        case .openai: return .codex
+        default: return nil
+        }
+    }
+    private var accent: Color { UsageSharePalette.accent(for: leadingVisualProvider) }
     private var statisticsInk: Color { snapshot.podiumTier?.foreground ?? UsageSharePalette.ink }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            UsageShareBackdrop(provider: snapshot.todayRanking.first?.provider)
+            UsageShareBackdrop(provider: leadingVisualProvider)
             HStack(alignment: .firstTextBaseline) {
                 Text(verbatim: "AI Podium")
                     .font(AppTheme.font(size: 25, weightValue: 650)).tracking(-0.5)
@@ -138,47 +151,68 @@ struct UsageShareCard: View {
     private var podiumPlate: some View {
         ZStack(alignment: .topLeading) {
             plateSurface(radius: 44)
-            Text("Today’s AI podium")
-                .font(AppTheme.font(size: 20, weightValue: 650))
-                .lineLimit(1).minimumScaleFactor(0.7)
-                .frame(width: 316, alignment: .leading).offset(x: 32, y: 30)
-            if snapshot.todayRanking.isEmpty {
-                VStack(spacing: 10) {
-                    Text("No recorded data")
-                        .font(AppTheme.font(size: 23, weightValue: 550))
-                    Text("Today")
-                        .font(AppTheme.font(size: 16, weightValue: 450))
-                        .foregroundStyle(UsageSharePalette.muted)
-                }
-                .multilineTextAlignment(.center)
-                .frame(width: 300, height: 250).offset(x: 40, y: 96)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(rankedModels.isEmpty ? "Tools used" : "Most-used models")
+                    .font(AppTheme.font(size: 20, weightValue: 650))
+                Text(periodTitle(snapshot.period))
+                    .font(AppTheme.font(size: 14, weightValue: 450))
+                    .foregroundStyle(UsageSharePalette.muted)
+            }
+            .lineLimit(1).minimumScaleFactor(0.7)
+            .frame(width: 324, alignment: .leading).offset(x: 28, y: 26)
+            if rankedModels.isEmpty && snapshot.ranking.isEmpty {
+                Text("No recorded data")
+                    .font(AppTheme.font(size: 23, weightValue: 550))
+                    .multilineTextAlignment(.center)
+                    .frame(width: 300, height: 250).offset(x: 40, y: 96)
             } else {
-                podiumMarks
-                    .frame(width: 380, height: 212).offset(y: 64)
-                VStack(spacing: 10) {
-                    ForEach(Array(snapshot.todayRanking.prefix(3).enumerated()), id: \.offset) { index, entry in
-                        rankingReading(entry, rank: index + 1)
+                podiumMarks.frame(width: 380, height: 172).offset(y: 76)
+                VStack(spacing: 5) {
+                    if rankedModels.isEmpty {
+                        ForEach(Array(snapshot.ranking.prefix(3).enumerated()), id: \.offset) { index, entry in
+                            podiumReading(name: UsageModelPresentation.source(entry.provider) ?? "",
+                                context: UsageModelPresentation.localized("Model not recorded", locale: locale),
+                                tokens: entry.tokens.total, availability: entry.availability, rank: index + 1)
+                        }
+                    } else {
+                        ForEach(Array(rankedModels.enumerated()), id: \.offset) { index, entry in
+                            podiumReading(name: UsageModelPresentation.name(entry.modelID, locale: locale),
+                                context: UsageModelPresentation.context(modelID: entry.modelID, provider: entry.provider, sources: entry.sources),
+                                tokens: entry.tokens.total, availability: entry.availability, rank: index + 1)
+                        }
                     }
                 }
-                .frame(width: 316, alignment: .leading).offset(x: 32, y: 292)
+                .frame(width: 324, alignment: .leading).offset(x: 28, y: 250)
+                if !rankedModels.isEmpty && unassignedTokens > 0 {
+                    HStack(spacing: 5) {
+                        Text("Model not recorded")
+                        Spacer(minLength: 4)
+                        Text(count(unassignedTokens, availability: unassignedAvailability, compact: true)).monospacedDigit()
+                    }
+                    .font(AppTheme.font(size: 12, weightValue: 450))
+                    .foregroundStyle(UsageSharePalette.muted).lineLimit(1).minimumScaleFactor(0.7)
+                    .frame(width: 324).offset(x: 28, y: 388)
+                }
             }
         }
     }
 
     private var podiumMarks: some View {
-        ZStack {
-            // Lower ranks sit behind #1; their marks remain authentic and legible.
-            ForEach(Array(snapshot.todayRanking.prefix(3).enumerated()), id: \.offset) { index, entry in
-                medallion(entry, rank: index + 1, size: index == 0 ? 160 : 106)
-                    .position(x: index == 0 ? 190 : (index == 1 ? 92 : 288),
-                              y: index == 0 ? 100 : 157)
+        let glyphs: [ProviderGlyph?] = rankedModels.isEmpty
+            ? snapshot.ranking.prefix(3).map { $0.provider == .claude ? .claude : .openai }
+            : rankedModels.map { UsageModelPresentation.glyph($0.modelID) }
+        return ZStack {
+            ForEach(Array(glyphs.enumerated()), id: \.offset) { index, glyph in
+                medallion(glyph, rank: index + 1, size: index == 0 ? 128 : 86)
+                    .position(x: index == 0 ? 190 : (index == 1 ? 100 : 280),
+                              y: index == 0 ? 70 : 122)
                     .zIndex(index == 0 ? 3 : 1)
             }
         }
         .accessibilityHidden(true)
     }
 
-    private func medallion(_ entry: UsageShareProviderTotal, rank: Int, size: CGFloat) -> some View {
+    private func medallion(_ glyph: ProviderGlyph?, rank: Int, size: CGFloat) -> some View {
         ZStack {
             Circle().fill(UsageSharePalette.black)
             Circle().fill(RadialGradient(colors: [accent.opacity(rank == 1 ? 0.75 : 0.28), .clear],
@@ -190,8 +224,12 @@ struct UsageShareCard: View {
                                                  startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 2)
             Circle().strokeBorder(LinearGradient(colors: [accent.opacity(0.65), .clear, accent.opacity(0.22)],
                                                  startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.5).padding(7)
-            ProviderGlyphView(glyph: entry.provider == .claude ? .claude : .openai, size: size * 0.51)
-                .foregroundStyle(entry.provider == .claude ? UsageSharePalette.claude : UsageSharePalette.ink)
+            if let glyph {
+                ProviderGlyphView(glyph: glyph, size: size * 0.51)
+                    .foregroundStyle(glyph == .claude ? UsageSharePalette.claude : UsageSharePalette.ink)
+            } else {
+                Image(systemName: "cpu").font(.system(size: size * 0.4))
+            }
             Text(verbatim: "\(rank)")
                 .font(AppTheme.font(size: rank == 1 ? 23 : 17, weightValue: 700))
                 .frame(width: rank == 1 ? 38 : 28, height: rank == 1 ? 38 : 28)
@@ -205,19 +243,27 @@ struct UsageShareCard: View {
         .shadow(color: .black.opacity(0.75), radius: 12, x: 0, y: 17)
     }
 
-    private func rankingReading(_ entry: UsageShareProviderTotal, rank: Int) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+    private func podiumReading(name: String, context: String, tokens: Int,
+                               availability: UsageMeasurementAvailability, rank: Int) -> some View {
+        HStack(alignment: .center, spacing: 9) {
             Text(verbatim: "0\(rank)")
-                .font(AppTheme.font(size: 14, weightValue: 500))
+                .font(AppTheme.font(size: 13, weightValue: 500))
                 .foregroundStyle(UsageSharePalette.muted)
-            Text(verbatim: entry.provider == .claude ? "Claude" : "Codex")
-                .font(AppTheme.font(size: 18, weightValue: rank == 1 ? 650 : 500))
-            Spacer(minLength: 8)
-            Text(count(entry.tokens.total, availability: entry.availability))
-                .font(AppTheme.font(size: 16, weightValue: 550))
-                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.55)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(verbatim: name)
+                    .font(AppTheme.font(size: 17, weightValue: rank == 1 ? 650 : 550))
+                    .lineLimit(1).minimumScaleFactor(0.75)
+                Text(verbatim: context)
+                    .font(AppTheme.font(size: 11, weightValue: 450))
+                    .foregroundStyle(UsageSharePalette.muted).lineLimit(1).minimumScaleFactor(0.7)
+            }
+            Spacer(minLength: 0)
+            Text(count(tokens, availability: availability, compact: true))
+                .font(AppTheme.font(size: 15, weightValue: 550))
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
+                .fixedSize(horizontal: true, vertical: false)
         }
-        .frame(height: 25)
+        .frame(height: 40)
     }
 
     private func plateSurface(radius: CGFloat) -> some View {
@@ -261,6 +307,8 @@ struct UsageShareCard: View {
             Group {
                 if snapshot.isPartial || snapshot.weekAvailability != .complete || snapshot.monthAvailability != .complete {
                     Text("Partial history · ≥ means at least")
+                } else if snapshot.modelRanking.contains(where: { $0.availability != .complete }) {
+                    Text("Models partly identified · ≥ means at least")
                 } else {
                     Text("Local history · Input, cache & output")
                 }

@@ -684,3 +684,21 @@
 "A cleaner account editor" = "Une personnalisation plus soignée";
 
 "A compact layout gives names, icons and buttons proper margins, including after sign-in. Choose an emoji and see it immediately." = "Une disposition compacte donne aux noms, icônes et boutons les bonnes marges, y compris après connexion. Choisissez un emoji et voyez-le immédiatement.";
+
+/* Actual model usage */
+"Most-used models" = "Modèles les plus utilisés";
+"By recorded tokens" = "Par tokens enregistrés";
+"Model not recorded" = "Modèle non renseigné";
+"These tokens remain in your totals, but the history does not identify their model." = "Ces tokens restent dans vos totaux, mais leur modèle n’est pas renseigné dans l’historique.";
+"Show fewer models" = "Réduire la liste";
+"Show all models" = "Voir tous les modèles";
+"Tools used" = "Outils utilisés";
+
+"Models partly identified · ≥ means at least" = "Modèles partiellement identifiés · ≥ signifie au moins";
+
+/* 0.23.0 */
+"The models behind your work." = "Les modèles derrière votre travail.";
+"Your most-used models" = "Vos modèles les plus utilisés";
+"Usage ranks the models actually recorded in your history, with their tokens, provider and source tools. The same model used in several tools is counted together." = "L’usage classe les modèles réellement enregistrés dans votre historique, avec leurs tokens, leur fournisseur et les outils utilisés. Un même modèle utilisé dans plusieurs outils est regroupé.";
+"A podium for your period" = "Un podium pour votre période";
+"Your image shows the top models for today, this week, this month or one project. Missing model names stay explicit, and saved history keeps its original totals." = "Votre image présente les modèles les plus utilisés aujourd’hui, cette semaine, ce mois-ci ou sur un projet. Les modèles non renseignés restent signalés et l’historique conserve ses totaux.";

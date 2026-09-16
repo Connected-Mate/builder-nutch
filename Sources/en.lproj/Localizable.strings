@@ -419,3 +419,21 @@
 "A cleaner account editor" = "A cleaner account editor";
 
 "A compact layout gives names, icons and buttons proper margins, including after sign-in. Choose an emoji and see it immediately." = "A compact layout gives names, icons and buttons proper margins, including after sign-in. Choose an emoji and see it immediately.";
+
+/* Actual model usage */
+"Most-used models" = "Most-used models";
+"By recorded tokens" = "By recorded tokens";
+"Model not recorded" = "Model not recorded";
+"These tokens remain in your totals, but the history does not identify their model." = "These tokens remain in your totals, but the history does not identify their model.";
+"Show fewer models" = "Show fewer models";
+"Show all models" = "Show all models";
+"Tools used" = "Tools used";
+
+"Models partly identified · ≥ means at least" = "Models partly identified · ≥ means at least";
+
+/* 0.23.0 */
+"The models behind your work." = "The models behind your work.";
+"Your most-used models" = "Your most-used models";
+"Usage ranks the models actually recorded in your history, with their tokens, provider and source tools. The same model used in several tools is counted together." = "Usage ranks the models actually recorded in your history, with their tokens, provider and source tools. The same model used in several tools is counted together.";
+"A podium for your period" = "A podium for your period";
+"Your image shows the top models for today, this week, this month or one project. Missing model names stay explicit, and saved history keeps its original totals." = "Your image shows the top models for today, this week, this month or one project. Missing model names stay explicit, and saved history keeps its original totals.";

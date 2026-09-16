@@ -43,6 +43,7 @@ struct UsageStatisticsView: View {
             header
             totals
             dailyActivity
+            UsageModelsView(entries: UsageModelRanking.entries(in: report))
             details
         }
         .foregroundStyle(AppTheme.ink)

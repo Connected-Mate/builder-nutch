@@ -98,7 +98,8 @@ enum UsageModelRanking {
             }
         }
         var totals: [ModelKey: UsageTokenTotals] = [:]
-        var partial = report.scan.hitLimit
+        var partial = report.scan.hitLimit || report.scan.filesSkipped > 0
+            || report.scan.malformedLines > 0 || report.scan.oversizedLines > 0
             || calendar.startOfDay(for: startDate) < calendar.startOfDay(for: report.windowStart)
             || calendar.startOfDay(for: endDate) > calendar.startOfDay(for: report.windowEnd)
         for (bucket, budget) in budgets {
