@@ -30,6 +30,11 @@ struct ReleaseNote: Equatable {
 /// `testTheCurrentVersionHasANote`.
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
+        ReleaseNote(version: "0.22.1", headline: "Choose an account. Know its limits.", changes: [
+            .init(title: "Switch when you choose", detail: "Use account changes the Mac's Claude login immediately. Active identifies the login actually in use; queuing a future session stays in the account menu."),
+            .init(title: "Zero does not mean unlimited", detail: "A model can be at its weekly limit even with 0% used in five hours. The account now names that model and shows its limits before switching. Using it with another model pauses automatic rotation."),
+            .init(title: "Keep a working login", detail: "A failed usage check or an exhausted shared allowance no longer lets a manual switch replace the current login.")
+        ]),
         ReleaseNote(version: "0.22.0", headline: "Today, with room to breathe.", changes: [
             .init(title: "Start with today", detail: "Usage opens on today's recorded tokens, inputs, outputs and projects. Switch to 7 or 30 days whenever you need the bigger picture."),
             .init(title: "More room for your work", detail: "Repeated page headers are gone. Privacy and refresh sit in the sidebar, while account alerts have proper spacing and rounded edges.")

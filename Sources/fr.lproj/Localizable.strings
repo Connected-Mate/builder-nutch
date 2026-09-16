@@ -626,3 +626,37 @@
 "When GenGen is reached, save your certificate from AI Podium. It includes your lifetime total and eligibility, without account or project details." = "Une fois GenGen obtenu, enregistrez votre certificat depuis AI Podium. Il contient votre total cumulé et les conditions atteintes, sans compte ni projet.";
 "Make your profile yours" = "Votre profil, votre signature";
 "Import your certificate in GenGen Studio to create a profile frame, LinkedIn and X banners, or a certificate post. Photos stay on your device." = "Importez votre certificat dans GenGen Studio pour créer une photo de profil, vos bannières LinkedIn et X ou un visuel de certificat. Les photos restent sur votre appareil.";
+
+"Action" = "Action";
+
+"Active" = "Actif";
+
+"See limits" = "Voir limites";
+
+"Switching…" = "Bascule…";
+
+"Use for next session" = "Prévoir pour la prochaine session";
+
+"%@ limit reached" = "Limite %@ atteinte";
+
+"Use with another model" = "Utiliser avec un autre modèle";
+
+"Switching accounts does not change the model in Claude." = "Changer de compte ne change pas le modèle dans Claude.";
+
+"Automatic rotation will pause. Choose an available model with /model." = "La rotation automatique sera mise en pause. Choisissez un modèle disponible avec /model.";
+
+"Automatic rotation is paused. Choose an available model with /model." = "La rotation automatique est en pause. Choisissez un modèle disponible avec /model.";
+
+"Choose an account. Know its limits." = "Choisissez un compte en connaissant ses limites.";
+
+"Switch when you choose" = "Une bascule au clic";
+
+"Use account changes the Mac's Claude login immediately. Active identifies the login actually in use; queuing a future session stays in the account menu." = "Utiliser ce compte change immédiatement le compte Claude du Mac. Actif indique le compte réellement utilisé. Le choix pour une prochaine session reste dans le menu du compte.";
+
+"Zero does not mean unlimited" = "Zéro ne signifie pas illimité";
+
+"A model can be at its weekly limit even with 0% used in five hours. The account now names that model and shows its limits before switching. Using it with another model pauses automatic rotation." = "Un modèle peut avoir atteint sa limite hebdomadaire même avec 0 % sur cinq heures. Le compte indique désormais le modèle concerné et affiche ses limites avant la bascule. Son utilisation avec un autre modèle met la rotation automatique en pause.";
+
+"Keep a working login" = "Préservez le compte qui fonctionne";
+
+"A failed usage check or an exhausted shared allowance no longer lets a manual switch replace the current login." = "Une vérification échouée ou une limite commune atteinte empêche désormais de remplacer le compte actif par ce compte.";

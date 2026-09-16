@@ -217,9 +217,9 @@ final class AccountManager: ObservableObject {
         return storage
     }
 
-    private func persist(accounts: [ManagedAccount], selected: [AccountProvider: UUID]) throws {
+    private func persist(accounts: [ManagedAccount], selected: [AccountProvider: UUID], automaticSelectionOverride: Bool? = nil) throws {
         try usableStorage().save(AccountCatalog(accounts: accounts, selected: selected,
-            automaticSelection: automaticSelection, ignoredExistingProfiles: ignoredExistingProfiles,
+            automaticSelection: automaticSelectionOverride ?? automaticSelection, ignoredExistingProfiles: ignoredExistingProfiles,
             rotationOrder: rotationOrder, switchThresholdPercent: switchThresholdPercent,
             switchAheadMinutes: switchAheadMinutes, systemClaudeAccountID: lastKnownSystemClaude,
             lastAutomaticSwitch: lastAutomaticSwitch))
@@ -767,7 +767,8 @@ final class AccountManager: ObservableObject {
     }
 
     private func activateSystemClaude(_ target: ManagedAccount, automatic: Bool,
-                                      cause: AccountSelection.SystemClaudeDecision.Cause? = nil) async throws {
+                                      cause: AccountSelection.SystemClaudeDecision.Cause? = nil,
+                                      allowModelLimitedClaude: Bool = false) async throws {
         guard let credentials = systemCredentials, target.provider == .claude,
               !hasShutDown, !isSwitchingClaude, !busyIDs.contains(target.id), !authenticationInProgress else { throw ManagedAccountError.busy }
         // Learn who is really on the Mac before moving anyone off it. Cheap when
@@ -775,6 +776,10 @@ final class AccountManager: ObservableObject {
         await resolveLoginIdentities()
         guard !hasShutDown, !isSwitchingClaude, !busyIDs.contains(target.id), !authenticationInProgress else { throw ManagedAccountError.busy }
         updateSystemClaudeIdentity()
+        if !automatic, let refusal = explicitClaudeSwitchRefusal(state(for: target), allowModelLimited: allowModelLimitedClaude) {
+            throw NSError(domain: "AccountManager.ClaudeSwitch", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: refusal])
+        }
         guard profileHoldsAnotherLogin(target) == nil else { throw ManagedAccountError.notConnected }
         // The Mac is signed in to someone this catalog has never met — a
         // `claude /login` done by hand. There is no row to save that login
@@ -786,7 +791,16 @@ final class AccountManager: ObservableObject {
               let currentIdentity = try macLogin?.identity ?? credentials.identity(at: systemClaudeLocation),
               let targetIdentity = try credentials.identity(at: credentialLocation(for: target))
         else { throw ManagedAccountError.notConnected }
-        guard currentID != target.id else { return }
+        let pauseRotationForModel = !automatic && allowModelLimitedClaude && state(for: target).rateLimitStatus().kind == .modelRestricted
+        let modelChoiceNotice = NSLocalizedString("Automatic rotation is paused. Choose an available model with /model.", comment: "Explicit model-limited account use")
+        guard currentID != target.id else {
+            if pauseRotationForModel {
+                try persist(accounts: accounts, selected: selected, automaticSelectionOverride: false)
+                automaticSelection = false
+                notice = modelChoiceNotice
+            }
+            return
+        }
         isSwitchingClaude = true
         var switchedTo: ManagedAccount?
         defer {
@@ -805,7 +819,7 @@ final class AccountManager: ObservableObject {
                                   recoveryBackup: recoveryBackup)
         var updated = selected
         updated[.claude] = target.id
-        do { try persist(accounts: accounts, selected: updated) }
+        do { try persist(accounts: accounts, selected: updated, automaticSelectionOverride: pauseRotationForModel ? false : nil) }
         catch {
             // Restore the previous login if the catalog cannot record the change.
             try await copyClaudeLogin(from: credentialLocation(for: saved), to: systemClaudeLocation, identity: currentIdentity, allowExpired: true, completingTransaction: true)
@@ -813,6 +827,7 @@ final class AccountManager: ObservableObject {
         }
         selected = updated
         systemClaudeAccountID = target.id
+        if pauseRotationForModel { automaticSelection = false }
         // The Mac now holds the target's token and the outgoing profile holds
         // what the Mac had. Say so here rather than letting a stale answer name
         // the wrong account until the next resolve.
@@ -832,6 +847,7 @@ final class AccountManager: ObservableObject {
         switchedTo = target
         let reason = cause.map { switchReason($0, from: current) } ?? ""
         notice = "Claude now uses \(target.label) on this Mac. Sessions using the Mac login pick up this account on their next request."
+        if pauseRotationForModel { notice = (notice ?? "") + " " + modelChoiceNotice }
         if !reason.isEmpty { notice = reason + " " + (notice ?? "") }
         if automatic {
             automaticSwitch = AutomaticAccountSwitch(provider: .claude, fromID: current.id,
@@ -1573,7 +1589,33 @@ final class AccountManager: ObservableObject {
         }
     }
 
-    func launch(_ account: ManagedAccount, project: URL) async {
+    private func explicitClaudeSwitchRefusal(_ state: ManagedAccountState, allowModelLimited: Bool) -> String? {
+        guard state.isConnected else { return ManagedAccountError.notConnected.localizedDescription }
+        guard state.isFresh(), !state.accountWindows.isEmpty,
+              state.accountRemainingPercent != nil else {
+            return state.message ?? NSLocalizedString("Refresh needed", comment: "Restriction evidence expired")
+        }
+        let restriction = state.rateLimitStatus()
+        switch restriction.kind {
+        case .quotaExhausted, .providerRestricted:
+            return restriction.title + (restriction.affectedLabels.isEmpty ? "" : " · " + restriction.affectedLabels.joined(separator: "; "))
+        case .modelRestricted:
+            let sharedAvailable = state.accountWindows.allSatisfy { !$0.isBlocked && ($0.usedFraction ?? 1) < 1 }
+            if allowModelLimited, sharedAvailable, (state.accountRemainingPercent ?? 0) > 0 { return nil }
+            return AccountUsageNotice.modelLimit(state) ?? restriction.title
+        case .usageCheckPaused, .refreshRequired:
+            return state.message ?? restriction.title
+        case .notReported:
+            // Passed resets require a new allowance reading; unknown windows
+            // cannot be interpreted as permission to replace the Mac login.
+            guard state.accountWindows.allSatisfy({ !$0.isBlocked && ($0.usedFraction ?? 1) < 1 }) else {
+                return NSLocalizedString("Refresh needed", comment: "Restriction evidence expired")
+            }
+            return nil
+        }
+    }
+
+    func launch(_ account: ManagedAccount, project: URL, allowModelLimitedClaude: Bool = false) async {
         guard !hasShutDown else { return }
         // Doing nothing here is what "the account stays stuck" looked like: the
         // click landed while a sign-in was still open in the browser.
@@ -1587,7 +1629,7 @@ final class AccountManager: ObservableObject {
                 updateSystemClaudeIdentity()
                 await refresh(account)
                 guard state(for: account).isConnected else { throw ManagedAccountError.notConnected }
-                try await activateSystemClaude(account, automatic: false)
+                try await activateSystemClaude(account, automatic: false, allowModelLimitedClaude: allowModelLimitedClaude)
                 systemSwitchPaused = false
                 return
             }

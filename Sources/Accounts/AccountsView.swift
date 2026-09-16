@@ -84,10 +84,10 @@ struct AccountsView: View {
                     // A single contextual status, only where the affected accounts live.
                     if manager.loginAccountID != nil {
                         loginBanner
-                    } else if filter == .claude, let attention = manager.attention {
-                        attentionBanner(attention)
                     } else if let notice = manager.notice, !hidePersonalDetails {
                         noticeBanner(notice)
+                    } else if filter == .claude, let attention = manager.attention {
+                        attentionBanner(attention)
                     }
                     assistantList
                     if !manager.accounts.isEmpty { nextSessionBar }
@@ -378,7 +378,7 @@ struct AccountsView: View {
                     VStack(spacing: 3) {
                         Text(LocalizedStringKey(preferences.usageDisplayMode.columnTitle))
                     }.frame(width: 78)
-                    Text("Selection").frame(width: 100)
+                    Text("Action").frame(width: 100)
                 }
                 .font(AppTheme.font(size: 10, weightValue: 500)).foregroundStyle(AppTheme.muted)
                 .padding(.horizontal, 12)
@@ -505,7 +505,7 @@ struct AccountsView: View {
             if let selectedAccount {
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(selectedAccount.readsDesktopUsage ? "On this Mac" : selectedAccount.isBrowserOnly ? "Selected profile" : "For your next session")
+                        Text(selectedAccount.readsDesktopUsage || (selectedAccount.provider == .claude && manager.systemClaudeAccountID == selectedAccount.id) ? "On this Mac" : selectedAccount.isBrowserOnly ? "Selected profile" : "For your next session")
                             .font(AppTheme.font(size: 10)).foregroundStyle(AppTheme.muted)
                         Text(displayName(for: selectedAccount)).font(AppTheme.font(size: 12, weightValue: 550)).lineLimit(1)
                     }
@@ -513,7 +513,7 @@ struct AccountsView: View {
                     Button {
                         Task { await manager.launch(selectedAccount, project: projectURL) }
                     } label: {
-                        Label(selectedAccount.isBrowserOnly ? "Open profile" : "Open \(selectedAccount.provider.workspaceTitle)",
+                        Label(selectedAccount.provider == .claude && manager.canSwitchClaudeLogin ? "Use account" : selectedAccount.isBrowserOnly ? "Open profile" : "Open \(selectedAccount.provider.workspaceTitle)",
                               systemImage: "arrow.up.right")
                     }
                     .buttonStyle(AppButtonStyle(primary: true, compact: true))
@@ -656,8 +656,9 @@ enum AccountUsageNotice {
     static func modelLimit(_ state: ManagedAccountState) -> String? {
         guard state.isConnected, state.isFresh(), (state.accountRemainingPercent ?? 0) > 0,
               state.accountWindows.allSatisfy({ !$0.isBlocked && ($0.usedFraction ?? 1) < 1 }),
-              let limit = state.windows.first(where: { $0.isModelSpecific && ($0.isBlocked || ($0.usedFraction ?? 0) >= 1) }),
-              let name = limit.modelName else { return nil }
+              state.rateLimitStatus().kind == .modelRestricted,
+              let name = state.windows.first(where: { $0.isModelSpecific && ($0.isBlocked || ($0.usedFraction ?? 0) >= 1) })?.modelName
+                ?? state.providerRestriction?.modelName else { return nil }
         return String(format: NSLocalizedString("%@ is at its limit. Choose another model with /model.", comment: "Model-only limit"), name)
     }
 }
@@ -676,9 +677,28 @@ private struct AssistantRow: View {
     let remove: () -> Void
     let reportError: (String) -> Void
     @State private var showingUsage = false
+    @State private var isUsingAccount = false
     @AppStorage("accounts.hidePersonalDetails") private var hidePersonalDetails = false
 
     private var needsReconnect: Bool { state.requiresSignIn && !isLoginPending }
+    private var usesMacClaude: Bool { account.provider == .claude && manager.canSwitchClaudeLogin }
+    private var isCurrentClaude: Bool { usesMacClaude && manager.systemClaudeAccountID == account.id }
+    private var hasClaudeRestriction: Bool {
+        guard usesMacClaude else { return false }
+        switch state.rateLimitStatus().kind {
+        case .quotaExhausted, .modelRestricted, .providerRestricted: return true
+        default: return false
+        }
+    }
+
+    private func useAccount(allowModelLimited: Bool = false) {
+        guard !isUsingAccount else { return }
+        isUsingAccount = true
+        Task {
+            await manager.launch(account, project: projectURL, allowModelLimitedClaude: allowModelLimited)
+            isUsingAccount = false
+        }
+    }
 
     private var displayLabel: String {
         guard hidePersonalDetails else { return account.label }
@@ -732,9 +752,15 @@ private struct AssistantRow: View {
                 Menu {
                     Button("Usage details") { showingUsage = true }
                     if state.isConnected {
-                        Button(account.isBrowserOnly ? "Open profile" : "Open with this account") {
-                            Task { await manager.launch(account, project: projectURL) }
+                        Button(usesMacClaude ? "Use account" : account.isBrowserOnly ? "Open profile" : "Open with this account") {
+                            if hasClaudeRestriction { showingUsage = true }
+                            else { useAccount() }
                         }.disabled(state.isBusy || loginInProgress)
+                        if usesMacClaude {
+                            Button("Use for next session") {
+                                do { try manager.setNext(account) } catch { reportError(error.localizedDescription) }
+                            }.disabled(state.isBusy || loginInProgress)
+                        }
                     }
                     if !account.isBrowserOnly {
                         Button("Refresh usage") { Task { await manager.refresh(account) } }.disabled(state.isBusy)
@@ -819,6 +845,21 @@ private struct AssistantRow: View {
         } else if !state.isConnected || state.requiresSignIn {
             Button(isLoginPending ? "Signing in…" : state.requiresSignIn ? "Reconnect" : "Connect", action: connect)
                 .buttonStyle(WorkspaceSelectionStyle(attention: needsReconnect)).disabled(state.isBusy || loginInProgress)
+        } else if usesMacClaude {
+            Button {
+                if hasClaudeRestriction { showingUsage = true }
+                else { useAccount() }
+            } label: {
+                HStack(spacing: 5) {
+                    if isCurrentClaude { Image(systemName: "checkmark").font(.system(size: 9)) }
+                    Text(isUsingAccount ? "Switching…" : isCurrentClaude ? "Active" : hasClaudeRestriction ? "See limits" : "Use account")
+                }
+                .frame(width: 70)
+            }
+            .buttonStyle(WorkspaceSelectionStyle(primary: isCurrentClaude))
+            .disabled(isCurrentClaude || isUsingAccount || state.isBusy || loginInProgress || !manager.busyIDs.isEmpty)
+            .accessibilityLabel("\(isCurrentClaude ? "Active" : hasClaudeRestriction ? "See limits" : "Use account") · \(displayLabel)")
+            .accessibilityAddTraits(isCurrentClaude ? .isSelected : [])
         } else {
             Button {
                 do { try manager.setNext(account) } catch { reportError(error.localizedDescription) }
@@ -847,6 +888,10 @@ private struct AssistantRow: View {
         if !state.isConnected { return state.message ?? "Connect this account." }
         if account.isBrowserOnly { return "Browser profile ready" }
         let rateLimit = state.rateLimitStatus()
+        if rateLimit.kind == .modelRestricted,
+           let name = state.windows.first(where: { $0.isModelSpecific && ($0.isBlocked || ($0.usedFraction ?? 0) >= 1) })?.modelName ?? state.providerRestriction?.modelName {
+            return String(format: NSLocalizedString("%@ limit reached", comment: "Name the restricted model beside its account"), name)
+        }
         if rateLimit.kind != .notReported { return rateLimit.title }
         if !state.windows.isEmpty && !state.isFresh() { return "Last known usage · refresh to update" }
         if AccountUsageNotice.modelLimit(state) != nil { return "Model limit · See usage details" }
@@ -950,6 +995,23 @@ private struct AssistantRow: View {
             } else if limit.kind == .notReported {
                 Text("This service does not report requests or tokens per minute here. Subscription limits are listed below.")
                     .foregroundStyle(AppTheme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+            if usesMacClaude, !isCurrentClaude, limit.kind == .modelRestricted,
+               let modelNotice = AccountUsageNotice.modelLimit(state) {
+                Text(modelNotice).fixedSize(horizontal: false, vertical: true)
+                Text("Switching accounts does not change the model in Claude.")
+                    .foregroundStyle(AppTheme.muted).fixedSize(horizontal: false, vertical: true)
+                if manager.automaticSelection {
+                    Text("Automatic rotation will pause. Choose an available model with /model.")
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button("Use with another model") {
+                    showingUsage = false
+                    useAccount(allowModelLimited: true)
+                }
+                .buttonStyle(WorkspaceSelectionStyle())
+                .disabled(isUsingAccount || state.isBusy || loginInProgress || !manager.busyIDs.isEmpty)
+                .padding(.top, 4)
             }
             Divider().overlay(AppTheme.line).padding(.top, 4)
         }

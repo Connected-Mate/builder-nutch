@@ -24,6 +24,9 @@ final class ClaudeSystemRotationTests: XCTestCase {
     private final class Runner: AccountCommandRunning, ClaudeAccountReading {
         var used: [String: Double] = ["A": 99, "B": 0]
         var failUsage = false
+        var extraWindows: [LimitWindow] = []
+        var readingDate: Date? = nil
+        var providerRestriction: AccountProviderRestriction? = nil
         /// Accounts whose saved credential is gone or unusable, the way a revoked
         /// refresh token or a half-written Keychain item reads.
         var missingLogin: Set<String> = []
@@ -42,7 +45,8 @@ final class ClaudeSystemRotationTests: XCTestCase {
             guard let identity = config["oauthAccount"] as? [String: String] else { throw ClaudeSystemCredentialError.missingLogin }
             if missingLogin.contains(identity["accountUuid"]!) { throw ClaudeSystemCredentialError.missingLogin }
             return ManagedAccountState(isConnected: true, email: identity["emailAddress"], plan: "max",
-                windows: [LimitWindow(id: "five_hour", label: "5h limit", usedFraction: used[identity["accountUuid"]!]! / 100)], refreshedAt: Date())
+                windows: [LimitWindow(id: "five_hour", label: "5h limit", usedFraction: used[identity["accountUuid"]!]! / 100)] + extraWindows,
+                refreshedAt: readingDate ?? Date(), providerRestriction: providerRestriction)
         }
         func run(_ command: AccountCommand, cancellation: AccountCancellation) async throws -> Data {
             record(command.directory)
@@ -83,6 +87,138 @@ final class ClaudeSystemRotationTests: XCTestCase {
         for account in accounts { try seed(ClaudeCredentialLocation(directory: manager.configurationDirectory(for: account), isDefault: false), id: account.label) }
         try seed(location, id: "A")
         return (manager, runner, keychain, credentials, location, accounts, { opened })
+    }
+
+    @MainActor
+    func testAlternativeModelUsePausesRotationAndSurvivesNextRefresh() async throws {
+        let (manager, runner, _, credentials, system, accounts, _) = try fixture()
+        runner.used["A"] = 50
+        await manager.refreshAll()
+        manager.automaticSelection = true
+        runner.extraWindows = [LimitWindow(id: "seven_day_fable", label: "Fable", usedFraction: 1, modelName: "Fable")]
+        await manager.launch(accounts[1], project: system.directory, allowModelLimitedClaude: true)
+        XCTAssertFalse(manager.automaticSelection)
+        XCTAssertTrue(manager.notice?.contains("/model") == true)
+        await manager.refreshAll()
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "B")
+        XCTAssertEqual(manager.systemClaudeAccountID, accounts[1].id)
+    }
+
+    @MainActor
+    func testFailedAlternativeModelCopyKeepsAutomaticRotationEnabled() async throws {
+        let (manager, runner, keychain, credentials, system, accounts, _) = try fixture()
+        runner.used["A"] = 50
+        await manager.refreshAll()
+        manager.automaticSelection = true
+        runner.extraWindows = [LimitWindow(id: "seven_day_fable", label: "Fable", usedFraction: 1, modelName: "Fable")]
+        keychain.rejectDefaultWrite = true
+        let original = keychain.items[system.service]
+        await manager.launch(accounts[1], project: system.directory, allowModelLimitedClaude: true)
+        XCTAssertTrue(manager.automaticSelection)
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "A")
+        XCTAssertEqual(keychain.items[system.service], original)
+    }
+
+    @MainActor
+    func testAlternativeModelUseOnCurrentAccountPausesWithoutClaimingSwitch() async throws {
+        let (manager, runner, _, credentials, system, accounts, _) = try fixture()
+        runner.used["A"] = 50
+        await manager.refreshAll()
+        manager.automaticSelection = true
+        runner.extraWindows = [LimitWindow(id: "seven_day_fable", label: "Fable", usedFraction: 1, modelName: "Fable")]
+        await manager.launch(accounts[0], project: system.directory, allowModelLimitedClaude: true)
+        XCTAssertFalse(manager.automaticSelection)
+        XCTAssertTrue(manager.notice?.contains("/model") == true)
+        XCTAssertFalse(manager.notice?.contains("Claude now uses") == true)
+        await manager.refreshAll()
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "A")
+        XCTAssertNotEqual(manager.resolvedAttention?.kind, .switched)
+    }
+
+    @MainActor
+    func testExplicitProviderReportedModelLimitRefusesDefaultWithoutSpentModelWindow() async throws {
+        let (manager, runner, keychain, credentials, system, accounts, _) = try fixture()
+        runner.providerRestriction = AccountProviderRestriction(label: "Fable unavailable", modelName: "Fable", observedAt: Date())
+        let original = keychain.items[system.service]
+        await manager.launch(accounts[1], project: system.directory)
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "A")
+        XCTAssertEqual(keychain.items[system.service], original)
+        XCTAssertTrue(manager.notice?.contains("Fable") == true)
+    }
+
+    @MainActor
+    func testExplicitProviderReportedModelLimitAllowsAlternativeWithSharedHeadroom() async throws {
+        let (manager, runner, _, credentials, system, accounts, _) = try fixture()
+        runner.providerRestriction = AccountProviderRestriction(label: "Fable unavailable", modelName: "Fable", observedAt: Date())
+        await manager.launch(accounts[1], project: system.directory, allowModelLimitedClaude: true)
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "B")
+        XCTAssertEqual(manager.systemClaudeAccountID, accounts[1].id)
+    }
+
+    @MainActor
+    func testAlternativeModelOverrideRefusesProviderWideRestriction() async throws {
+        let (manager, runner, keychain, credentials, system, accounts, _) = try fixture()
+        runner.providerRestriction = AccountProviderRestriction(label: "Account restricted", observedAt: Date())
+        let original = keychain.items[system.service]
+        await manager.launch(accounts[1], project: system.directory, allowModelLimitedClaude: true)
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "A")
+        XCTAssertEqual(keychain.items[system.service], original)
+        XCTAssertTrue(manager.notice?.contains("Account restricted") == true)
+    }
+
+    @MainActor
+    func testExplicitSwitchRefusesModelLimitEvenWithUnusedShortAllowance() async throws {
+        let (manager, runner, keychain, credentials, system, accounts, _) = try fixture()
+        runner.extraWindows = [LimitWindow(id: "seven_day_fable", label: "Fable", usedFraction: 1, modelName: "Fable")]
+        let original = keychain.items[system.service]
+        await manager.launch(accounts[1], project: system.directory)
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "A")
+        XCTAssertEqual(keychain.items[system.service], original)
+        XCTAssertTrue(manager.notice?.contains("Fable") == true)
+    }
+
+    @MainActor
+    func testExplicitOtherModelOverrideSwitchesWithFreshSharedAllowance() async throws {
+        let (manager, runner, _, credentials, system, accounts, _) = try fixture()
+        runner.extraWindows = [LimitWindow(id: "seven_day_fable", label: "Fable", usedFraction: 1, modelName: "Fable")]
+        await manager.launch(accounts[1], project: system.directory, allowModelLimitedClaude: true)
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "B")
+        XCTAssertEqual(manager.systemClaudeAccountID, accounts[1].id)
+    }
+
+    @MainActor
+    func testOtherModelOverrideNeverBypassesSpentSharedAllowance() async throws {
+        let (manager, runner, keychain, credentials, system, accounts, _) = try fixture()
+        runner.extraWindows = [LimitWindow(id: "seven_day", label: "Weekly", usedFraction: 1),
+                               LimitWindow(id: "seven_day_fable", label: "Fable", usedFraction: 1, modelName: "Fable")]
+        let original = keychain.items[system.service]
+        await manager.launch(accounts[1], project: system.directory, allowModelLimitedClaude: true)
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "A")
+        XCTAssertEqual(keychain.items[system.service], original)
+        XCTAssertTrue(manager.notice?.contains("Weekly") == true)
+    }
+
+    @MainActor
+    func testFailedExplicitRefreshNeverUsesCachedUnusedAllowance() async throws {
+        let (manager, runner, keychain, credentials, system, accounts, _) = try fixture()
+        await manager.refresh(accounts[1])
+        XCTAssertEqual(manager.state(for: accounts[1]).primaryRemainingPercent, 100)
+        runner.failUsage = true
+        let original = keychain.items[system.service]
+        await manager.launch(accounts[1], project: system.directory, allowModelLimitedClaude: true)
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "A")
+        XCTAssertEqual(keychain.items[system.service], original)
+        XCTAssertNotNil(manager.state(for: accounts[1]).usageCheckFailedAt)
+    }
+
+    @MainActor
+    func testStaleExplicitRefreshCannotReplaceTheMacLogin() async throws {
+        let (manager, runner, keychain, credentials, system, accounts, _) = try fixture()
+        runner.readingDate = Date().addingTimeInterval(-301)
+        let original = keychain.items[system.service]
+        await manager.launch(accounts[1], project: system.directory)
+        XCTAssertEqual(try credentials.identity(at: system)?.accountID, "A")
+        XCTAssertEqual(keychain.items[system.service], original)
     }
 
     @MainActor

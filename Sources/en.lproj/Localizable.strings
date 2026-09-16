@@ -361,3 +361,37 @@
 "When GenGen is reached, save your certificate from AI Podium. It includes your lifetime total and eligibility, without account or project details." = "When GenGen is reached, save your certificate from AI Podium. It includes your lifetime total and eligibility, without account or project details.";
 "Make your profile yours" = "Make your profile yours";
 "Import your certificate in GenGen Studio to create a profile frame, LinkedIn and X banners, or a certificate post. Photos stay on your device." = "Import your certificate in GenGen Studio to create a profile frame, LinkedIn and X banners, or a certificate post. Photos stay on your device.";
+
+"Action" = "Action";
+
+"Active" = "Active";
+
+"See limits" = "See limits";
+
+"Switching…" = "Switching…";
+
+"Use for next session" = "Use for next session";
+
+"%@ limit reached" = "%@ limit reached";
+
+"Use with another model" = "Use with another model";
+
+"Switching accounts does not change the model in Claude." = "Switching accounts does not change the model in Claude.";
+
+"Automatic rotation will pause. Choose an available model with /model." = "Automatic rotation will pause. Choose an available model with /model.";
+
+"Automatic rotation is paused. Choose an available model with /model." = "Automatic rotation is paused. Choose an available model with /model.";
+
+"Choose an account. Know its limits." = "Choose an account. Know its limits.";
+
+"Switch when you choose" = "Switch when you choose";
+
+"Use account changes the Mac's Claude login immediately. Active identifies the login actually in use; queuing a future session stays in the account menu." = "Use account changes the Mac's Claude login immediately. Active identifies the login actually in use; queuing a future session stays in the account menu.";
+
+"Zero does not mean unlimited" = "Zero does not mean unlimited";
+
+"A model can be at its weekly limit even with 0% used in five hours. The account now names that model and shows its limits before switching. Using it with another model pauses automatic rotation." = "A model can be at its weekly limit even with 0% used in five hours. The account now names that model and shows its limits before switching. Using it with another model pauses automatic rotation.";
+
+"Keep a working login" = "Keep a working login";
+
+"A failed usage check or an exhausted shared allowance no longer lets a manual switch replace the current login." = "A failed usage check or an exhausted shared allowance no longer lets a manual switch replace the current login.";
