@@ -1432,7 +1432,7 @@ private struct PersonalizeAssistantView: View {
                     Spacer()
                     Button(completionTitle == "Finish" ? "Skip" : "Cancel") { dismiss() }
                         .buttonStyle(AppButtonStyle(compact: true)).keyboardShortcut(.cancelAction)
-                    Button(completionTitle, action: save)
+                    Button(action: save) { Text(LocalizedStringKey(completionTitle)) }
                         .buttonStyle(AppButtonStyle(primary: true, compact: true))
                         .keyboardShortcut(.defaultAction)
                 }
@@ -1470,7 +1470,7 @@ private struct PersonalizeAssistantView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(emoji.map { Text("Use \($0)") } ?? Text("Use provider icon"))
         .accessibilityAddTraits(active ? .isSelected : [])
-        .help(emoji == nil ? "Use provider icon" : emoji!)
+        .help(emoji.map { Text(verbatim: $0) } ?? Text("Use provider icon"))
     }
 
     private func save() {

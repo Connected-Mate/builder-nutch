@@ -268,7 +268,7 @@ struct InlineAccountRotation: View {
     let displayMode: UsageDisplayMode
     let onChooseNext: (UUID) -> Void
 
-    /// Whether anybody can actually take over.
+    /// Whether the adjacent cells are the actual current and next accounts.
     ///
     /// Everything that draws the handover reads this, not just the badge. The
     /// connector and the rule are claims in their own right — a line drawn from
@@ -284,7 +284,7 @@ struct InlineAccountRotation: View {
 
     /// The rule itself, so it can be stated without a renderer.
     static func drawsHandover(_ accounts: [NotchAccountItem]) -> Bool {
-        accounts.contains { $0.isNext }
+        accounts.count > 1 && accounts[0].isCurrent && accounts[1].isNext
     }
 
     var body: some View {
@@ -315,8 +315,7 @@ struct InlineAccountRotation: View {
     }
 
     /// A fixed rule separates the active handoff from the rest of the loop.
-    /// The current account cannot be dragged, so this stays directly below
-    /// NEXT while later accounts move around underneath it.
+    /// Only drawn when NEXT is second; manual ordering may put it elsewhere.
     private var queueDivider: some View {
         let position = 2 * NotchLayout.cellAlong(for: edge)
             + 1.5 * NotchLayout.cellSpacing

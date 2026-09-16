@@ -674,3 +674,13 @@
 "Emoji" = "Emoji";
 
 "Use provider icon" = "Utiliser le logo de l’assistant";
+
+"Your accounts, in your order." = "Vos comptes, dans votre ordre.";
+
+"An order that stays" = "Un ordre qui reste en place";
+
+"Dragging accounts in the side panel saves the final visible order and keeps it open. The active account stays identified, while the next-account badge no longer moves other accounts around." = "Le glisser-déposer dans le panneau latéral enregistre l’ordre final et le laisse visible. Le compte actif reste identifié et le repère du compte suivant ne déplace plus les autres comptes.";
+
+"A cleaner account editor" = "Une personnalisation plus soignée";
+
+"A compact layout gives names, icons and buttons proper margins, including after sign-in. Choose an emoji and see it immediately." = "Une disposition compacte donne aux noms, icônes et boutons les bonnes marges, y compris après connexion. Choisissez un emoji et voyez-le immédiatement.";

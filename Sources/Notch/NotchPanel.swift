@@ -48,7 +48,7 @@ final class NotchPanel: NSPanel {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.48, execute: work)
         case .leftMouseDragged:
             if let origin = mouseDownLocation,
-               hypot(event.locationInWindow.x - origin.x, event.locationInWindow.y - origin.y) > 7 {
+               didDrag || hypot(event.locationInWindow.x - origin.x, event.locationInWindow.y - origin.y) > 7 {
                 didDrag = true
                 cancelLongPress(resetGesture: false)
                 onDragChanged?(origin, event.locationInWindow)

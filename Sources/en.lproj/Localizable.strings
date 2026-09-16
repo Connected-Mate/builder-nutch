@@ -409,3 +409,13 @@
 "Emoji" = "Emoji";
 
 "Use provider icon" = "Use provider icon";
+
+"Your accounts, in your order." = "Your accounts, in your order.";
+
+"An order that stays" = "An order that stays";
+
+"Dragging accounts in the side panel saves the final visible order and keeps it open. The active account stays identified, while the next-account badge no longer moves other accounts around." = "Dragging accounts in the side panel saves the final visible order and keeps it open. The active account stays identified, while the next-account badge no longer moves other accounts around.";
+
+"A cleaner account editor" = "A cleaner account editor";
+
+"A compact layout gives names, icons and buttons proper margins, including after sign-in. Choose an emoji and see it immediately." = "A compact layout gives names, icons and buttons proper margins, including after sign-in. Choose an emoji and see it immediately.";

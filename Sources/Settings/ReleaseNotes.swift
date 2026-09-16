@@ -30,6 +30,10 @@ struct ReleaseNote: Equatable {
 /// `testTheCurrentVersionHasANote`.
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
+        ReleaseNote(version: "0.22.3", headline: "Your accounts, in your order.", changes: [
+            .init(title: "An order that stays", detail: "Dragging accounts in the side panel saves the final visible order and keeps it open. The active account stays identified, while the next-account badge no longer moves other accounts around."),
+            .init(title: "A cleaner account editor", detail: "A compact layout gives names, icons and buttons proper margins, including after sign-in. Choose an emoji and see it immediately.")
+        ]),
         ReleaseNote(version: "0.22.2", headline: "Choose an account. Know its limits.", changes: [
             .init(title: "Model limits in your language", detail: "The model limit shown beside an account follows the app's language, including French.")
         ]),

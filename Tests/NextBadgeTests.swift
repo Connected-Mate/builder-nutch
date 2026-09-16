@@ -129,6 +129,13 @@ final class NextBadgeTests: XCTestCase {
         }
         XCTAssertTrue(InlineAccountRotation.drawsHandover(withNext))
         XCTAssertFalse(InlineAccountRotation.drawsHandover(none))
+        let nextAfterManualReorder = (0..<3).map {
+            item(names[$0], id: ids[$0], usage: "40%", current: $0 == 0, next: $0 == 2)
+        }
+        XCTAssertFalse(InlineAccountRotation.drawsHandover(nextAfterManualReorder))
+        let manuallyOrdered = try XCTUnwrap(render(nextAfterManualReorder))
+        XCTAssertEqual(inkInHandoverGap(manuallyOrdered), 0,
+                       "Manual order must not draw the current account's handover to an unrelated second account")
 
         let connected = try XCTUnwrap(render(withNext))
         let orphaned = try XCTUnwrap(render(none))
